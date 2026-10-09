@@ -1,0 +1,6 @@
+.cli-autonomy { margin: 8px 0 12px; font-size: 13px; }
+.cli-autonomy .cli-autonomy-label { display: flex; flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.cli-autonomy input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; }
+.cli-autonomy p { margin: 6px 0 0; line-height: 1.5; }
+.empty-cli-entry { display: flex; flex-direction: column; min-width: 0; }
+.empty-cli-entry .empty-cli-card { width: 100%; }

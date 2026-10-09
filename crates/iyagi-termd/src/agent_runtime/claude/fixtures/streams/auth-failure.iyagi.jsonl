@@ -1,0 +1,4 @@
+{"iyagi_recording":1,"exit_code":1,"line_delay_ms":0}
+{"type":"system","subtype":"init","session_id":"claude-sess-auth","model":"claude-test-model","tools":[],"mcp_servers":[]}
+{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":1000,"error_status":401,"error":"authentication_failed","uuid":"u-1","session_id":"claude-sess-auth"}
+{"type":"system","subtype":"api_retry","attempt":2,"max_retries":3,"retry_delay_ms":2000,"error_status":401,"error":"authentication_failed","uuid":"u-2","session_id":"claude-sess-auth"}

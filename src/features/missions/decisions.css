@@ -1,0 +1,393 @@
+/*
+ * 결정 요청 · 실행 상세 · 오류/상태 안내 스타일.
+ * missions.css의 기존 규칙은 건드리지 않고 이 파일에서만 확장한다.
+ */
+
+/* ---- 오류 안내(MissionErrorNotice) ------------------------------------------ */
+
+.mission-error-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-panel));
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.mission-error-notice p {
+  margin: 0;
+}
+
+.mission-error-message {
+  color: var(--fg);
+}
+
+.mission-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mission-error-login {
+  color: var(--fg-muted);
+}
+
+.mission-error-detail summary,
+.mission-status-notice-details summary,
+.mission-decision-details summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.mission-error-detail pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* ---- 상태 안내 한 줄(StatusNotice) ------------------------------------------ */
+
+.mission-status-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.mission-status-notice-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mission-status-notice-line {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mission-status-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mission-status-notice-actions button {
+  font-size: 11px;
+  padding: 1px 8px;
+}
+
+.mission-status-notice-body p {
+  margin: 4px 0 0;
+  color: var(--fg-muted);
+}
+
+/* ---- 결정 요청 패널(DecisionPanel) ------------------------------------------ */
+
+.mission-decision.mission-decision-bounded {
+  max-height: 50vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.mission-decision-situation {
+  font-weight: 600;
+}
+
+.mission-decision-failure-line {
+  color: var(--fg-muted);
+  font-family: "Nanum Gothic Coding", "Segoe UI", monospace;
+  font-size: 12px;
+}
+
+/* 선택지는 내용이 길어도 패널 아래에 붙어 보인다(스크롤 영역 안 sticky). */
+.mission-decision-footer {
+  position: sticky;
+  bottom: -8px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 -10px;
+  padding: 6px 10px 8px;
+  background: inherit;
+  border-top: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border));
+}
+
+.mission-decision-footer .mission-decision-options {
+  align-items: flex-start;
+}
+
+.mission-decision-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 240px;
+}
+
+.mission-decision p.mission-decision-effect,
+.mission-decision-effect {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: normal;
+}
+
+.mission-decision-details {
+  font-size: 12px;
+}
+
+.mission-decision-details > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--fg-muted);
+}
+
+.mission-decision-details pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.mission-decision-affected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.mission-decision-affected button.link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.mission-decision-plan {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+}
+
+.mission-decision-plan li {
+  margin: 2px 0;
+}
+
+.mission-decision-plan .mission-plan-meta {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.mission-decision-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.mission-decision-text textarea {
+  width: 100%;
+  min-height: 3.5em;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.mission-decision .mission-inline-confirm,
+.mission-task-actions .mission-reassign-picker {
+  position: static;
+  max-width: none;
+}
+
+/* ---- 한도 편집기(PolicyLimitsEditor) ---------------------------------------- */
+
+.mission-limits-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-size: 12px;
+}
+
+.mission-limits-editor h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* 팀 편집기는 한도 편집기와 같은 팝오버 안에 들어가고 행 배치만 다르다. */
+.mission-team-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-size: 12px;
+}
+
+.mission-team-editor h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mission-team-row {
+  display: grid;
+  grid-template-columns: minmax(10em, 1fr) auto;
+  align-items: center;
+  gap: 2px 8px;
+}
+
+.mission-team-row label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mission-team-row select {
+  min-width: 0;
+  max-width: 22em;
+}
+
+.mission-limits-row {
+  display: grid;
+  grid-template-columns: minmax(8em, 1fr) auto;
+  align-items: center;
+  gap: 2px 8px;
+}
+
+.mission-limits-row label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mission-limits-row input {
+  width: 6em;
+  min-width: 0;
+}
+
+.mission-limits-row input.mission-limits-cost {
+  width: 9em;
+}
+
+.mission-limits-usage {
+  grid-column: 1 / -1;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.mission-limits-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---- 실행 상세(RunDetail) ---------------------------------------------------- */
+
+.mission-info-icon {
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--fg-muted);
+  cursor: help;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.mission-disabled-reason {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.mission-disabled-reason button.link {
+  border: none;
+  background: transparent;
+  padding: 0 0 0 4px;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.mission-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.mission-activity {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.mission-activity .mission-activity-log {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.mission-activity-latest {
+  position: sticky;
+  bottom: 4px;
+  align-self: flex-end;
+  margin-top: -28px;
+  font-size: 11px;
+  padding: 2px 10px;
+}
+
+.mission-detail-section-title {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.mission-detail-section-title:first-child {
+  margin-top: 0;
+}
+
+.mission-blocked-reason {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mission-blocked-report {
+  margin: 2px 0 0;
+  max-height: 10em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.mission-capability-failure { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }

@@ -1,0 +1,157 @@
+/* I11 프로필/관리 실행 UI 보조 스타일(workbench.css 공통 클래스 재사용 + 최소한의 추가). */
+
+.compat-matrix {
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.compat-matrix table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.compat-matrix th,
+.compat-matrix td {
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  padding: 3px 8px;
+  text-align: left;
+}
+
+.compat-cell.compat-supported {
+  color: #7ee2a8;
+}
+
+.compat-cell.compat-unsupported {
+  color: #ff9c8a;
+}
+
+.compat-cell.compat-permission_required,
+.compat-cell.compat-conditional {
+  color: #ffd48a;
+}
+
+.policy-editor fieldset,
+.profile-form fieldset,
+.argv-editor,
+.env-editor {
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 6px;
+  margin: 8px 0;
+  padding: 6px 10px;
+}
+
+.policy-editor legend,
+.profile-form legend,
+.argv-editor legend,
+.env-editor legend {
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.enforcement-segment {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.enforcement-segment label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.enforcement-hint {
+  cursor: help;
+  border: 1px solid rgba(128, 128, 128, 0.5);
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  text-align: center;
+  line-height: 12px;
+}
+
+.capability-reality {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.capability-reality .workload-notice {
+  margin: 2px 0 6px 0;
+}
+
+.policy-numbers,
+.env-row,
+.version-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.stepper {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.env-row {
+  margin: 4px 0;
+}
+
+.env-secret-note {
+  width: 100%;
+  margin: 0;
+}
+
+.argv-fixed pre,
+.workload-notice pre {
+  margin: 2px 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+.cli-candidate {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.direct-shell-guide,
+.compat-section,
+.profile-edit {
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.profiles-panel .profile-list-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+/* 셸 명령(ccd/ccg) 카드 — 나머지 틀은 settings.css의 .integration-block을 쓴다. */
+.shell-profiles-script summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.shell-profiles-conflicts {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.shell-profiles-conflicts li {
+  margin: 6px 0;
+}
+
+.shell-profiles-conflicts pre {
+  margin: 2px 0;
+}

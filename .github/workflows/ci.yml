@@ -1,0 +1,201 @@
+# iyagi CI — three OS build jobs from day one (spec 06-verification §1).
+# Lockfiles are committed; jobs use `npm ci` and `cargo --locked`.
+#
+# Security policy (2026-09 security audit; adapted from the previous
+# GitLab setup when the repository moved to GitHub)
+# -----------------------------------------------------------------------
+# Containerized jobs (linux-check, frontend, bundle-linux) run on
+# GitHub-hosted ubuntu runners in pinned containers and validate every
+# push and pull request. Host-touching jobs (windows-check,
+# windows-pty-integration, macos-check, linux-cgroup, bundle-windows,
+# bundle-macos) run on personal self-hosted machines that hold live
+# credentials — or on a host-delegated cgroup subtree — so they are gated
+# to protected refs only: they run on pushes to `main` and to tags, and
+# never on pull_request events (a PR runs the head commit's own workflow
+# file, so a branch must never be able to schedule host jobs).
+#
+# These `if:` gates are NOT the security boundary. GitHub builds a
+# branch's pipeline from that commit's own ci.yml, so anyone who can push
+# a branch can delete a gate or retarget a job at the self-hosted labels.
+# The real controls are server-side, and these repository settings are
+# REQUIRED:
+#   1. Settings → Actions → Runners: keep the self-hosted runner groups
+#      restricted to selected repositories, and never enable "Runners can
+#      run on public repositories" for a group that touches personal
+#      machines (this repository is public; GitHub asks for that opt-in
+#      explicitly — do not give it for these groups).
+#   2. Settings → Actions → General → Workflow permissions: read
+#      contents only.
+#   3. `main` and release tags are protected (otherwise the gated jobs
+#      never run); "Do not allow bypassing" recommended.
+#   4. Actions caches are not integrity-protected and a branch can
+#      restore caches created on the default branch, so the cache keys
+#      below are per-ref and host-touching jobs cache nothing.
+#
+# Coverage trade-off: the platform regression tests for the security fixes
+# (macOS verification-sandbox deny list, macos_tree/macos_guardian, Windows
+# named-pipe first-instance retry, conpty, linux_cgroup pidfd signalling) now
+# run only on protected refs, i.e. after merge. Before merging a
+# platform-specific security change, run those suites locally or have a
+# maintainer push to a protected ref. Tag or publish a release only
+# from a green protected pipeline (macos-check, windows-check,
+# windows-pty-integration, linux-cgroup).
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_HOME: ${{ github.workspace }}/.cargo
+
+# Host-touching jobs merge this condition: pushes to protected refs only.
+# Protected here = the default branch or any tag (settings note 3 makes
+# that real server-side). pull_request events never match.
+jobs:
+  # ---------- Linux (containerized; every ref) ----------
+  linux-check:
+    runs-on: ubuntu-latest
+    container: rust:1.89
+    steps:
+      - uses: actions/checkout@v4
+      # The workspace includes src-tauri: its gtk/webkit2gtk -sys build scripts
+      # need the GTK dev packages (pkg-config) even for `cargo check`.
+      - name: Install host deps
+        run: >
+          apt-get update -qq && apt-get install -y -qq
+          nodejs npm python3
+          libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+          librsvg2-dev patchelf
+      - uses: actions/cache@v4
+        with:
+          # Per-ref key — no cross-branch target/ or registry sharing (note 4).
+          key: linux-check-${{ github.ref }}-${{ hashFiles('Cargo.lock') }}
+          path:
+            - .cargo/registry/
+            - target/
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: src/generated must be committed in sync
+        run: git diff --exit-code -- src/generated || (echo 'src/generated stale'; exit 1)
+      # Real daemon binary over the UDS wire (hello/snapshot/launch/dedup/shutdown).
+      - run: cargo build -p iyagi-termd -p term-fixture --locked
+      - run: python3 scripts/smoke_e2e.py
+
+  # Linux cgroup delegation test on a dedicated self-hosted runner label.
+  # `cgroup_lifecycle_when_delegated` self-skips without a delegated subtree;
+  # IYAGI_CGROUP_REQUIRE_DELEGATION makes that skip a failure here so the job
+  # proves the real cgroup path instead of passing vacuously.
+  linux-cgroup:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, cgroup-delegated]
+    env:
+      IYAGI_CGROUP_REQUIRE_DELEGATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      # Touches a host-delegated cgroup subtree — nothing cached (note 4).
+      - run: cargo test -p term-platform --locked cgroup_lifecycle_when_delegated -- --nocapture
+
+  # ---------- Windows (self-hosted; protected refs) ----------
+  windows-check:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: src/generated must be committed in sync
+        run: git diff --exit-code -- src/generated || (echo 'src/generated stale'; exit 1)
+
+  windows-pty-integration:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test -p term-pty --locked --ignored conpty
+
+  # ---------- macOS (self-hosted; protected refs) ----------
+  macos-check:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, macos]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  # ---------- Frontend (containerized; every ref) ----------
+  frontend:
+    runs-on: ubuntu-latest
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build:frontend
+
+  # ---------- Bundles ----------
+  bundle-linux:
+    runs-on: ubuntu-latest
+    container: rust:1.89
+    steps:
+      - uses: actions/checkout@v4
+      # bookworm ships libayatana-appindicator3-dev (libappindicator3-dev is gone).
+      - name: Install host deps
+        run: >
+          apt-get update -qq && apt-get install -y -qq
+          nodejs npm
+          libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+          librsvg2-dev patchelf
+      - uses: actions/cache@v4
+        with:
+          key: bundle-linux-${{ github.ref }}-${{ hashFiles('Cargo.lock') }}
+          path:
+            - .cargo/registry/
+            - target/
+      - run: npm ci
+      # A real .deb (pure-Rust bundler, no FUSE/linuxdeploy needed) so the
+      # sidecar staging and deb depends are exercised, not just the binary.
+      - run: npm run tauri build -- --bundles deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-bundle
+          path: target/release/bundle/deb/
+          retention-days: 7
+
+  bundle-windows:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run tauri build -- --no-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-binaries
+          path: target/release/
+          retention-days: 7
+
+  bundle-macos:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, macos]
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run tauri build -- --no-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-binaries
+          path: target/release/
+          retention-days: 7

@@ -1,0 +1,148 @@
+{
+  "accepted": true,
+  "approvals": [
+    {
+      "provider_request_id": "0",
+      "question": "{\n  \"changes\": [\n    {\n      \"diff\": \"42\\n\",\n      \"kind\": {\n        \"type\": \"add\"\n      },\n      \"path\": \"/var/folders/ld/mkzs9j3s71n1lrjtq2k7jr340000gn/T/.tmpQRN4q0/data/missions/13035f3b-3de4-4ea5-a6dc-97ddbd69b759/workspaces/483c967a-76c8-4a69-b1d9-6e8cc604b86f/sum.txt\"\n    }\n  ],\n  \"details_available\": true,\n  \"grant_root\": null,\n  \"reason\": null,\n  \"type\": \"file_change\"\n}"
+    },
+    {
+      "provider_request_id": "0",
+      "question": "{\n  \"changes\": [\n    {\n      \"diff\": \"verified\\n\",\n      \"kind\": {\n        \"type\": \"add\"\n      },\n      \"path\": \"/var/folders/ld/mkzs9j3s71n1lrjtq2k7jr340000gn/T/.tmpQRN4q0/data/missions/13035f3b-3de4-4ea5-a6dc-97ddbd69b759/workspaces/edf0cd76-3664-4b51-a0e7-8e3ebe511560/label.txt\"\n    }\n  ],\n  \"details_available\": true,\n  \"grant_root\": null,\n  \"reason\": null,\n  \"type\": \"file_change\"\n}"
+    },
+    {
+      "provider_request_id": "0",
+      "question": "command approval (command): /bin/zsh -c 'od -An -t x1 sum.txt' @ /var/folders/ld/mkzs9j3s71n1lrjtq2k7jr340000gn/T/.tmpQRN4q0/data/missions/13035f3b-3de4-4ea5-a6dc-97ddbd69b759/workspaces/d755c938-5c2b-4cb1-91b4-1f018607112c"
+    },
+    {
+      "provider_request_id": "1",
+      "question": "command approval (command): /bin/zsh -c 'od -An -t x1 label.txt' @ /var/folders/ld/mkzs9j3s71n1lrjtq2k7jr340000gn/T/.tmpQRN4q0/data/missions/13035f3b-3de4-4ea5-a6dc-97ddbd69b759/workspaces/d755c938-5c2b-4cb1-91b4-1f018607112c"
+    },
+    {
+      "provider_request_id": "2",
+      "question": "command approval (command): /bin/zsh -c 'git diff --no-ext-diff --name-only 2a663fb5dd99bd62787086a72c89ff43a145ac96 8bce616d5e2a2d013e256e6bedcddb72930b1153' @ /var/folders/ld/mkzs9j3s71n1lrjtq2k7jr340000gn/T/.tmpQRN4q0/data/missions/13035f3b-3de4-4ea5-a6dc-97ddbd69b759/workspaces/d755c938-5c2b-4cb1-91b4-1f018607112c"
+    }
+  ],
+  "arch": "aarch64",
+  "auth_route": "subscription",
+  "cleanup": true,
+  "exact_models": true,
+  "format": 1,
+  "model": "gpt-5.6-luna",
+  "original_unchanged": true,
+  "os": "macos",
+  "passed": true,
+  "provider": "openai",
+  "require_enforced_verification": true,
+  "runtime": "codex",
+  "scope": "production daemon + IPC + SQLite + Git + native Exec + real model inference; two independent writers, verification, review and acceptance",
+  "summary": {
+    "phase": "done",
+    "runs": [
+      {
+        "exec_id": "aa70bec0-be47-4db2-b50d-8d06514ac090",
+        "failure_code": null,
+        "id": "e6f9fde3-cf02-4c88-b31a-2baaa1c448d1",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "succeeded",
+        "task_id": "a310a4af-496b-4208-8ce0-1afbd13b845f"
+      },
+      {
+        "exec_id": "045f9639-7165-407b-a13b-54eb6bb146ae",
+        "failure_code": null,
+        "id": "75cf98d4-cc1e-42f2-b4b7-b2de6e9e5d8c",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "succeeded",
+        "task_id": "25ebfbb8-e2fb-41af-a4ab-56b70105a8c0"
+      },
+      {
+        "exec_id": "b5c6b2ea-bbe6-473f-aa01-d7ff19e7f7b7",
+        "failure_code": null,
+        "id": "96509c6f-3e8a-4135-9fcc-5e77674ebb9c",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "succeeded",
+        "task_id": "86c54e5e-b749-4d27-a170-1587fab68891"
+      },
+      {
+        "exec_id": "52dff446-e35c-4613-b235-8f2bb6b5ccdf",
+        "failure_code": null,
+        "id": "d54fc0f7-6708-40c8-9672-4166daf03c8e",
+        "observed_model": null,
+        "requested_model": null,
+        "state": "succeeded",
+        "task_id": "8d3c83bc-6cdf-4f1a-9cb6-410e9660d7ec"
+      },
+      {
+        "exec_id": "1c5f94a4-d1a9-467d-90b1-45e06d4ab018",
+        "failure_code": null,
+        "id": "93508e90-7134-457c-9722-34defbd24aa5",
+        "observed_model": null,
+        "requested_model": null,
+        "state": "succeeded",
+        "task_id": "9d925e48-4d08-440c-acec-071076fb32ae"
+      },
+      {
+        "exec_id": "cc8c14ac-93fc-4efa-a06b-700ef1d49655",
+        "failure_code": null,
+        "id": "0b4669a5-5151-485b-bd52-aeeb95d18fd5",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "succeeded",
+        "task_id": "ebd71bff-94d2-4019-81c9-13a38852f664"
+      }
+    ],
+    "state": "completed",
+    "tasks": [
+      {
+        "blocked_code": null,
+        "id": "a310a4af-496b-4208-8ce0-1afbd13b845f",
+        "kind": "plan",
+        "state": "succeeded"
+      },
+      {
+        "blocked_code": null,
+        "id": "25ebfbb8-e2fb-41af-a4ab-56b70105a8c0",
+        "kind": "implement",
+        "state": "succeeded"
+      },
+      {
+        "blocked_code": null,
+        "id": "86c54e5e-b749-4d27-a170-1587fab68891",
+        "kind": "implement",
+        "state": "succeeded"
+      },
+      {
+        "blocked_code": null,
+        "id": "8d3c83bc-6cdf-4f1a-9cb6-410e9660d7ec",
+        "kind": "integrate",
+        "state": "succeeded"
+      },
+      {
+        "blocked_code": null,
+        "id": "9d925e48-4d08-440c-acec-071076fb32ae",
+        "kind": "verify",
+        "state": "succeeded"
+      },
+      {
+        "blocked_code": null,
+        "id": "ebd71bff-94d2-4019-81c9-13a38852f664",
+        "kind": "review",
+        "state": "succeeded"
+      }
+    ]
+  },
+  "tested_at": "2026-09-16T14:30:52.162Z",
+  "verifications": [
+    {
+      "candidate_id": "a06773e0-cf72-4de8-8bec-dbb290ea09bc",
+      "exit_code": 0,
+      "id": "eb0e5140-3fc6-48db-8253-770907da0ba5",
+      "input_integrity": "enforced",
+      "run_id": "93508e90-7134-457c-9722-34defbd24aa5",
+      "status": "passed"
+    }
+  ],
+  "version": "0.154.0"
+}

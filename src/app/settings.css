@@ -1,0 +1,413 @@
+.settings-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex: 0 0 auto;
+}
+
+.settings-header h1 { margin: 0; font-size: 20px; }
+.settings-header p { margin: 8px 0 0; color: var(--fg-muted); }
+.settings-return { padding: 9px 14px; white-space: nowrap; }
+.settings-layout { display: flex; flex: 1; min-height: 0; }
+.settings-nav {
+  width: 230px;
+  flex: 0 0 auto;
+  padding: 20px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+  overflow-y: auto;
+}
+.settings-nav button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 6px;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+.settings-nav button[aria-current="page"] { background: var(--bg-elevated); border-color: var(--accent); }
+.settings-nav button span { font-weight: 600; }
+.settings-nav small { color: var(--fg-muted); line-height: 1.5; }
+.settings-content { flex: 1; min-width: 0; overflow: auto; padding: 28px 32px; }
+.settings-panel { max-width: 1000px; }
+.settings-panel[hidden] { display: none; }
+.settings-panel h2 { margin-top: 0; font-size: 17px; }
+.settings-panel .profile-list { padding: 0; list-style: none; }
+.settings-panel .profile-list-item { flex-wrap: wrap; padding: 12px 0; }
+.settings-panel .profile-list-item code { overflow-wrap: anywhere; }
+.settings-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settings-panel input, .settings-panel select, .settings-panel textarea { max-width: 100%; }
+.settings-panel input:not([type="radio"]):not([type="checkbox"]),
+.settings-panel select, .settings-panel textarea {
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 9px;
+  font: inherit;
+}
+.settings-panel textarea { width: 100%; min-height: 70px; resize: vertical; }
+
+/* AI 작업 패널만 폼 밀도가 높다(연결·팀·검증을 한 화면에서 만든다). 기본 행보다
+   컨트롤을 한 뼘 키워 라벨과 입력이 맞붙어 보이지 않게 한다. 기본 규칙과 같은
+   선택자 무게로는 순서에 기대게 되므로 한 단계 더 구체적으로 적는다. */
+.settings-panel .mission-settings > h2 { margin: 0; }
+.settings-panel .mission-settings input:not([type="radio"]):not([type="checkbox"]),
+.settings-panel .mission-settings select,
+.settings-panel .mission-settings textarea {
+  padding: 8px 11px;
+  min-height: 36px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+.settings-panel .mission-settings input:focus-visible,
+.settings-panel .mission-settings select:focus-visible,
+.settings-panel .mission-settings textarea:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-panel .enforcement-segment label { flex-direction: row; align-items: center; gap: 6px; }
+@media (max-width: 760px) {
+  .settings-header { padding: 16px; gap: 12px; }
+  .settings-nav { width: 165px; padding: 12px 8px; }
+  .settings-content { padding: 20px 16px; }
+}
+
+/* ---- 설정 검색 · 그룹 내비게이션 -------------------------------------- */
+
+.settings-search {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 7px 9px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.settings-search-none { padding: 0 4px; }
+
+.settings-results { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.settings-results h2 { margin: 0 0 6px; font-size: 12px; color: var(--fg-muted); font-weight: 600; }
+.settings-results ul { list-style: none; margin: 0; padding: 0; }
+.settings-results button { gap: 2px; }
+.settings-results small { color: var(--fg-muted); }
+
+.settings-nav-footer { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 10px; }
+.settings-nav-footer p { margin: 0 4px 8px; line-height: 1.5; }
+.settings-reset-all { width: 100%; text-align: center; }
+.settings-reset-actions { display: flex; gap: 6px; }
+.settings-reset-actions button { flex: 1; text-align: center; }
+
+/* ---- 설정 행 --------------------------------------------------------- */
+
+.setting-row {
+  display: flex;
+  gap: 24px;
+  padding: 16px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-row-inline { align-items: flex-start; justify-content: space-between; }
+.setting-row-stacked { flex-direction: column; gap: 12px; }
+
+.setting-text { min-width: 0; max-width: 46ch; }
+.setting-row-stacked .setting-text { max-width: none; }
+.setting-label { display: block; font-weight: 600; }
+.setting-description { margin: 5px 0 0; color: var(--fg-muted); line-height: 1.55; }
+
+.setting-control { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.setting-row-stacked .setting-control { display: block; width: 100%; }
+
+.setting-reset {
+  padding: 4px 9px;
+  font-size: 12px;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+.setting-reset:hover { color: var(--fg); border-color: var(--accent); }
+
+/* 검색 결과에서 이 행으로 왔음을 잠깐 알린다(1.6초 뒤 해제). */
+.setting-row-highlight {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.setting-select { min-width: 190px; }
+.setting-toggle { display: inline-flex; align-items: center; gap: 7px; }
+.setting-toggle-state { color: var(--fg-muted); min-width: 2.4em; }
+
+.setting-number { display: inline-flex; align-items: center; gap: 10px; }
+.setting-number input[type="range"] { width: 170px; accent-color: var(--accent); }
+.setting-number-input { width: 5em; }
+.setting-unit { color: var(--fg-muted); }
+
+/* 에이전트별 배경 색조(paneBackground.ts) — 에이전트 이름과 색 고르기를
+   가로로 나란히 둔다(stacked 행 안에서 폭 전체를 쓴다). */
+.agent-tint-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.agent-tint { display: inline-flex; align-items: center; gap: 6px; }
+/* 고른 색조가 아니라 실제로 칠해질 배경 — 피커 옆에 붙여 둘을 나란히 본다. */
+.agent-tint-preview {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.agent-tint .setting-color {
+  width: 34px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.setting-error { margin: 8px 0 0; color: var(--danger); }
+
+/* ---- 사용자 셸 ------------------------------------------------------- */
+
+.custom-shells { width: 100%; }
+.custom-shell-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.custom-shell-form label { display: flex; flex-direction: column; gap: 4px; }
+.custom-shell-form label span { color: var(--fg-muted); font-size: 12px; }
+.custom-shell-form input { min-width: 160px; }
+
+.custom-shell-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.custom-shell-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.custom-shell-name { font-weight: 600; }
+.custom-shell-list code { color: var(--fg-muted); overflow-wrap: anywhere; flex: 1; }
+
+/* ---- 단축키 안내표 --------------------------------------------------- */
+
+.shortcut-table { border-collapse: collapse; width: 100%; max-width: 560px; }
+.shortcut-table th, .shortcut-table td { text-align: left; padding: 9px 4px; border-bottom: 1px solid var(--border); }
+.shortcut-table thead th { color: var(--fg-muted); font-size: 12px; }
+.shortcut-table tbody th { font-weight: 400; }
+.shortcut-table kbd {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 2px 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .setting-row-inline { flex-direction: column; gap: 10px; }
+  .setting-control { width: 100%; }
+}
+
+/* 팔레트 키보드 선택(W2) — 마우스 호버와 같은 강조 */
+.palette-list button.palette-selected {
+  background: rgba(97, 175, 239, 0.16);
+  outline: 1px solid #4f7ad0;
+}
+
+/* 저널 검색 결과(W2) */
+.search-scope {
+  display: flex;
+  gap: 14px;
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+
+.search-journal-results ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-journal-results button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border, #3a3d45);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.search-journal-results button:hover {
+  border-color: #61afef;
+}
+
+.search-journal-session {
+  color: #8fb4f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.search-journal-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 단축키 재정의(고급) — W3-2 */
+.shortcut-advanced {
+  margin-top: 14px;
+}
+
+.shortcut-advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.shortcut-override-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shortcut-override-list li {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(90px, auto) auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.shortcut-override-binding {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted, #9aa0aa);
+}
+
+.shortcut-capturing {
+  color: #8fb4f0;
+}
+
+/* 라이트 배경에서는 dark용 옅은 파랑(#8fb4f0)이 안 읽힌다. */
+:root[data-theme="light"] .search-journal-session,
+:root[data-theme="light"] .shortcut-capturing {
+  color: #1f5cb0;
+}
+
+/* 연동 패널 — hooks 등록 미리보기 */
+.hooks-path {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.hooks-diff,
+.hooks-snippet {
+  background: rgba(97, 175, 239, 0.08);
+  border: 1px solid var(--border, #3a3d45);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 12px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.hooks-diff::before,
+.hooks-snippet::before {
+  content: none;
+}
+
+.integration-block {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.integration-block:first-child {
+  padding-top: 0;
+}
+
+.integration-block h2,
+.integration-block h3 {
+  margin-top: 0;
+}
+
+.integration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.integration-key-field {
+  width: min(420px, 100%);
+}
+
+/* Z.ai Coding Plan 카드 — Claude Code 라우팅 스위치·주 모델 선택. */
+.zai-route {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 13px;
+}
+
+.zai-route-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.zai-route-switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.zai-route-switch input[type="checkbox"]:disabled + span {
+  opacity: 0.6;
+}
+
+.zai-route-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.zai-route-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.zai-route-notes li {
+  margin: 2px 0;
+}

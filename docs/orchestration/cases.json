@@ -1,0 +1,51 @@
+{
+  "description": "명세 규칙용 축약 fixture. a/b 등은 테스트 ID alias이며 실제 wire에서는 UUID로 치환한다.",
+  "transitions": [
+    {"id":"S01","entity":"mission","from":"draft","to":"running","allowed":true},
+    {"id":"S02","entity":"mission","from":"running","to":"completed","allowed":true},
+    {"id":"S03","entity":"mission","from":"draft","to":"completed","allowed":false},
+    {"id":"S04","entity":"mission","from":"completed","to":"running","allowed":false},
+    {"id":"S05","entity":"mission","from":"running","to":"paused","allowed":false},
+    {"id":"S06","entity":"mission","from":"pausing","to":"paused","allowed":true},
+    {"id":"S07","entity":"mission","from":"stopping","to":"cancelled","allowed":true},
+    {"id":"S08","entity":"task","from":"planned","to":"succeeded","allowed":false},
+    {"id":"S09","entity":"task","from":"ready","to":"running","allowed":true},
+    {"id":"S10","entity":"task","from":"running","to":"awaiting_review","allowed":true},
+    {"id":"S11","entity":"task","from":"awaiting_review","to":"succeeded","allowed":true},
+    {"id":"S12","entity":"task","from":"failed","to":"ready","allowed":true},
+    {"id":"S13","entity":"task","from":"succeeded","to":"ready","allowed":false},
+    {"id":"S14","entity":"task","from":"running","to":"superseded","allowed":false},
+    {"id":"S15","entity":"run","from":"prepared","to":"starting","allowed":true},
+    {"id":"S16","entity":"run","from":"starting","to":"unknown","allowed":true},
+    {"id":"S17","entity":"run","from":"unknown","to":"running","allowed":false},
+    {"id":"S18","entity":"run","from":"running","to":"succeeded","allowed":true},
+    {"id":"S19","entity":"run","from":"stopping","to":"succeeded","allowed":false},
+    {"id":"S20","entity":"run","from":"running","to":"cancelled","allowed":false}
+  ],
+  "plans": [
+    {"id":"P01","tasks":[{"id":"a","mission":"m","deps":[]},{"id":"b","mission":"m","deps":["a"]},{"id":"c","mission":"m","deps":["a"]}],"expected":"ok"},
+    {"id":"P02","tasks":[{"id":"a","mission":"m","deps":["b"]},{"id":"b","mission":"m","deps":["a"]}],"expected":"cycle"},
+    {"id":"P03","tasks":[{"id":"a","mission":"m","deps":["a"]}],"expected":"self"},
+    {"id":"P04","tasks":[{"id":"a","mission":"m","deps":["missing"]}],"expected":"missing"},
+    {"id":"P05","tasks":[{"id":"a","mission":"m","deps":[]},{"id":"a","mission":"m","deps":[]}],"expected":"duplicate"},
+    {"id":"P06","tasks":[{"id":"a","mission":"m","deps":[]},{"id":"b","mission":"other","deps":["a"]}],"expected":"cross_mission"},
+    {"id":"P07","tasks":[{"id":"a","mission":"m","deps":[]},{"id":"b","mission":"m","deps":["a","a"]}],"expected":"duplicate_edge"}
+  ],
+  "recovery": [
+    {"id":"R01","dispatch":"unsent","policy_allows":true,"mission_running":true,"expected":"dispatch"},
+    {"id":"R02","dispatch":"unsent","policy_allows":false,"mission_running":true,"expected":"hold"},
+    {"id":"R03","dispatch":"may_have_sent","policy_allows":true,"mission_running":true,"expected":"inspect"},
+    {"id":"R04","dispatch":"acknowledged","policy_allows":true,"mission_running":true,"expected":"inspect"},
+    {"id":"R05","dispatch":"unsent","policy_allows":true,"mission_running":false,"expected":"hold"}
+  ],
+  "acceptance": [
+    {"id":"A01","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"enforced","strict":true,"observed_ack":false,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":true},
+    {"id":"A02","current_candidate":"c2","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"enforced","strict":true,"observed_ack":false,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":false},
+    {"id":"A03","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"observed","strict":true,"observed_ack":true,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":false},
+    {"id":"A04","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"observed","strict":false,"observed_ack":true,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":true},
+    {"id":"A05","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"observed","strict":false,"observed_ack":false,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":false},
+    {"id":"A06","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"unknown","strict":false,"observed_ack":true,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":false},
+    {"id":"A07","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"enforced","strict":true,"observed_ack":false,"review_passed":true,"blocking_findings":1,"human_checks_done":true,"live_or_unknown":0,"open_blocking_decisions":0,"expected":false},
+    {"id":"A08","current_candidate":"c1","requested_candidate":"c1","required_tasks_done":true,"verification_passed":true,"integrity":"enforced","strict":true,"observed_ack":false,"review_passed":true,"blocking_findings":0,"human_checks_done":true,"live_or_unknown":1,"open_blocking_decisions":0,"expected":false}
+  ]
+}

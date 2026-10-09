@@ -1,0 +1,17 @@
+[package]
+name = "term-contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Wire/persistence contracts shared by daemon, core, platform and UI. No OS or UI deps."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }

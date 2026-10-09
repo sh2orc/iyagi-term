@@ -1,0 +1,91 @@
+{
+  "format": 1,
+  "runtime": "codex",
+  "version": "codex-cli 0.154.0",
+  "os": "Darwin",
+  "os_release": "25.6.0",
+  "architecture": "arm64",
+  "scope": "command/exec; no model or authentication",
+  "tested_at": "2026-09-16T04:48:02Z",
+  "cases": [
+    {
+      "case": "read_only_inside",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "read_only_outside",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_inside",
+      "passed": true,
+      "written": true,
+      "changed": true,
+      "errno": null
+    },
+    {
+      "case": "workspace_write_sibling",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_symlink",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_git",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_codex",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_agents",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_tmpdir",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "workspace_write_slash_tmp",
+      "passed": true,
+      "written": false,
+      "changed": false,
+      "errno": 1
+    },
+    {
+      "case": "read_only_network",
+      "passed": true
+    },
+    {
+      "case": "workspace_write_network",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

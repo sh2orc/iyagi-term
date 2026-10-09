@@ -1,0 +1,28 @@
+{
+  "mission": {
+    "draft": ["running", "cancelled"],
+    "running": ["pausing", "stopping", "completed", "failed"],
+    "pausing": ["paused", "stopping", "failed"],
+    "paused": ["running", "stopping"],
+    "stopping": ["cancelled", "failed"],
+    "completed": [], "failed": [], "cancelled": []
+  },
+  "task": {
+    "planned": ["ready", "blocked", "cancelled", "superseded"],
+    "ready": ["running", "blocked", "cancelled", "superseded"],
+    "running": ["awaiting_input", "awaiting_review", "succeeded", "failed", "blocked", "cancelled"],
+    "awaiting_input": ["running", "blocked", "failed", "cancelled"],
+    "awaiting_review": ["succeeded", "failed", "cancelled"],
+    "blocked": ["ready", "failed", "cancelled", "superseded"],
+    "failed": ["ready", "cancelled", "superseded"],
+    "succeeded": [], "cancelled": ["ready", "superseded"], "superseded": []
+  },
+  "run": {
+    "prepared": ["starting", "cancelled"],
+    "starting": ["running", "stopping", "failed", "interrupted", "unknown"],
+    "running": ["awaiting_input", "stopping", "succeeded", "failed", "interrupted", "unknown"],
+    "awaiting_input": ["running", "stopping", "failed", "interrupted", "unknown"],
+    "stopping": ["cancelled", "failed", "interrupted", "unknown"],
+    "succeeded": [], "failed": [], "cancelled": [], "interrupted": [], "unknown": []
+  }
+}

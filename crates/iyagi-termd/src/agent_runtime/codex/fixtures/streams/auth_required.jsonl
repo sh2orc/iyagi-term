@@ -1,0 +1,5 @@
+{"dir": "c", "msg": {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "iyagi", "title": null, "version": "0.1.0"}, "capabilities": {}}}}
+{"dir": "s", "msg": {"id": 1, "result": {"userAgent": "codex/0.153.4 (windows 10.0.26200; x86_64) iyagi-termd", "codexHome": "C:\\Users\\dev\\.codex", "platformFamily": "windows", "platformOs": "windows"}}}
+{"dir": "c", "msg": {"method": "initialized"}}
+{"dir": "c", "msg": {"id": 2, "method": "account/read", "params": {}}}
+{"dir": "s", "msg": {"id": 2, "result": {"requiresOpenaiAuth": true, "account": null}}}

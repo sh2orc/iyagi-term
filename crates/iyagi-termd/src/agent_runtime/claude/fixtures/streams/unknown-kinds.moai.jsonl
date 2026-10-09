@@ -1,0 +1,6 @@
+{"iyagi_recording":1,"exit_code":0,"line_delay_ms":0}
+{"type":"system","subtype":"init","session_id":"claude-sess-unk","model":"claude-test-model","tools":[],"mcp_servers":[]}
+{"type":"totally_new_kind","payload":{"whatever":1}}
+{"type":"another_future_kind","x":42}
+this line is not json at all
+{"type":"result","subtype":"success","is_error":false,"session_id":"claude-sess-unk","result":"survived unknown kinds","usage":{"input_tokens":10,"output_tokens":5},"total_cost_usd":0.0001}

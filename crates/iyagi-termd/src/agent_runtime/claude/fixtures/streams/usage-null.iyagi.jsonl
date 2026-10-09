@@ -1,0 +1,3 @@
+{"iyagi_recording":1,"exit_code":0,"line_delay_ms":0}
+{"type":"system","subtype":"init","session_id":"claude-sess-null","model":"claude-test-model","tools":[],"mcp_servers":[]}
+{"type":"result","subtype":"success","is_error":false,"session_id":"claude-sess-null","result":"null usage stays null","usage":null,"total_cost_usd":null}

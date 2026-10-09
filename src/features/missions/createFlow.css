@@ -1,0 +1,263 @@
+/*
+ * 새 AI 작업 대화상자·빠른 설정·설정 화면의 추가 표시:
+ * 부제, 후속 작업 base, 커밋하지 않은 변경 경로, 리뷰 포함/생략, 시작 실패,
+ * 실험적 연결 배지·동의, 다시 동의 안내. 기본 배치는 missions.css를 따른다.
+ */
+
+.mission-create-subtitle {
+  margin: -6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mission-create-follow-up {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+p.mission-create-follow-up:not(.mission-create-warning):not(.muted) {
+  padding: 6px 8px;
+  border-left: 3px solid var(--ok);
+  border-radius: 4px;
+}
+
+.mission-create-dirty {
+  display: grid;
+  gap: 4px;
+}
+
+.mission-create-dirty p {
+  margin: 0;
+}
+
+.mission-create-dirty-paths {
+  margin: 0;
+  padding-left: 16px;
+  max-height: 160px;
+  overflow-y: auto;
+  color: var(--fg);
+}
+
+.mission-create-dirty-paths code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.mission-create-goal-bytes {
+  color: var(--warn);
+}
+
+.mission-create-notice {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mission-create-start-lead {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.mission-create-notice > button {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.mission-create-review {
+  gap: 2px;
+}
+
+.mission-create-review label {
+  align-items: flex-start;
+  line-height: 1.5;
+}
+
+.mission-create-review input[type="radio"] {
+  margin-top: 3px;
+  flex: none;
+}
+
+.mission-create-experimental {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mission-experimental-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+p.mission-experimental-badge {
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  white-space: normal;
+}
+
+/* 빠른 설정 카드의 실험적 사용 동의 — `.mission-create-field label`(flex row)보다 구체적으로. */
+.mission-quick-setup .mission-quick-setup-experimental {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px dashed var(--warn);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.mission-quick-setup .mission-quick-setup-experimental-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.mission-quick-setup-experimental-risk,
+.mission-quick-setup-experimental-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mission-quick-setup-experimental-note {
+  color: var(--warn);
+}
+
+/* 팀 템플릿의 실험적 사용 동의 — 빠른 설정 카드의 블록과 같은 모양. */
+.mission-settings-consent {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px dashed var(--warn);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.mission-settings-consent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+/* 연결 하나의 신뢰 칩과 근거 한 줄(11 §8) — 빠른 설정 배지와 같은 색 규칙을 쓴다. */
+.mission-trust {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+}
+
+.mission-trust-chip {
+  margin: 0;
+  padding: 2px 8px;
+  border-left: 3px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 22%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.mission-trust-chip .muted {
+  font-weight: 400;
+}
+
+.mission-trust-chip.is-verified { border-left-color: var(--ok); }
+.mission-trust-chip.is-partial { border-left-color: var(--warn); }
+.mission-trust-chip.is-blocked { border-left-color: var(--danger); }
+
+.mission-trust-reason {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.mission-settings-reconsent {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.mission-settings-reconsent p {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mission-settings-reconsent button {
+  justify-self: start;
+}
+
+/* The composer is part of the terminal layout, with no backdrop or focus trap. */
+.mission-create-sidebar {
+  flex: 0 0 clamp(300px, 30vw, 380px);
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  display: flex;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.mission-create-sidebar .mission-create {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  padding: 14px;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+}
+.mission-create-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mission-create-sidebar .mission-create-actions {
+  position: sticky;
+  bottom: -14px;
+  margin: auto -14px -14px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  z-index: 1;
+}
+.mission-create-sidebar .mission-create-actions .primary { flex: 1; }
+.mission-create-sidebar .mission-create-section { flex-shrink: 0; }
+.mission-create-sidebar .mission-create-field { flex-shrink: 0; min-width: 0; }
+.mission-create-sidebar textarea { min-height: 120px; }
+.mission-create-sidebar .mission-requirement-row { flex-wrap: wrap; }
+.mission-create-sidebar .mission-create-section-values { display: none; }
+.mission-create-sidebar .mission-create-section[open] .mission-create-section-values { display: inline; }
+@media (max-width: 620px) {
+  .workbench-main:has(> .mission-create-sidebar) { flex-wrap: wrap; }
+  .mission-create-sidebar {
+    flex-basis: 100%;
+    height: 55%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .workbench-main:has(> .mission-create-sidebar) > .split-scroll { flex-basis: 100%; height: 45%; }
+}

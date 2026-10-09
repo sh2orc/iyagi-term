@@ -1,0 +1,376 @@
+/* ---- 결과 확인·확정(ResultReview) ------------------------------------------
+ * 상단 요약은 고정, 상세는 아래에서 스크롤한다. 요약이 영역보다 길면(좁은 창·
+ * 200% 확대) 요약이 줄어들며(최대 65%) 자체 스크롤한다 — 상세는 최소 8rem을 남긴다.
+ */
+
+.mission-result.result-review {
+  position: relative;
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+}
+
+.result-review-summary {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 65%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.result-review-details {
+  flex: 1 1 0;
+  min-height: 8rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.result-review-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.result-review-status.tone-ok {
+  color: var(--ok);
+}
+
+.result-review-status.tone-review {
+  color: var(--warn);
+}
+
+.result-review-status.tone-muted {
+  color: var(--fg-muted);
+}
+
+/* 확인창은 결과 영역 안에서 흐름대로 그린다(missions.css의 absolute 배치 무효화). */
+.result-review .mission-inline-confirm.result-review-confirm {
+  position: static;
+  top: auto;
+  right: auto;
+  z-index: auto;
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+
+.result-review-confirm-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---- 체크리스트 */
+
+.result-review-checklist h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.result-review-checklist > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.result-review-checklist li.ok {
+  color: var(--fg-muted);
+}
+
+.result-review-glyph {
+  display: inline-block;
+  width: 1.1em;
+}
+
+.result-review-checklist li.ok .result-review-glyph {
+  color: var(--ok);
+}
+
+.result-review-checklist li.unmet .result-review-glyph {
+  color: var(--warn);
+}
+
+.result-review-issues {
+  list-style: none;
+  margin: 2px 0 4px 1.1em;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.result-review-issues .link,
+.result-review-checks .link {
+  color: var(--accent);
+}
+
+.result-review-accept-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.result-review-block-reason {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+
+.result-review-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.result-review-accepted {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--ok);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* ---- 직접 확인할 항목 */
+
+.result-review-confirmations {
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.result-review-confirmations > p {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.result-review-checks {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.result-review-checks label {
+  display: block;
+}
+
+.result-review-disabled-reason {
+  margin: 2px 0 0 1.6em;
+  font-size: 11px;
+}
+
+/* ---- 요구사항·변경·검증 */
+
+.result-review-req-glyph {
+  width: 1.2em;
+}
+
+.result-review-req-commands {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.result-review-req-commands .req-command-passed {
+  color: var(--ok);
+}
+
+.result-review-req-commands .req-command-failed {
+  color: var(--danger);
+}
+
+.result-review-req-commands .req-command-missing {
+  color: var(--fg-muted);
+}
+
+.result-review-files .change-added {
+  color: var(--ok);
+}
+
+.result-review-files .change-deleted {
+  color: var(--danger);
+}
+
+.result-review-change {
+  display: inline-block;
+  min-width: 2.5em;
+  font-size: 11px;
+}
+
+.result-review-path {
+  overflow-wrap: anywhere;
+}
+
+.result-review-verifications li {
+  overflow-wrap: anywhere;
+}
+
+.result-review-log summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.result-review-log-body {
+  margin: 4px 0 0;
+  font-family: "Nanum Gothic Coding", "Segoe UI", monospace;
+  font-size: 11px;
+  color: var(--fg);
+}
+
+.finding-severity {
+  font-weight: 600;
+}
+
+.finding-severity.severity-blocking {
+  color: var(--danger);
+}
+
+.finding-severity.severity-major {
+  color: var(--warn);
+}
+
+/* ---- 결과 가져오기 */
+
+.result-import-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.result-import-summary.emphasized,
+.result-review-import-section.emphasized {
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
+.result-review-import-section.emphasized {
+  padding: 6px 8px;
+}
+
+.result-import-summary .link {
+  align-self: flex-start;
+  color: var(--accent);
+}
+
+.result-import-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.result-import-command {
+  font-family: "Nanum Gothic Coding", "Segoe UI", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.result-import-warning {
+  margin: 0;
+  color: var(--warn);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.result-import {
+  font-size: 12px;
+}
+
+.result-import > p {
+  margin: 0 0 4px;
+}
+
+.result-import-oids {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 8px;
+  margin: 6px 0;
+}
+
+.result-import-oids dt {
+  color: var(--fg-muted);
+}
+
+.result-import-oids dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.result-import-commands {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.result-import-choice {
+  display: block;
+}
+
+.result-import-recommended {
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+}
+
+.result-import-command-row {
+  margin: 2px 0 0 1.6em;
+}
+
+.result-import-help {
+  margin: 2px 0 0 1.6em;
+}
+
+.result-import-copy {
+  font-size: 11px;
+  padding: 0 6px;
+}
+
+.result-import-copied {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--ok);
+}
+
+.result-import-copy-failed {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--danger);
+}

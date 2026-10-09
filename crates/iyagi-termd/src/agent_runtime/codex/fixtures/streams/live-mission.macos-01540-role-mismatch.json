@@ -1,0 +1,71 @@
+{
+  "accepted": false,
+  "approvals": [],
+  "arch": "aarch64",
+  "auth_route": "subscription",
+  "cleanup": true,
+  "exact_models": false,
+  "format": 1,
+  "model": "gpt-5.6-luna",
+  "original_unchanged": true,
+  "os": "macos",
+  "passed": false,
+  "provider": "openai",
+  "runtime": "codex",
+  "scope": "production daemon + IPC + SQLite + Git + native Exec + real model inference; two independent writers, verification, review and acceptance",
+  "summary": {
+    "phase": "implementing",
+    "runs": [
+      {
+        "exec_id": "84e39557-3c3b-4978-9295-518e2ba9e170",
+        "failure_code": "BUDGET_EXCEEDED",
+        "id": "0938d944-860d-405b-a01b-13b509026c56",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "cancelled",
+        "task_id": "c9f174ac-ad9b-4c1b-bada-259462566c4d"
+      },
+      {
+        "exec_id": "f8750214-b93b-4934-830f-80de7f9dfd19",
+        "failure_code": "RESULT_INVALID",
+        "id": "7eb8ff29-e370-488b-b34d-563bc4f13877",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "failed",
+        "task_id": "9afa6060-a6a2-4c0f-abae-2cb1d297acec"
+      },
+      {
+        "exec_id": "1ad96b7d-d9d9-41e8-bb77-20ada7ec9f95",
+        "failure_code": null,
+        "id": "d9adfc87-ff60-4c15-802c-50abb53aff1e",
+        "observed_model": "gpt-5.6-luna",
+        "requested_model": "gpt-5.6-luna",
+        "state": "succeeded",
+        "task_id": "194ee831-7bf2-40f1-beef-8a708763b3f3"
+      }
+    ],
+    "state": "cancelled",
+    "tasks": [
+      {
+        "blocked_code": null,
+        "id": "194ee831-7bf2-40f1-beef-8a708763b3f3",
+        "kind": "plan",
+        "state": "succeeded"
+      },
+      {
+        "blocked_code": "ResultInvalid",
+        "id": "9afa6060-a6a2-4c0f-abae-2cb1d297acec",
+        "kind": "implement",
+        "state": "cancelled"
+      },
+      {
+        "blocked_code": "BudgetExceeded",
+        "id": "c9f174ac-ad9b-4c1b-bada-259462566c4d",
+        "kind": "implement",
+        "state": "cancelled"
+      }
+    ]
+  },
+  "tested_at": "2026-09-16T09:25:50.726Z",
+  "version": "0.154.0"
+}

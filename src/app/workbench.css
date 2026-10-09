@@ -1,0 +1,2699 @@
+/* 내장 한글 코딩 폰트(OFL — public/fonts/OFL.txt). "한글 폭 = 라틴×2"가
+ * 정확해 터미널 2셀 격자와 어긋나지 않는다. main.tsx가 생성 전에 로드를
+ * 보장한다. */
+@font-face {
+  font-family: "Nanum Gothic Coding";
+  src: url("/fonts/NanumGothicCoding-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "Nanum Gothic Coding";
+  src: url("/fonts/NanumGothicCoding-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: block;
+}
+
+/* iyagi workbench — dark theme, 04-ui.md §1 layout. */
+
+/* mission 화면 스타일(src/features/missions/missions.css)은 MissionPage가
+ * 직접 import한다(vite JS import — CSS @import는 파일 머리 규칙 위반으로
+ * Drop될 수 있다). */
+
+:root {
+  color-scheme: dark;
+  --bg: #141519;
+  --bg-panel: #1e1f24;
+  --bg-raised: #23252b;
+  --bg-elevated: #26272e;
+  --border: #33353d;
+  --fg: #d7dae0;
+  --fg-muted: #9aa0ab;
+  --accent: #61afef;
+  --accent-strong: #3b6fb5;
+  --danger: #e06c75;
+  --warn: #e5c07b;
+  --ok: #98c379;
+  --header-h: 40px;
+}
+
+/* 라이트 팔레트 — <html data-theme="light">일 때 색상 토큰만 재정의한다.
+   dark 값을 그대로 반전시키지 않고 대비(AA)와 layer 구분을 다시 설계했다
+   (04-ui.md §4: 기본 theme dark/light 두 가지 요구).
+   흰색이 겹치지 않게 세 겹을 둔다: 창 프레임(--bg)이 가장 어두운
+   웜 그레이, 카드·터미널면(--bg-panel)은 종이색, 머리글·버튼
+   (--bg-elevated)만 순백이다. dark에서 터미널 배경이 --bg-panel인
+   것과 같은 관계를 유지한다(xtermSetup LIGHT_THEME 참조). */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e9e7e1;
+  --bg-panel: #f7f5f1;
+  --bg-raised: #ffffff;
+  --bg-elevated: #ffffff;
+  --border: #d6d0c5;
+  --fg: #23252b;
+  --fg-muted: #5b5d66;
+  --accent: #1966b3;
+  --accent-strong: #1547a8;
+  --danger: #c4291f;
+  --warn: #8f6008;
+  --ok: #227729;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+button {
+  background: var(--bg-elevated);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  /* accent-strong은 두 테마 모두 진한 파랑이다 — 글자는 테마 --fg를
+     따라가면 라이트에서 검정이 얹힌다. broadcast-toggle.on과 같이 흰색으로. */
+  color: #fff;
+}
+
+.muted {
+  color: var(--fg-muted);
+}
+
+/* ---- layout shell --------------------------------------------------- */
+
+.workbench {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--header-h);
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+
+.tab.active {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  color: var(--fg);
+  /* 배경만으로는 라이트에서 흰 탭이 흰 바에 묻힌다 — accent 밑줄로
+     활성 탭을 두 테마 모두에서 읽힌다. */
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.tab.running:not(.active) {
+  background: rgba(76, 190, 111, 0.22);
+  border-color: rgba(100, 210, 135, 0.55);
+  color: #b1e9c1;
+}
+
+.tab.running:not(.active):hover {
+  background: rgba(76, 190, 111, 0.3);
+}
+
+.tab-running-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: #87df9f;
+  box-shadow: 0 0 6px rgba(100, 210, 135, 0.5);
+}
+
+/* 에이전트 활동 마커(탭·pane 타이틀 앞 — iTerm2에서 CLI가 제목에 스피너를
+   넣는 자리): 작업 중이면 숨 쉬듯 밝아졌다 흐려지는 초록 점(출력 활동 점과
+   같은 초록, 회전 없음), 확인 대기면 노란 점(정지). 에이전트가 감지된
+   탭에서는 출력 활동 점(.tab-running-dot) 대신 이것만 보인다. */
+/* 마커 자리: 점이 나타났다 사라져도 제목·배지가 좌우로 밀리지 않도록 폭을 고정한다
+   (활동 상태가 몇 초마다 바뀌면 헤더와 탭이 떨려 보인다). */
+.tab-marker-slot,
+.pane-marker-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+}
+
+.tab-agent-marker,
+.pane-agent-marker {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+}
+
+.tab-agent-marker.working,
+.pane-agent-marker.working {
+  /* 출력 활동 점(#87df9f)보다 채도를 올린 선명한 초록 — 작은 점이 눈에 들어오게. */
+  background: #3cdd72;
+  box-shadow: 0 0 6px rgba(60, 221, 114, 0.55);
+  animation: agent-marker-breathe 2.4s ease-in-out infinite;
+}
+
+.tab-agent-marker.waiting,
+.pane-agent-marker.waiting {
+  background: var(--warn);
+  box-shadow: 0 0 6px rgba(229, 192, 123, 0.55);
+}
+
+@keyframes agent-marker-breathe {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 모션 최소 설정: 점이 숨 쉬지 않고 거의 꽉 찬 밝기로 멈춘다. */
+@media (prefers-reduced-motion: reduce) {
+  .tab-agent-marker.working,
+  .pane-agent-marker.working {
+    animation: none;
+    opacity: 0.9;
+  }
+}
+
+.tab.renaming {
+  cursor: text;
+}
+
+/* 탭 폭이 이름 길이를 따라가도록 input size 속성과 함께 쓴다. */
+.tab-title-input {
+  min-width: 6ch;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+
+.tab-close {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+
+/* 액션 메뉴(탭·pane 공용, ActionMenu.tsx). */
+.tab-context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.tab-context-menu button {
+  width: 100%;
+  padding: 5px 9px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.tab-context-menu button:hover:not(:disabled),
+.tab-context-menu button:focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  outline: none;
+}
+
+/* 지금 할 수 없는 항목: 자리는 지키되 초점·강조에서 빠진다(왜 없는지가
+   아니라 "지금은 아니다"를 보이는 쪽이 메뉴 근육 기억을 지킨다). */
+.tab-context-menu button:disabled {
+  color: var(--fg-muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.tab-context-menu button:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.tab-context-menu .danger {
+  color: var(--danger);
+}
+
+/* 범용 컨텍스트 메뉴(ContextMenu.tsx) — 터미널 우클릭 메뉴 등. */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  min-width: 220px;
+  max-width: 360px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font-size: 12px;
+  user-select: none;
+  animation: context-menu-in 80ms ease-out;
+}
+
+@keyframes context-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-menu {
+    animation: none;
+  }
+}
+
+.context-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.context-menu-item:not(.disabled):hover,
+.context-menu-item:not(.disabled):focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  outline: none;
+}
+
+.context-menu-item.disabled {
+  opacity: 0.45;
+}
+
+/* 전역 button:hover(accent 테두리)가 비활성 항목에 번지지 않게 한다. */
+.context-menu-item.disabled:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.context-menu-item.danger {
+  color: var(--danger);
+}
+
+.context-menu-check {
+  flex: 0 0 14px;
+  text-align: center;
+}
+
+.context-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-shortcut {
+  flex: 0 0 auto;
+  margin-left: 24px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.context-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 8px;
+}
+
+.context-menu-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-row-buttons {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.context-menu-row-button {
+  width: auto;
+  min-width: 28px;
+  justify-content: center;
+  padding: 2px 6px;
+}
+
+.context-menu-row-button .context-menu-label {
+  flex: 0 0 auto;
+}
+
+.tab-add {
+  padding: 1px 8px;
+}
+
+/* 동시 입력은 상단 토글과 각 pane의 테두리·배지로 표시한다. */
+.pane-broadcast {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--warn);
+  border-radius: 3px;
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.broadcast-toggle.on {
+  background: var(--accent-strong);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* 상단 바 아이콘 버튼: 텍스트 라벨 대신 16px 라인 아이콘(Modals.tsx 종료
+   대화 아이콘과 같은 규격). 이름은 각 버튼의 aria-label/title이 유지한다. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.icon-button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.workbench-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 창이 최소 크기보다 작아지면 바깥 스크롤 제공, pane 최소 크기 유지(04 §2). */
+.split-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+
+/*
+ * 탭 전환 효과(features/terminal/tabSwitchEffect.ts). 들어오는 탭이 진행
+ * 방향에서 1.5%만 밀려 들어오는 150ms 페이드다. transform은 .split-scroll
+ * 요소 자체에 걸어 그 스크롤 영역(scrollWidth)을 바꾸지 않는다 — 부모
+ * .workbench-main은 overflow:visible이라 슬라이드가 스크롤바를 만들지 않는다.
+ * data-tab-dir는 Workbench 효과가 붙이고, 매 전환마다 animation을 재시작한다.
+ */
+@keyframes tab-slide-next {
+  from { transform: translateX(1.5%); opacity: 0.55; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes tab-slide-prev {
+  from { transform: translateX(-1.5%); opacity: 0.55; }
+  to { transform: none; opacity: 1; }
+}
+.split-scroll[data-tab-dir="next"] {
+  animation: tab-slide-next 150ms ease-out;
+}
+.split-scroll[data-tab-dir="prev"] {
+  animation: tab-slide-prev 150ms ease-out;
+}
+/* 모션 최소화: 가로 움직임 없이 옅은 페이드만. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes tab-fade {
+    from { opacity: 0.6; }
+    to { opacity: 1; }
+  }
+  .split-scroll[data-tab-dir="next"],
+  .split-scroll[data-tab-dir="prev"] {
+    animation: tab-fade 90ms ease-out;
+  }
+}
+
+/* ---- split tree ------------------------------------------------------ */
+
+.split-root,
+.split {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A split node is always a flex child of .split-root or .pane-slot; without
+   grow it stays at its content width instead of filling the whole area. */
+.split {
+  flex: 1 1 auto;
+}
+
+.split-row {
+  flex-direction: row;
+}
+
+/* 컴포넌트는 axis 값 그대로 split-column/divider-column을 쓴다 */
+.split-column {
+  flex-direction: column;
+}
+
+/* pane 최소 크기 유지 — 창이 더 작으면 바깥 .split-scroll이 스크롤된다. */
+.pane-slot {
+  display: flex;
+  min-width: 240px;
+  min-height: 144px;
+}
+
+/* 경계선은 pane 카드 사이의 얇은 여백이다. 6px을 --border로 꽉 칠하면
+   pane 자신의 1px border까지 겹쳐 8px짜리 굵은 띠로 보였다. 평소에는
+   색을 칠하지 않고 hover/focus에서만 강조한다. */
+.divider {
+  flex: 0 0 4px;
+  background: transparent;
+  position: relative;
+  z-index: 2;
+}
+
+/* 보이는 두께는 4px 그대로 두고 잡을 수 있는 영역만 양쪽으로 3px씩
+   넓힌다(얇은 경계선도 집기 쉽게 — 실제 hit 영역 10px). */
+.divider::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.divider:hover {
+  background: var(--accent-strong);
+}
+
+.divider:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-strong);
+}
+
+.divider-row {
+  cursor: col-resize;
+  width: 4px;
+}
+
+.divider-row::before {
+  left: -3px;
+  right: -3px;
+}
+
+.divider-column {
+  cursor: row-resize;
+  height: 4px;
+}
+
+.divider-column::before {
+  top: -3px;
+  bottom: -3px;
+}
+
+/* ---- terminal pane ---------------------------------------------------- */
+
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 240px;
+  min-height: 144px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.terminal-pane.focused {
+  border-color: #636773;
+}
+
+/* .focused보다 뒤에 온다: 둘 다 걸린 pane에서는 동기 입력 쪽을 보여 준다. */
+.terminal-pane.broadcasting {
+  border-color: var(--warn);
+}
+
+/* 파일을 끌어다 놓는 동안의 대상 pane(dropPaste.ts). 초점·동기 입력보다 뒤에
+   온다 — 지금 일어나는 일이 가장 급한 소식이다. */
+.terminal-pane.drop-target {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex: 0 0 24px;
+  min-height: 24px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-cwd {
+  color: var(--fg-muted);
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.pane-git-branch {
+  max-width: 160px;
+  flex: 0 1 auto;
+  overflow: hidden;
+  padding: 0 4px;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  line-height: 18px;
+  text-overflow: ellipsis;
+}
+
+.pane-state {
+  color: var(--fg-muted);
+}
+
+.pane-state.state-live {
+  color: var(--ok);
+}
+
+.pane-state.state-failed,
+.pane-state.state-exited {
+  color: var(--danger);
+}
+
+.pane-flow {
+  color: var(--warn);
+}
+
+/* 입력이 닿지 않는 이유(좀비 pane 진단): 가드 일시정지는 재개 버튼을 품고,
+   입력 막힘은 경고색 한 토막. 헤더 줄 높이를 흔들지 않게 버튼도 납작하게. */
+.pane-guard,
+.pane-input-stalled {
+  flex: 0 0 auto;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.pane-guard-resume {
+  margin-left: 6px;
+  padding: 0 6px;
+  font: inherit;
+  line-height: 1.4;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* 압력 완화(08 §2): 양보 중은 낮춘 우선순위를 뜻하는 차분한 호박색,
+   보호 표시는 알림이 아니라 상태라 회색 한 토막이다. 크기·굵기는 헤더의
+   다른 상태 문구와 같게 두어 줄 높이를 흔들지 않는다. */
+.pane-relief {
+  flex: 0 0 auto;
+  color: #c9a227;
+  white-space: nowrap;
+}
+
+.pane-protected {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* 롤링 저널이 지운 앞부분 안내(02-runner §5): 조용한 회색 한 토막. */
+.pane-replay-trimmed {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* 마지막 출력 경과(에이전트 pane): 평소엔 조용히, 오래 조용하면 눈에 띄게 —
+   5분부터 stale(경고색), 30분부터 stale-old(한 단계 더 강조). */
+.pane-last-output {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pane-last-output.stale {
+  color: var(--warn);
+}
+
+.pane-last-output.stale-old {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* 초마다 갱신되는 숫자: 고정폭 숫자와 최소 폭으로 글자 수가 바뀌어도(0.9 ↔ 12.3)
+   왼쪽 요소들이 밀리지 않는다 — 헤더가 초마다 떨리던 원인. */
+.pane-usage {
+  flex: 0 0 auto;
+  min-width: 21ch;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+
+.pane-close {
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  color: inherit;
+}
+
+/* pane 메뉴(⋯): 닫기 버튼과 같은 크기로 그 앞에 선다. 항상 보인다 —
+   숨겨 두면 창을 옮기는 길이 있는 줄 모른다. 평소에는 흐리게, 그 창을
+   만지고 있을 때(헤더 hover·초점·보고 있는 창) 또렷하게. */
+.pane-menu {
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  color: inherit;
+  line-height: 1;
+  opacity: 0.45;
+}
+
+.pane-header:hover .pane-menu,
+.pane-header:focus-within .pane-menu,
+.terminal-pane.focused .pane-menu {
+  opacity: 0.8;
+}
+
+.pane-menu:hover,
+.pane-menu:focus-visible {
+  opacity: 1;
+}
+
+/* 상단 바 "배치 편집": 동기 입력 토글과 같은 줄의 일반 버튼(켜짐 상태 없음). */
+.layout-editor-button {
+  white-space: nowrap;
+}
+
+.pane-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.terminal-view {
+  position: absolute;
+  inset: 0;
+  padding: 2px 4px;
+}
+
+.xterm-host,
+.terminal-view .xterm {
+  height: 100%;
+}
+
+/* The grid fits whole rows; the viewport also covers the remaining pixels.
+   xterm's default black would otherwise leave a strip below the last row. */
+.terminal-view .xterm-viewport {
+  background-color: var(--bg-panel);
+}
+
+.pane-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(20, 21, 25, 0.72);
+  z-index: 3;
+}
+
+.pane-overlay-error {
+  background: rgba(46, 22, 24, 0.85);
+}
+
+/* 재생 중에는 이전 화면을 비추고 반투명 배지만 얹는다 — 화면을 통째로 숨기면
+   멈춘 듯 보이고, 다시 나타날 때 깜빡인다. */
+.pane-overlay-replay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 8px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.pane-overlay-replay > * {
+  pointer-events: auto;
+}
+
+/* 재생 상태 배지: 터미널을 가리지 않는 반투명 알약 한 토막(tmux attach처럼
+   살아 있는 화면 위에 상태만 알린다). */
+.pane-replay-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(20, 21, 25, 0.72);
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+/* Finished output remains selectable and scrollable above a compact status bar. */
+.pane-body[data-phase="exited"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-body[data-phase="exited"] .terminal-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pane-overlay-exited {
+  position: relative;
+  inset: auto;
+  flex: 0 0 auto;
+  padding: 8px;
+  gap: 4px;
+  max-height: 40%;
+  overflow: auto;
+}
+
+.pane-overlay-exited p { margin: 0; }
+
+.overlay-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- resource strip --------------------------------------------------- */
+
+.resource-strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  flex: 0 0 28px;
+}
+
+.strip-subscriptions {
+  flex: 0 0 auto;
+  /* space-between에서 가운데 떠 있던 사용량 묶음을 오른쪽(관리 버튼 옆)으로 민다. */
+  margin-left: auto;
+}
+
+.strip-subscription-button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+/* 공급자별 게이지: 라벨 · 막대 · 퍼센트. 퍼센트는 오른쪽 정렬 고정폭 칸이라
+   "5%"와 "100%"에서 막대 위치가 흔들리지 않는다. */
+.strip-quota {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* 폭은 flex-basis가 아니라 width로 준다 — WebKit(Tauri macOS)은 flex
+   컨테이너의 내용 폭을 잴 때 flex-basis를 무시해 빈 막대를 0px로 계산하고,
+   그만큼 퍼센트가 다음 공급자 라벨 위로 밀려 겹쳤다. */
+.strip-quota-bar {
+  flex: none;
+  width: 44px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.strip-quota-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.strip-quota-value {
+  min-width: 4ch;
+  text-align: right;
+}
+
+.strip-quota-low .strip-quota-fill {
+  background: var(--danger);
+}
+
+.strip-quota-low .strip-quota-value {
+  color: var(--danger);
+}
+
+.subscription-popover {
+  position: absolute;
+  right: 10px;
+  bottom: 32px;
+  z-index: 20;
+  width: min(380px, calc(100vw - 20px));
+  max-height: min(520px, calc(100vh - 64px));
+  overflow: auto;
+  padding: 12px;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 13px;
+}
+
+.subscription-popover > header,
+.subscription-provider-title,
+.subscription-window > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subscription-popover > header {
+  margin-bottom: 8px;
+}
+
+.subscription-provider {
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.subscription-provider p {
+  margin: 6px 0 0;
+}
+
+.subscription-provider small,
+.subscription-provider-title span,
+.subscription-window small {
+  color: var(--fg-muted);
+}
+
+.subscription-window {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.subscription-window progress {
+  width: 100%;
+  height: 7px;
+  accent-color: #5d9cec;
+}
+
+.strip-metrics {
+  display: flex;
+  gap: 14px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+  font: inherit;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.strip-segment {
+  white-space: nowrap;
+}
+
+.strip-label {
+  color: var(--fg-muted);
+}
+
+.strip-segment-high {
+  color: #e5a0a5;
+}
+
+.strip-segment-high .strip-label {
+  color: inherit;
+}
+
+.strip-managed {
+  flex: 0 0 auto;
+  font: inherit;
+  padding: 2px 8px;
+}
+
+/* 가드 일시정지 개수(08 §5) — 상태가 아니라 개입이 필요한 신호라 경고색.
+   대기 사유(strip-wait-reason)와 같은 자리에 이어 붙는다. */
+.strip-suspended {
+  color: var(--warn);
+}
+
+/* ---- drawers ----------------------------------------------------------- */
+
+.graph-drawer {
+  flex: 0 0 auto;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  padding: 6px 10px;
+}
+
+.graph-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.graph-cell {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: var(--bg);
+}
+
+.graph-cell figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.graph-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sparkline {
+  width: 100%;
+  height: 28px;
+  color: var(--accent);
+}
+
+.sparkline-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border);
+}
+
+.queue-drawer {
+  flex: 0 0 320px;
+  max-width: 40vw;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  padding: 8px 10px;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* 자동 양보 토글(08 §2): 목록 위 한 줄. 지원하지 않는 플랫폼의 사유는
+   아래에 muted 한 줄로 붙는다. */
+.relief-policy {
+  margin-bottom: 8px;
+}
+
+/* 관리 작업 목록 머리: 제목과 "모두 연결"을 한 줄에 둔다. */
+.workload-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.workload-list-head h3 {
+  margin: 0;
+}
+
+.relief-policy label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-list ol,
+.workload-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.queue-entry,
+.workload-row {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: var(--bg);
+}
+
+.queue-entry-head,
+.workload-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.queue-title,
+.workload-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.queue-wait {
+  margin: 4px 0;
+  color: var(--warn);
+}
+
+.workload-meta,
+.workload-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.badge {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.workload-notice {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.notice-warn {
+  color: var(--warn);
+}
+
+.workload-actions,
+.queue-entry-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* ---- modals & toast ----------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 20;
+}
+
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 380px;
+  max-width: 640px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.palette-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.palette-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.palette-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.palette-list button:hover {
+  background: var(--bg-elevated);
+}
+
+/* 키보드 선택 표시 — 마우스 hover와 같은 자리에, 테두리 하나만 더 얹는다
+   (팔레트·대상 탭 목록이 같은 규칙을 쓴다). */
+.palette-list .palette-selected {
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ---- 대상 탭 고르기(MoveTargetDialog, 04-ui §2-5) --------------------- */
+
+.move-target-dialog,
+.regroup-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.move-target-dialog h2,
+.regroup-dialog h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.move-target-dialog p,
+.regroup-dialog p {
+  margin: 0;
+}
+
+/* 초점은 목록(role=listbox)이 갖고, 어디를 고르고 있는지는 선택 행이
+   보여 준다 — 목록 전체를 두르는 테두리는 그 표시와 겹쳐 시끄럽다. */
+.move-target-list {
+  margin: 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.move-target-list:focus-visible {
+  outline: none;
+}
+
+.move-target-list button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.move-target-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.move-target-count {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* 왜 못 고르는지는 행 안에서 오른쪽 끝에 작게 — 목록을 떠나지 않고 읽힌다. */
+.move-target-reason {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.move-target-row.disabled button,
+.move-target-row.disabled button:hover {
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* ---- 프로젝트별 다시 묶기 미리보기(RegroupDialog, 04-ui §2-5) --------- */
+
+.regroup-summary {
+  color: var(--fg-muted);
+}
+
+.regroup-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.regroup-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.regroup-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.regroup-group-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 새 탭(accent)·배치만 정리(warn)만 눈에 띈다 — 완전히 그대로인 탭은 확인할 것이 없다. */
+.regroup-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.regroup-badge.new {
+  color: var(--accent);
+}
+
+.regroup-badge.kept {
+  color: var(--fg-muted);
+}
+
+/* 배치만 다시 짜는 탭(id·이름은 그대로) — accent(새 탭)·fg-muted(그대로)와 구별. */
+.regroup-badge.relayout {
+  color: var(--warn);
+}
+
+.regroup-panes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.regroup-pane {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-form,
+.paste-preview,
+.notice-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.managed-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.managed-form input,
+.managed-form select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.paste-preview pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 6px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 8px 12px;
+  z-index: 30;
+  max-width: 380px;
+  cursor: pointer;
+}
+
+.empty-project {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--fg-muted);
+}
+
+.empty-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ---- mission 탭(O15 최소 placeholder — MissionPage는 O16) ----------- */
+
+.mission-tab-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--fg-muted);
+  padding: 24px;
+  text-align: center;
+}
+
+/* mission 탭 배지: 실행 N · 결정 N — 항상 보이는 정체성 정보(05 §1) */
+.tab-badge-mission {
+  border-color: #4f7ad0;
+  color: #8fb4f0;
+}
+
+/* ---- shell profile picker (04-ui §1 셸 프로필) ------------------------ */
+
+.shell-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 상단 언어 토글 — 지구본 아이콘(예전 KO/EN 텍스트). 규격은 .icon-button이 정한다. */
+
+.shell-picker-toggle {
+  margin-left: 2px;
+  padding: 4px 8px;
+}
+
+.shell-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 260px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 6px;
+}
+
+.shell-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shell-picker-start {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  text-align: left;
+  min-width: 0;
+}
+
+.shell-picker-start:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.shell-picker-label {
+  font-size: 13px;
+}
+
+.shell-picker-detail {
+  font-size: 11px;
+  color: var(--fg-muted, #9aa0aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.shell-picker-default {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--accent);
+  padding: 2px 6px;
+}
+
+.shell-picker-setdefault {
+  flex: 0 0 auto;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  padding: 2px 6px;
+}
+
+.shell-picker-setdefault:hover {
+  border-color: var(--accent);
+}
+
+.shell-picker-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--fg-muted, #9aa0aa);
+}
+
+.shell-picker-note {
+  margin: 6px 4px 2px;
+  font-size: 11px;
+  color: var(--fg-muted, #9aa0aa);
+}
+
+/* 시작 터미널 선택 대화상자(첫 실행/기본 미지정) */
+.shell-select {
+  min-width: 320px;
+}
+
+.shell-select h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.shell-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.shell-select-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shell-select-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent);
+}
+
+.shell-select-label {
+  font-size: 13px;
+}
+
+.shell-select-detail {
+  font-size: 11px;
+  color: var(--fg-muted, #9aa0aa);
+}
+
+.shell-select-empty {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--fg-muted, #9aa0aa);
+}
+
+.shell-select-save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--fg-muted, #9aa0aa);
+  cursor: pointer;
+}
+.close-panes-dialog .overlay-actions {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 일괄 재개 확인의 대상 목록 — 길어지면 대화상자 안에서만 스크롤한다. */
+.resume-agents-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.resume-agents-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* App quit confirmation */
+.modal-backdrop.quit-backdrop {
+  align-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 48%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.modal.quit-modal {
+  width: 460px;
+  min-width: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 32%), 0 2px 8px rgb(0 0 0 / 12%);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+}
+.quit-dialog { padding: 28px; }
+.quit-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+.quit-icon { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-raised); color: var(--fg); }
+.quit-icon svg { width: 25px; height: 25px; }
+.quit-count { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-muted); font-size: 12px; }
+.quit-count > span { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.quit-dialog h2 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -0.6px; line-height: 1.35; }
+.quit-description { margin: 10px 0 22px; color: var(--fg-muted); font-size: 13px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; }
+.quit-choices { display: grid; gap: 10px; }
+.quit-choice { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 16px; border-radius: 10px; background: var(--bg-raised); text-align: left; transition: background 120ms, border-color 120ms; }
+.quit-choice-copy { display: grid; gap: 6px; }
+.quit-choice-copy strong { font-size: 14px; font-weight: 600; line-height: 1.4; }
+.quit-choice-copy > span { color: var(--fg-muted); font-size: 12px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+.quit-choice-arrow { flex-shrink: 0; font-size: 20px; color: var(--fg-muted); }
+.quit-choice:not(:disabled):hover { background: var(--bg-elevated); border-color: var(--accent); }
+.quit-choice-danger { background: color-mix(in srgb, var(--danger) 5%, var(--bg-panel)); border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); }
+.quit-choice-danger strong, .quit-choice-danger .quit-choice-arrow { color: var(--danger); }
+.quit-choice-danger:not(:disabled):hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--bg-panel)); }
+.quit-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.quit-remember { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: 12px; line-height: 1.5; cursor: pointer; }
+.quit-remember input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); flex-shrink: 0; }
+.quit-cancel { flex-shrink: 0; min-height: 34px; padding: 6px 16px; border-radius: 8px; background: var(--bg-raised); }
+.quit-dialog :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.quit-dialog button:disabled { opacity: 0.5; cursor: wait; }
+@media (max-width: 420px) {
+  .modal-backdrop.quit-backdrop { padding: 16px; }
+  .quit-dialog { padding: 22px; }
+  .quit-dialog h2 { font-size: 20px; }
+  .quit-choice { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quit-choice { transition: none; }
+}
+
+/* ---- 탭 배지(W1-3): 조용한 신호 — 비활성 탭의 미확인 상태만 알린다 ---- */
+
+.tab-badge {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 14px;
+  border: 1px solid var(--border, #3a3d45);
+  color: var(--fg-muted, #9aa0aa);
+  background: transparent;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-badge-finished {
+  border-color: #4f7ad0;
+  color: #8fb4f0;
+}
+
+.tab-badge-queued {
+  border-color: #9a8440;
+  color: #d9c37a;
+}
+
+/* ---- 종료 사유 한 줄(W1-1): exited 오버레이의 근거 표시 ---- */
+
+.pane-exit-reason {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted, #9aa0aa);
+  max-width: 480px;
+  word-break: break-word;
+}
+
+/* ---- 빈 프로젝트 퀵스타트(W1-10): 감지된 CLI 1-클릭 관리 실행 ---- */
+
+.empty-quickstart {
+  margin-top: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 560px;
+}
+
+.empty-quickstart h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.empty-quickstart .muted {
+  font-size: 12px;
+  margin: 0;
+}
+
+.empty-cli-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.empty-cli-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #3a3d45);
+  border-radius: 6px;
+  background: var(--bg-raised, #23252b);
+  cursor: pointer;
+  min-width: 180px;
+  text-align: left;
+}
+
+.empty-cli-card:hover {
+  border-color: var(--accent);
+}
+
+.empty-cli-name {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.empty-cli-path {
+  font-size: 11px;
+  color: var(--fg-muted, #9aa0aa);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 알림센터(W1-5 최소) ------------------------------------------------ */
+
+.notif {
+  position: relative;
+}
+
+.notif-bell {
+  position: relative;
+}
+
+.notif-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #b3424a;
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.notif-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 340px;
+  max-height: 380px;
+  overflow-y: auto;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border, #3a3d45);
+  border-radius: 6px;
+  background: var(--bg-raised, #23252b);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.notif-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notif-item button {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.notif-item.unread button {
+  border-color: #4f7ad0;
+}
+
+.notif-item button:hover {
+  background: rgba(97, 175, 239, 0.12);
+}
+
+.notif-kind {
+  color: #8fb4f0;
+  white-space: nowrap;
+}
+
+.notif-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-at {
+  color: var(--fg-muted, #9aa0aa);
+  font-size: 11px;
+}
+
+.notif-hint {
+  margin: 0;
+  font-size: 11px;
+}
+
+.tab-badge-intervention {
+  border-color: #b3424a;
+  color: #e08a90;
+}
+
+
+/* 탭 자원 배지(W2): 살아 있는 에이전트의 CPU·RAM 요약 */
+.tab-usage {
+  flex: 0 0 auto;
+  min-width: 14ch;
+  text-align: right;
+  font-size: 10px;
+  color: var(--fg-muted, #9aa0aa);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 패턴 감지 배지(W3-5, opt-in) — 저신뢰 추정임을 색으로 구분 */
+.pane-intervention-badge {
+  color: #d9c37a;
+  font-size: 11px;
+  border: 1px solid #9a8440;
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+/* 최근 종료 세션 요약(W4-3 최소본) */
+.finished-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--border, #3a3d45);
+  padding-top: 8px;
+}
+
+.finished-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.finished-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.finished-reason {
+  color: var(--fg-muted, #9aa0aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+/* ---- 라이트 재조정 ------------------------------------------------------
+   위 규칙들 상당수는 dark 배경 위에 옅은 파스텔 글자를 올리도록 만들어졌다.
+   라이트에서는 그 색이 거의 흰색 배경 위에 얹혀 안 읽히거나(배지·running
+   탭 글자), 반대로 어두운 스크림에 어두운 글자가 빠진다(pane 오버레이).
+   색 토큰으로 해결되지 않는 것만 여기서 덮어쓴다. */
+
+:root[data-theme="light"] .tab.running:not(.active) {
+  background: rgba(76, 190, 111, 0.14);
+  border-color: rgba(60, 160, 95, 0.45);
+  color: #1d7a3a;
+}
+
+:root[data-theme="light"] .tab.running:not(.active):hover {
+  background: rgba(76, 190, 111, 0.22);
+}
+
+:root[data-theme="light"] .tab-running-dot {
+  background: #2e9e57;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .tab-agent-marker.working,
+:root[data-theme="light"] .pane-agent-marker.working {
+  background: #1db954;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .tab-agent-marker.waiting,
+:root[data-theme="light"] .pane-agent-marker.waiting {
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .terminal-pane.focused {
+  border-color: #848b97;
+}
+
+/* 다크 스크림 위 가는 밝은 글자 → 밝은 서리 유리 위 어두운 글자로 뒤집는다. */
+:root[data-theme="light"] .pane-overlay {
+  background: rgba(247, 245, 241, 0.88);
+}
+
+:root[data-theme="light"] .pane-overlay-error {
+  background: rgba(249, 233, 233, 0.94);
+}
+
+:root[data-theme="light"] .strip-segment-high {
+  color: #c4291f;
+}
+
+/* 상태 바 라벨(CPU/RAM/Disk/NET 등)은 12px 고정폭 글꼴이라 가늘어
+   보인다 — --fg-muted(#5b5d66)보다 한 단계 짙게 칠해 값을 돋보이게 한다. */
+:root[data-theme="light"] .strip-label {
+  color: #3f4149;
+}
+
+:root[data-theme="light"] .tab-badge-finished {
+  border-color: #9cb8e4;
+  color: #1f5cb0;
+}
+
+:root[data-theme="light"] .tab-badge-queued {
+  border-color: #cdbb85;
+  color: #7a5f10;
+}
+
+:root[data-theme="light"] .tab-badge-intervention {
+  border-color: #dd9ba0;
+  color: #b3232c;
+}
+
+:root[data-theme="light"] .pane-intervention-badge {
+  border-color: #b39a55;
+  color: #7a5f10;
+}
+
+:root[data-theme="light"] .notif-kind {
+  color: #1f5cb0;
+}
+
+/* 흰색 6% 덧칠은 라이트 배경에서 보이지 않는다 → 검정 5%로. */
+:root[data-theme="light"] .shell-picker-start:hover,
+:root[data-theme="light"] .shell-select-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+:root[data-theme="light"] .modal-backdrop {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme="light"] .shell-picker-menu,
+:root[data-theme="light"] .notif-panel {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+/* 라이트에서는 경계선만으로 카드가 떠 보이지 않는다 — 얕은 그림자로
+   프레임(--bg) 위에 pane을 올린다. */
+:root[data-theme="light"] .terminal-pane {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* WebKit/xterm의 조합 표시(preedit) — 불투명 배경(패널색)으로 확정 전 조합을
+ * 덮는다. TUI(Codex 등)의 placeholder 고스트 텍스트가 조합 글자 뒤로 비쳐
+ * 보이지 않게 하려면 투명이 아니라 불투명이어야 한다. 폭은 한글 2셀 격자에
+ * 맞춰지므로(xtermSetup hangulLetterSpacing) 조합 글자를 정확히 덮는다. */
+.xterm .composition-view {
+  background: var(--bg-panel);
+  color: var(--fg);
+  border-radius: 0;
+}
+
+/* 조합 중에는 블록 캐럿을 감춰 투명 preedit 뒤로 커서가 비치지 않게 한다.
+ * (.ime-composing은 브리지가 조합 중에만 .xterm 루트에 부여한다.) xterm은
+ * 커서에 visibility를 지정하지 않으므로 !important 없이도(있어도) 충돌 없다. */
+.xterm.ime-composing .xterm-cursor {
+  visibility: hidden !important;
+}
+
+/* 한/영 전환 풍선 — CapsLock 토글 시 터미널 캐럿 위치에 잠깐 떴다 사라진다
+ * (macOS 시스템 HUD가 WKWebView에는 오지 않아 앱이 직접 그린다). */
+.ime-mode-balloon,
+.ime-mode-balloon.ime-mode-ko,
+.ime-mode-balloon.ime-mode-en {
+  position: absolute;
+  z-index: 10;
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: #2f6ede;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 1px;
+  border: 1px solid #1e4fa8;
+  box-shadow: 0 4px 14px rgba(30, 79, 168, 0.45);
+  pointer-events: none;
+  animation: ime-mode-balloon 1s ease forwards;
+}
+@keyframes ime-mode-balloon {
+  0% { opacity: 0; transform: translateY(-100%) scale(0.85); }
+  18% { opacity: 1; transform: translateY(-118%) scale(1); }
+  70% { opacity: 1; transform: translateY(-118%) scale(1); }
+  100% { opacity: 0; transform: translateY(-135%) scale(0.95); }
+}
+
+/* Service colors, with readable light-theme variants for small title text. */
+:root { --agent-claude: #d97757; --agent-codex: #ffffff; --agent-opencode: #f1ecec; --agent-zai: #60a5fa; }
+:root[data-theme="light"] { --agent-claude: #a84427; --agent-codex: #000000; --agent-opencode: #211e1e; --agent-zai: #1d4ed8; }
+.agent-claude { --agent-color: var(--agent-claude); }
+.agent-codex { --agent-color: var(--agent-codex); }
+.agent-opencode { --agent-color: var(--agent-opencode); }
+.agent-zai { --agent-color: var(--agent-zai); }
+.tab-title { color: var(--agent-color, inherit); }
+.agent-icon { display: inline-block; width: 12px; height: 12px; margin-right: 5px; margin-top: 1px; position: relative; top: 1px; vertical-align: -1px; flex-shrink: 0; }
+.agent-icon svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.agent-icon img { width: 100%; height: 100%; object-fit: contain; }
+.agent-icon .agent-icon-light { display: none; }
+:root[data-theme="light"] .agent-icon .agent-icon-dark { display: none; }
+:root[data-theme="light"] .agent-icon .agent-icon-light { display: block; }
+
+/* Detected service badge in the terminal header. */
+.pane-agent-badge {
+  flex: 0 0 auto;
+  /* 이름 + 세션 표시(04-ui §5) + 현재 모델·effort가 함께 들어간다 — 넘치면 말줄임. */
+  max-width: 340px;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 20%, transparent);
+  border-radius: 999px;
+  color: var(--agent-color, var(--accent));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* ---- 에이전트 세션 배지·재개(04-ui §5) ------------------------------- */
+
+/* 세션 표시(이름 또는 짧은 id)가 붙으면 이름보다 한 단계 옅게 둔다. */
+.pane-agent-session {
+  opacity: 0.75;
+  font-weight: 500;
+}
+
+/* 현재 모델·effort(에이전트 기록 원문 — /model·/effort 즉시 반영). 잠정값
+ * (세션 기록 전 실행 인수·설정 기본값)은 흐리게 기울여 확정값과 구분한다. */
+.pane-agent-model {
+  opacity: 0.85;
+  font-weight: 500;
+}
+.pane-agent-model.provisional {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* 이어서 열 수 있는 빈 pane: 어떤 세션을 어디서 여는지 먼저 읽히게 한다.
+   `.pane-overlay-exited`의 padding을 덮어쓰므로 위아래 여백을 여기서 다시 준다. */
+.pane-overlay-resume {
+  padding: 12px 16px 14px;
+  gap: 6px;
+  text-align: center;
+}
+
+.pane-overlay-resume .overlay-actions {
+  margin-top: 4px;
+}
+
+/* 사유 줄은 제목 바로 아래, 위치 줄과 같은 크기로 — 오버레이 gap이 간격을 맡는다. */
+.pane-overlay-resume .pane-exit-reason {
+  margin: 0;
+  max-width: 100%;
+}
+
+.pane-overlay-resume .pane-resume-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* 세션 이름 · 작업 경로를 한 줄로 — 경로만 줄임표로 잘린다. */
+.pane-overlay-resume .pane-resume-where {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* 세션 이름이 길어도 줄 절반 넘게 차지하지 않는다 — 나머지는 경로 몫이다. */
+.pane-overlay-resume .pane-resume-session {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--accent);
+}
+
+.pane-overlay-resume .pane-resume-sep {
+  flex: 0 0 auto;
+  white-space: pre;
+  color: var(--fg-muted);
+}
+
+.pane-overlay-resume .pane-resume-cwd {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 최근 에이전트 세션 대화상자 --------------------------------------- */
+
+.agent-sessions-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.agent-session-row.active {
+  border-color: var(--accent);
+}
+
+.agent-session-agent {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.agent-session-label {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-session-cwd {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-session-at {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.agent-session-live {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* 가드 일시정지(08 §5) — "실행 중" 칩과 같은 모양, 경고색. 이유는 tooltip. */
+.agent-session-suspended {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.agent-session-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* About: roomy content inside the workbench, independent of the OS panel size. */
+.modal.about-modal {
+  width: 620px;
+  min-width: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 32%);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+}
+.about-dialog { padding: 36px; line-height: 1.7; font-size: 14px; }
+.about-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.about-header h2 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: -0.8px; }
+.about-header p { margin: 10px 0 0; color: var(--fg-muted); }
+.about-version { flex-shrink: 0; padding: 3px 10px; border: 1px solid var(--border); border-radius: 20px; color: var(--fg-muted); font-size: 12px; }
+.about-introduction { margin: 26px 0 20px; word-break: keep-all; overflow-wrap: anywhere; }
+.about-features { margin: 0; padding: 18px 20px 18px 38px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-raised); }
+.about-features li { padding: 4px 0 4px 2px; word-break: keep-all; overflow-wrap: anywhere; }
+.about-features li::marker { color: var(--accent); }
+.about-details { display: grid; gap: 8px; margin: 24px 0; font-size: 13px; }
+.about-details > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 16px; }
+.about-details dt { color: var(--fg-muted); }
+.about-details dd { margin: 0; }
+.about-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 20px; }
+.about-footer button { min-width: 80px; }
+.about-footer button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 520px) {
+  .about-dialog { padding: 24px; }
+  .about-header { flex-wrap: wrap; gap: 12px; }
+  .about-header h2 { font-size: 26px; }
+  .about-details > div { grid-template-columns: 80px minmax(0, 1fr); gap: 10px; }
+}
+
+/* ---- 끌어 놓기 재배치(04-ui §2-5) --------------------------------------
+   손잡이는 탭과 pane 헤더다. 누른 채 5px 넘게 움직이면 끌기가 시작되고,
+   미리보기는 LayoutDragLayer가 pointer-events 없는 고정 조각으로 그린다. */
+
+.tab,
+.pane-header {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pane-header {
+  cursor: grab;
+}
+
+/* 이름 편집 칸은 글자를 골라 덮어써야 한다 — WebKit은 조상의 user-select: none을 입력 칸에도 물린다. */
+.tab-title-input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 헤더 맨 앞의 잡기 표시(점 여섯 개): 평소에는 흐리게, 그 창을 만질 때 또렷하게. */
+.pane-grip {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 9px;
+  background-image: radial-gradient(circle, currentColor 0.8px, transparent 1.1px);
+  background-size: 3px 3px;
+  color: var(--fg-muted);
+  opacity: 0.5;
+}
+
+.pane-header:hover .pane-grip,
+.terminal-pane.focused .pane-grip {
+  opacity: 1;
+}
+
+/* 끄는 동안: 어디서나 잡은 손 모양, 글자 선택 없음. 놓을 수 없는 자리는 금지 표시. */
+body.layout-dragging,
+body.layout-dragging * {
+  cursor: grabbing !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+body.layout-dragging.layout-drop-blocked,
+body.layout-dragging.layout-drop-blocked * {
+  cursor: not-allowed !important;
+}
+
+.layout-drag-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.layout-drag-layer > * {
+  position: fixed;
+  pointer-events: none;
+}
+
+/* 끌고 있는 탭·pane은 제자리에서 흐려진다 — 어디서 떼어 왔는지 보인다. */
+.layout-drag-source {
+  border-radius: 4px;
+  background: var(--bg);
+  opacity: 0.5;
+}
+
+/* pane 위: 놓으면 옮긴 창이 차지할 자리(가장자리는 반쪽, 가운데는 전체 = 자리 바꾸기). */
+.layout-drop-zone {
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(97, 175, 239, 0.2);
+  transition: left 90ms ease-out, top 90ms ease-out, width 90ms ease-out, height 90ms ease-out;
+}
+
+.layout-drop-zone.zone-center {
+  border-style: dashed;
+}
+
+/* 탭 사이: 끼워 넣을 자리의 세로 막대. */
+.layout-drop-insert {
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(97, 175, 239, 0.6);
+  transition: left 80ms ease-out;
+}
+
+/* 탭 위: 그 탭 안으로(pane 옮기기·탭 합치기). */
+.layout-drop-tab {
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 5px;
+  background: rgba(97, 175, 239, 0.18);
+}
+
+:root[data-theme="light"] .layout-drop-zone,
+:root[data-theme="light"] .layout-drop-tab {
+  background: rgba(25, 102, 179, 0.14);
+}
+
+/* 막힌 자리(탭당 창 상한): 같은 모양을 빨간 테두리로 — 이유는 말풍선이 적는다. */
+.layout-drop-zone.blocked,
+.layout-drop-tab.blocked {
+  border-color: var(--danger);
+  background: rgba(224, 108, 117, 0.14);
+}
+
+.layout-drop-insert.blocked {
+  background: var(--danger);
+  box-shadow: none;
+}
+
+/* 탭 위에서 머무르는 동안: 아래 막대가 다 차면 합치기가 켜지거나 그 탭이 열린다. */
+.layout-drop-dwell {
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px dashed var(--accent);
+  border-radius: 5px;
+}
+
+.layout-drop-dwell-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: layout-dwell-fill linear forwards;
+}
+
+@keyframes layout-dwell-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* 커서 옆 말풍선: 무엇을 끌고 있는지, 놓으면 무슨 일이 일어나는지. */
+.layout-drag-ghost {
+  display: flex;
+  /* 화면 끝에서 왼쪽으로 뒤집혀도(translate -100%) 남은 폭에 눌리지 않게 내용 폭을 쓴다. */
+  width: max-content;
+  max-width: 300px;
+  word-break: keep-all;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.layout-drag-ghost-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-drag-ghost-action {
+  color: var(--fg-muted);
+}
+
+.layout-drag-ghost.ready {
+  border-color: var(--accent);
+}
+
+.layout-drag-ghost.ready .layout-drag-ghost-action {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.layout-drag-ghost.blocked {
+  border-color: var(--danger);
+}
+
+.layout-drag-ghost.blocked .layout-drag-ghost-action {
+  color: var(--danger);
+}
+
+.layout-drag-ghost-hint {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layout-drop-zone,
+  .layout-drop-insert {
+    transition: none;
+  }
+
+  .layout-drop-dwell-bar {
+    animation: none;
+    transform: scaleX(1);
+    opacity: 0.6;
+  }
+}
+
+/* 데몬 오래됨 배너(리뷰 Finding 1): .workbench 최상단의 얇은 비차단 띠.
+   모달이 아니라 사용자를 막지 않으며, 닫기(×)로 숨길 수 있다. */
+/* 스트립 안의 "데몬 업데이트 · 재시작" 토막 — 배너 대신 쓰는 기본 표시. */
+.strip-daemon {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--warn);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.strip-daemon:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.strip-daemon-failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+/* 탭 막대 아래 정보 띠(지금은 쓰지 않는 배너 — 계약 유지). */
+.daemon-outdated-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 12px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--warn);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.daemon-outdated-message {
+  flex: 1 1 auto;
+}
+
+.daemon-outdated-error {
+  color: var(--danger);
+}
+
+.daemon-outdated-restart {
+  padding: 3px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.daemon-outdated-restart:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.daemon-outdated-dismiss {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.strip-quota-unavailable {
+  color: var(--fg-muted);
+  font-size: 11px;
+}

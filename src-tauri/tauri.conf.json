@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "IYAGI",
+  "version": "0.1.0",
+  "identifier": "ai.iyagi.term",
+  "build": {
+    "beforeDevCommand": "npm run dev:stage-daemon && npm run dev:frontend",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:stage-daemon && npm run build:frontend",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "IYAGI Terminal",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 640,
+        "minHeight": 400,
+        "resizable": true,
+        "label": "main"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "resources": [],
+    "externalBin": [
+      "binaries/iyagi-termd"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libayatana-appindicator3-1 | libappindicator3-1"
+        ]
+      }
+    }
+  },
+  "plugins": {}
+}

@@ -1,0 +1,51 @@
+[package]
+name = "iyagi-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "iyagi — Tauri shell: window, IPC bridge to iyagi-termd"
+
+[lib]
+name = "iyagi_app_lib"
+# Desktop-only R1: the bin target links this rlib directly. cdylib/staticlib
+# are the mobile shape and trip GNU ld's export-ordinal limit on this host.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+term-contracts = { workspace = true }
+term-secrets = { workspace = true }
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+time = { version = "0.3.44", features = ["parsing"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+# 한/영 강제 전환(bridge/ime.rs): macOS는 Carbon TIS를 CoreFoundation 값으로
+# 다루고, Windows는 IMM32/키 합성을 쓴다(컴파일만 검증).
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tempfile = "3"

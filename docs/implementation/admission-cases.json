@@ -1,0 +1,44 @@
+{
+  "description": "Integer byte fixtures. running includes STARTING reservations. Expected checks are ordered as in 03-resources.md.",
+  "base": {
+    "total_bytes": 17179869184,
+    "available_bytes": 10737418240,
+    "logical_cpus": 8,
+    "sample_age_ms": 1000,
+    "reconciliation_required": false,
+    "pressure": "NORMAL",
+    "running": [],
+    "new": {"reservation_bytes": 2147483648, "cpu_slots": 1}
+  },
+  "cases": [
+    {"id": "empty-host", "set": {}, "expected": "ADMIT"},
+    {"id": "stale-host", "set": {"sample_age_ms": 3001}, "expected": "WAIT_TELEMETRY"},
+    {"id": "stale-boundary", "set": {"sample_age_ms": 3000}, "expected": "ADMIT"},
+    {"id": "unresolved-process", "set": {"reconciliation_required": true}, "expected": "WAIT_TELEMETRY"},
+    {"id": "oversized", "set": {"new": {"reservation_bytes": 8589934593, "cpu_slots": 1}}, "expected": "RESOURCE_UNSCHEDULABLE"},
+    {"id": "too-many-slots", "set": {"new": {"reservation_bytes": 2147483648, "cpu_slots": 5}}, "expected": "RESOURCE_UNSCHEDULABLE"},
+    {"id": "critical", "set": {"pressure": "CRITICAL"}, "expected": "WAIT_HOST_PRESSURE"},
+    {"id": "warning-enough-room", "set": {"pressure": "WARNING"}, "expected": "ADMIT"},
+    {"id": "concurrency", "set": {"running": [
+      {"reservation_bytes": 2147483648, "resident_bytes": 1073741824, "cpu_slots": 1},
+      {"reservation_bytes": 2147483648, "resident_bytes": 1073741824, "cpu_slots": 1}
+    ]}, "expected": "WAIT_CONCURRENCY"},
+    {"id": "slots-in-use", "set": {"running": [
+      {"reservation_bytes": 2147483648, "resident_bytes": 1073741824, "cpu_slots": 4}
+    ]}, "expected": "WAIT_CPU_SLOTS"},
+    {"id": "reservation-full", "set": {"running": [
+      {"reservation_bytes": 7516192768, "resident_bytes": 1073741824, "cpu_slots": 1}
+    ]}, "expected": "WAIT_RESERVATION_BUDGET"},
+    {"id": "headroom-short", "set": {"available_bytes": 4294967296}, "expected": "WAIT_MEMORY_HEADROOM"},
+    {"id": "exact-headroom", "set": {"available_bytes": 4724464026}, "expected": "ADMIT"},
+    {"id": "one-byte-short", "set": {"available_bytes": 4724464025}, "expected": "WAIT_MEMORY_HEADROOM"},
+    {"id": "unknown-resident-conservative", "set": {"available_bytes": 6442450944, "running": [
+      {"reservation_bytes": 2147483648, "resident_bytes": null, "cpu_slots": 1}
+    ]}, "expected": "WAIT_MEMORY_HEADROOM"},
+    {"id": "resident-over-reservation", "set": {"available_bytes": 4724464026, "running": [
+      {"reservation_bytes": 2147483648, "resident_bytes": 3221225472, "cpu_slots": 1}
+    ]}, "expected": "ADMIT"},
+    {"id": "single-core-host", "set": {"logical_cpus": 1}, "expected": "ADMIT"},
+    {"id": "small-host", "set": {"total_bytes": 4294967296, "available_bytes": 3221225472}, "expected": "WAIT_MEMORY_HEADROOM"}
+  ]
+}

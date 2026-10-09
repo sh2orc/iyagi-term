@@ -1,0 +1,33 @@
+{
+ "version": "opencode 1.18.30 linux live",
+ "model": "zai-coding-plan/glm-5.3",
+ "first": {
+  "label": "run-first",
+  "argv": [
+   "opencode",
+   "run",
+   "-m",
+   "zai-coding-plan/glm-5.3",
+   "--print-logs",
+   "--log-level",
+   "ERROR",
+   "Reply with exactly: ok"
+  ],
+  "exit_code": 0,
+  "stdout": "ok\n",
+  "stderr_tail": "\u001b[0m\n> build · glm-5.3\n\u001b[0m\n"
+ },
+ "resumed": {
+  "label": "run-continue-last",
+  "argv": [
+   "opencode",
+   "run",
+   "-m",
+   "zai-coding-plan/glm-5.3",
+   "-c",
+   "Reply with exactly: resumed"
+  ],
+  "exit_code": 0,
+  "stdout": "resumed"
+ }
+}

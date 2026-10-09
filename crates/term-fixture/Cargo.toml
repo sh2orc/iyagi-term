@@ -1,0 +1,33 @@
+[package]
+name = "term-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Deterministic test programs for PTY/flow/platform acceptance tests. Never shipped in the product bundle."
+
+[[bin]]
+name = "term-fixture"
+path = "src/main.rs"
+
+[[bin]]
+name = "mission-fixture-daemon"
+path = "src/mission_daemon.rs"
+
+[dependencies]
+base64 = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+iyagi-termd = { path = "../iyagi-termd" }
+term-contracts = { workspace = true }
+term-platform = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Unix-only libc: `escape` (setsid) and `tree` (SIGHUP immunity for the
+# descendants an early-exiting root leaves behind). Windows builds pull nothing.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }

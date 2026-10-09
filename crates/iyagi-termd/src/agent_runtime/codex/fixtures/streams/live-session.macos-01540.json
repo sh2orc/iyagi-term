@@ -1,0 +1,83 @@
+{
+  "arch": "aarch64",
+  "auth_route": "subscription",
+  "cases": [
+    {
+      "approvals": 0,
+      "approved_owned_file_changes": 0,
+      "case": "read_only_result",
+      "cleanup": true,
+      "events": 21,
+      "files_ok": true,
+      "interrupt_accepted": false,
+      "model_matches": true,
+      "passed": true,
+      "result_ok": true,
+      "started": true
+    },
+    {
+      "approvals": 1,
+      "approved_owned_file_changes": 1,
+      "case": "workspace_write_result",
+      "cleanup": true,
+      "events": 25,
+      "files_ok": true,
+      "interrupt_accepted": false,
+      "model_matches": true,
+      "passed": true,
+      "result_ok": true,
+      "started": true
+    },
+    {
+      "approvals": 0,
+      "approved_owned_file_changes": 0,
+      "case": "cancel",
+      "cleanup": true,
+      "events": 2,
+      "files_ok": true,
+      "interrupt_accepted": true,
+      "model_matches": true,
+      "passed": true,
+      "result_ok": true,
+      "started": true
+    }
+  ],
+  "diagnostics": [
+    {
+      "matches_start_reply": true,
+      "turn_started": true
+    },
+    {
+      "turn_completed": "completed"
+    },
+    {
+      "matches_start_reply": true,
+      "turn_started": true
+    },
+    {
+      "turn_completed": "completed"
+    },
+    {
+      "matches_start_reply": true,
+      "turn_started": true
+    },
+    {
+      "accepted": true,
+      "error_code": null,
+      "interrupt_reply": true
+    },
+    {
+      "turn_completed": "interrupted"
+    }
+  ],
+  "failure": null,
+  "format": 1,
+  "model": "gpt-5.6-luna",
+  "os": "macos",
+  "passed": true,
+  "provider": "openai",
+  "runtime": "codex",
+  "scope": "production adapter + native Exec; real managed subscription inference",
+  "tested_at": "2026-09-16T05:18:38.524Z",
+  "version": "0.154.0"
+}

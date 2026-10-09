@@ -1,0 +1,380 @@
+/* iyagi — 실행 중 작업 화면 보강(05-ui §1·§4·§5·§7·§8·§10).
+ * missions.css 뒤에 import한다: 연결 상태, 결정 배너 낭독 자리, 결과 전환 표시,
+ * 중간 폭 레이아웃, Lead 뷰포트, 실패 요약·결정 답변 카드, 좁은 팀 목록. */
+
+/* ---- 연결·동기화(§10) ------------------------------------------------------ */
+
+/* 끊김: 읽기는 되게 두고 흐리게만 한다. 알림 줄은 또렷하게 남긴다. */
+.mission-page.offline .mission-body,
+.mission-page.offline > .mission-decision-banner {
+  opacity: 0.6;
+  filter: grayscale(0.35);
+}
+
+.mission-connection-lost {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mission-sync-delayed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.mission-page-loading .mission-sync-error,
+.mission-page-loading .mission-sync-delayed,
+.mission-page-loading .mission-connection-lost {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-width: min(480px, 90%);
+}
+
+/* 변경 요청 보호 영역: fieldset이 레이아웃에 끼어들지 않게 한다. */
+.mission-action-guard {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-inline-size: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* ---- 기록 없음 ------------------------------------------------------------- */
+
+.mission-not-found {
+  text-align: center;
+  padding: 16px;
+}
+
+.mission-not-found h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.mission-not-found p {
+  margin: 0;
+  max-width: 440px;
+}
+
+/* ---- 결정 배너(§8) --------------------------------------------------------- */
+
+/* 결정이 없을 때도 낭독 자리를 지킨다(보이지 않게). */
+.mission-decision-live-idle,
+.mission-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mission-decision-banner.saved {
+  background: color-mix(in srgb, var(--ok) 12%, var(--bg-panel));
+}
+
+/* ---- 헤더 제어(§8) --------------------------------------------------------- */
+
+.mission-control-waiting {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.mission-control-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 42;
+  width: min(360px, 90vw);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.mission-limits-popover {
+  width: min(380px, 90vw);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* ---- 결과 확정 대기 표시(§9) ----------------------------------------------- */
+
+.mission-pending-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  vertical-align: middle;
+}
+
+/* ---- 중간 폭(§7): 상세는 side sheet — 오른쪽 아래를 빈 채로 두지 않는다 ---- */
+
+.mission-right-pane.detail-collapsed .mission-team {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+.mission-right-pane.detail-collapsed .mission-right-bottom {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/* side sheet는 .mission-body 안에서 열린다 — 헤더·배너 아래에서 시작한다. */
+.mission-body > .mission-side-sheet {
+  top: 0;
+}
+
+/* ---- Lead 대화(§4) --------------------------------------------------------- */
+
+/* 새 활동 버튼의 기준 영역. scroll 영역은 기준 요소 위치 계산을 위해 positioned. */
+.mission-lead-viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mission-lead-viewport > .mission-lead-scroll {
+  position: relative;
+}
+
+.mission-lead-viewport > .mission-new-activity {
+  bottom: 12px;
+}
+
+.mission-lead-planning {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
+}
+
+.mission-outcome-card {
+  padding: 8px 10px;
+  white-space: normal;
+}
+
+.mission-outcome-card[data-state="failed"] {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.mission-outcome-card .mission-card-title {
+  margin: 0;
+}
+
+.mission-outcome-message,
+.mission-outcome-code {
+  margin: 4px 0 0;
+}
+
+.mission-outcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mission-decision-answer {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg-panel);
+}
+
+.mission-decision-answer p {
+  margin: 0;
+}
+
+.mission-decision-answer-title {
+  font-weight: 600;
+}
+
+.mission-composer-done {
+  gap: 6px;
+}
+
+.mission-composer-done > p,
+.mission-follow-up-note {
+  margin: 0;
+  text-align: center;
+}
+
+.mission-follow-up-note {
+  font-size: 11px;
+}
+
+/* ---- 팀 목록(§5) ----------------------------------------------------------- */
+
+.mission-task-dependency {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mission-team {
+  container-type: inline-size;
+  container-name: mission-team;
+}
+
+/* 좁은 목록(≤320px): 제목 첫 줄, 모델·상태 둘째 줄. */
+@container mission-team (max-width: 320px) {
+  .mission-team-row {
+    flex-wrap: wrap;
+    row-gap: 1px;
+  }
+
+  .mission-team-row .mission-task-title {
+    flex: 1 1 calc(100% - 20px);
+  }
+
+  .mission-team-row .mission-task-meta {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-left: 20px;
+    overflow: hidden;
+  }
+
+  .mission-team-row .mission-task-model {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mission-team-row .mission-task-state-label {
+    margin-left: auto;
+  }
+}
+
+/* ---- 보관 되돌리기 토스트 -------------------------------------------------- */
+
+.mission-undo-toast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+
+.mission-undo-toast .mission-error-notice {
+  flex-basis: 100%;
+}
+
+.mission-undo-toast-close {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+}
+
+/* Team navigation stays compact; only the selected execution is mounted. */
+.mission-workspace-nav,
+.mission-workspace-toolbar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: 12px;
+}
+.mission-workspace-nav button[aria-pressed="true"] {
+  color: var(--fg);
+  box-shadow: inset 0 -2px var(--accent);
+}
+.mission-workspace-team {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 260px;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+.mission-workspace-team .mission-team {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.mission-workspace-team .mission-team-title-row {
+  align-items: flex-start;
+  flex-direction: column;
+}
+.mission-workspace-team .mission-team-filters { flex-wrap: wrap; }
+.mission-workspace-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.mission-workspace-toolbar > button:last-child { margin-left: auto; }
+.mission-workspace-content .mission-detail-header {
+  max-height: 40%;
+  min-height: 0;
+  flex-shrink: 1;
+  overflow-y: auto;
+}
+.mission-workspace-content .mission-detail-body:has(.mission-activity) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mission-workspace-content .mission-detail-body > [role="tabpanel"]:has(.mission-activity),
+.mission-workspace-content .mission-activity {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.mission-workspace-content .mission-activity .mission-activity-log {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  line-height: 1.6;
+  border: 0;
+  border-radius: 0;
+  padding: 12px;
+}
+.mission-workspace.mode-narrow .mission-workspace-team {
+  flex: 1 1 0;
+  border-right: 0;
+}
+.mission-workspace.mode-narrow .mission-workspace-content { width: 100%; }

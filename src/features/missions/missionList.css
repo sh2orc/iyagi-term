@@ -1,0 +1,195 @@
+/* AI 작업 목록(modal kind "mission-list") */
+
+.mission-list-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(600px, 86vw);
+}
+
+.mission-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mission-list-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.mission-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mission-list-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.mission-list-filter.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mission-list-filter.attention:not(.selected) {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.mission-list-count {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-list-limit {
+  padding: 6px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.mission-list-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.mission-list-section h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.mission-list-section.group-decision h3 {
+  color: var(--warn);
+}
+
+.mission-list-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mission-list-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.mission-list-row.group-decision {
+  border-color: var(--warn);
+}
+
+.mission-list-row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 6px;
+}
+
+.mission-list-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mission-list-open:hover,
+.mission-list-open:focus-visible {
+  background: var(--bg-elevated);
+}
+
+.mission-list-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.mission-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.mission-list-repo {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-list-decisions {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.mission-list-tab-open {
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.mission-list-updated {
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-list-unarchive {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.mission-list-row .mission-error-notice {
+  margin: 0 8px 8px;
+}
+
+.mission-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 4px;
+}
+
+.mission-list-empty p {
+  margin: 0;
+}
+
+.mission-list-empty-title {
+  font-weight: 600;
+}
+
+.mission-list-none {
+  margin: 8px 0;
+}

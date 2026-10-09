@@ -1,0 +1,1397 @@
+/* iyagi — mission 화면(O16, 05-ui §1·§7). workbench.css 디자인 언어를
+ * 따른다: CSS custom properties, dark/light 토큰, 13px 기준. 모션은
+ * prefers-reduced-motion에서 끈다(아래 파일 끝). */
+
+/* ---- 페이지 뼈대(§1): header/banner 고정, pane별 독립 scroll ------------- */
+
+.mission-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  font-size: 13px;
+}
+
+.mission-page-loading {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.mission-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  min-height: 34px;
+}
+
+.mission-header-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mission-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-cost-policy { margin-top: 10px; }
+.mission-quota-notice { padding: 8px; border: 1px solid var(--border); border-radius: 4px; overflow-wrap: anywhere; }
+.mission-decision.cost { max-height: 45%; overflow-y: auto; flex-shrink: 0; }
+.mission-cost-policy label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.mission-cost-policy input, .mission-cost-policy select { max-width: 100%; min-width: 0; }
+
+.mission-header-title h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40vw;
+}
+
+.mission-state {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.mission-header-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.mission-control-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.mission-control-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+}
+
+.mission-control-menu button:hover:not(:disabled) {
+  background: var(--bg-raised);
+}
+
+.mission-inline-confirm {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 41;
+  max-width: 340px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mission-inline-confirm h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mission-inline-confirm p {
+  margin: 0;
+}
+
+.mission-area-error {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.mission-sync-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+}
+
+/* 결정 배너(§1·§8) */
+.mission-decision-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.mission-decision-banner > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 본문 분할(§1·§7) ------------------------------------------------------ */
+
+.mission-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.mission-lead-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ≥1100px: Lead 최소 420px(§7). flex-basis는 인라인으로 ratio가 들어온다. */
+.mission-page.mode-wide .mission-lead-pane {
+  flex: 0 0 auto;
+  min-width: 420px;
+  max-width: 70%;
+}
+
+.mission-divider {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.12s ease;
+}
+
+.mission-divider:hover,
+.mission-divider:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+.mission-right-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 320px;
+  min-height: 0;
+}
+
+/* 760..1099: 목록 폭 280px 고정(§7). */
+.mission-page.mode-medium .mission-right-pane {
+  min-width: 0;
+  flex: 0 0 280px;
+  max-width: 280px;
+}
+
+.mission-page.mode-medium .mission-lead-pane {
+  flex: 1 1 auto;
+}
+
+.mission-right-bottom {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 200px;
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.mission-right-toggle {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.mission-right-toggle button {
+  border: none;
+  background: transparent;
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.mission-right-toggle button[aria-pressed="true"] {
+  background: var(--bg-elevated);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* <760: 한 영역만(§7). */
+.mission-page.mode-narrow .mission-body {
+  flex-direction: column;
+}
+
+.mission-page.mode-narrow .mission-lead-pane,
+.mission-page.mode-narrow .mission-right-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.mission-narrow-nav {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.mission-narrow-nav button {
+  flex: 1 1 auto;
+  font-size: 12px;
+}
+
+.mission-narrow-nav button[aria-pressed="true"] {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+  background: var(--bg-elevated);
+}
+
+/* side sheet(760..1099, §7) */
+.mission-side-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 90%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.mission-sheet-close {
+  align-self: flex-end;
+  margin: 6px;
+  flex: 0 0 auto;
+}
+
+.mission-side-sheet.narrow { width: 100%; border-left: 0; }
+.mission-side-sheet.narrow .mission-detail-header { max-height: 70%; min-height: 0; overflow-y: auto; flex-shrink: 1; }
+
+/* ---- Lead 대화(§4) --------------------------------------------------------- */
+
+.mission-lead {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mission-lead-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mission-lead-empty {
+  margin: 8px 0;
+}
+
+.mission-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  padding: 8px 10px;
+}
+
+.mission-card-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.mission-plan-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mission-plan-toggle:hover {
+  border: none;
+}
+
+.mission-plan-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mission-plan-ordinal {
+  color: var(--fg-muted);
+}
+
+.mission-msg {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+}
+
+.mission-msg-user {
+  border-left: 3px solid var(--accent);
+}
+
+.mission-msg-agent {
+  border-left: 3px solid var(--ok);
+}
+
+.mission-msg-system {
+  border-left: 3px solid var(--fg-muted);
+  color: var(--fg-muted);
+}
+
+.mission-msg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex-wrap: wrap;
+}
+
+.mission-msg-role {
+  font-weight: 600;
+}
+
+.mission-msg-delivery {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.mission-msg-delivery.delivery-delivered {
+  color: var(--ok);
+}
+
+.mission-msg-delivery.delivery-unknown,
+.mission-msg-delivery.delivery-queued {
+  color: var(--warn);
+}
+
+.mission-msg-delivery.delivery-rejected {
+  color: var(--danger);
+}
+
+.mission-msg-run-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  padding: 0 2px;
+  font-size: 11px;
+  text-decoration: underline;
+}
+
+.mission-msg-body {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mission-body-error {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.mission-new-activity {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: var(--accent-strong);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+/* composer(§4) — pane 하단 고정 */
+.mission-composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mission-composer-recipient {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.mission-composer-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.mission-composer-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: vertical;
+  min-height: 38px;
+  max-height: 160px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font: inherit;
+}
+
+.mission-composer-send {
+  flex: 0 0 auto;
+  max-width: 50%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mission-composer-done {
+  align-items: center;
+}
+
+/* ---- 팀 목록(§5) ----------------------------------------------------------- */
+
+.mission-team {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 160px;
+  max-height: 40%;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.mission-team-header {
+  flex: 0 0 auto;
+  padding: 6px 10px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.mission-team-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.mission-team-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mission-team-counters {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.mission-team-counters .counter-live {
+  color: var(--ok);
+}
+
+.mission-team-counters .counter-decisions {
+  color: var(--warn);
+}
+
+.mission-team-filters {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.mission-filter-chip {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  background: transparent;
+}
+
+.mission-filter-chip.active {
+  background: var(--bg-elevated);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.mission-team-search {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.mission-team-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mission-team-row-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.mission-team-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+  min-height: 28px;
+}
+
+.mission-team-row:hover {
+  border-color: var(--accent);
+}
+
+.mission-team-row.selected {
+  background: var(--bg-elevated);
+  border-color: var(--accent);
+}
+
+.mission-team-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.mission-task-status {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+}
+
+/* 상태 색 — 색만이 아니라 글리프/텍스트가 항상 함께 있다(§7). */
+.mission-task-status.status-running,
+.mission-task-status.status-awaiting_input {
+  color: var(--ok);
+}
+
+.mission-task-status.status-starting {
+  color: var(--accent);
+}
+
+.mission-task-status.status-failed {
+  color: var(--danger);
+}
+
+.mission-task-status.status-blocked {
+  color: var(--warn);
+}
+
+.mission-task-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mission-task-meta {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.mission-task-state-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.mission-task-state-label.state-running {
+  color: var(--ok);
+}
+
+.mission-task-state-label.state-failed {
+  color: var(--danger);
+}
+
+.mission-task-state-label.state-awaiting_input {
+  color: var(--warn);
+}
+
+.mission-task-extra {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 8px 2px 28px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.mission-team-history-toggle {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.mission-attempt-list {
+  list-style: none;
+  margin: 0 0 2px;
+  padding: 2px 8px 2px 28px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mission-team-more {
+  flex: 0 0 auto;
+  margin: 2px 4px 4px;
+  font-size: 11px;
+}
+
+.mission-team-empty {
+  margin: 8px 10px;
+}
+
+/* ---- 상세(§6) -------------------------------------------------------------- */
+
+.mission-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mission-detail-header {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.mission-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mission-detail-title {
+  margin: 0;
+  font-size: 13px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mission-detail-meta {
+  display: flex;
+  gap: 14px;
+  margin: 0;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.mission-detail-meta div {
+  display: flex;
+  gap: 4px;
+}
+
+.mission-detail-meta dt {
+  color: var(--fg-muted);
+}
+
+.mission-detail-meta dd {
+  margin: 0;
+}
+
+.mission-detail-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.mission-detail-tab {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 3px 3px 0 0;
+  color: var(--fg-muted);
+}
+
+.mission-detail-tab.active {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.mission-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+}
+
+.mission-detail-empty {
+  margin: 10px;
+}
+
+.mission-activity-log {
+  margin: 0;
+  font-family: "Nanum Gothic Coding", "Segoe UI", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.mission-exec-note {
+  margin: 0 0 6px;
+  color: var(--fg);
+}
+
+.mission-changes-progress {
+  margin: 0;
+  color: var(--warn);
+}
+
+.mission-changes-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-family: "Nanum Gothic Coding", "Segoe UI", monospace;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mission-changes-list .change-add {
+  color: var(--ok);
+}
+
+.mission-changes-list .change-delete {
+  color: var(--danger);
+}
+
+.mission-verification-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.mission-verification-list .verification-failed {
+  color: var(--danger);
+}
+
+.mission-verification-list .verification-passed {
+  color: var(--ok);
+}
+
+.mission-task-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  position: relative;
+  align-items: center;
+}
+
+.mission-instruct-toggle {
+  align-self: flex-start;
+  font-size: 12px;
+}
+
+.mission-task-composer {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+/* ---- 결정 패널(§8) ---------------------------------------------------------- */
+
+.mission-decision {
+  flex: 0 0 auto;
+  margin: 6px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-panel));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mission-decision.obsolete {
+  border-color: var(--border);
+  opacity: 0.75;
+}
+
+.mission-decision-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mission-decision-header h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mission-decision-blocking {
+  font-size: 10px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 14px;
+}
+
+.mission-decision p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.mission-conflict-paths { max-height: 8em; overflow: auto; overflow-wrap: anywhere; }
+.mission-conflict-paths ul { margin: 4px 0; padding-left: 20px; }
+.mission-conflict-paths code { white-space: pre-wrap; }
+.mission-file-approval { max-height: 28em; overflow: auto; overflow-wrap: anywhere; }
+.mission-file-approval pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mission-reconciled-accept { overflow-wrap: anywhere; }
+.mission-reconciled-accept label { display: block; margin: 8px 0; }
+
+.mission-decision-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mission-decision-obsolete .link {
+  color: var(--accent);
+}
+
+/* ---- 결과 화면(§9) ---------------------------------------------------------- */
+
+.mission-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mission-result-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.mission-result-header h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.mission-result-status {
+  font-size: 12px;
+  color: var(--ok);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 6px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.mission-result-status.review {
+  color: var(--warn);
+}
+
+.mission-result-section h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.mission-req-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mission-req-table td {
+  border-top: 1px solid var(--border);
+  padding: 3px 6px 3px 0;
+  vertical-align: top;
+}
+
+.mission-req-human {
+  margin-left: 6px;
+  font-size: 10px;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.mission-findings-list,
+.mission-limitations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mission-result-accept {
+  align-self: flex-start;
+}
+
+.mission-confirm-ids {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+}
+
+/* ---- 생성 대화상자(§3) ------------------------------------------------------- */
+
+.mission-create {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 560px;
+  width: min(560px, 92vw);
+  max-height: 84vh;
+  overflow-y: auto;
+}
+
+.mission-create h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.mission-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mission-create-field > span,
+.mission-create-field legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.mission-create-field input[type="text"],
+.mission-create-field input[type="number"],
+.mission-create-field textarea,
+.mission-create-field select {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.mission-create-field textarea {
+  resize: vertical;
+}
+
+.mission-create-field small {
+  font-size: 11px;
+}
+
+.mission-create-field label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.mission-create-check {
+  font-weight: 400;
+}
+
+.mission-requirement-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.mission-requirement-text {
+  flex: 2 1 180px;
+  min-width: 0;
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.mission-requirement-verification {
+  flex: 1 1 120px;
+  min-width: 0;
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.mission-requirement-human {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mission-binding-missing {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--warn);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.mission-create-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* ---- 모션 최소 설정(§7): mission 화면의 전환·애니메이션 끄기 --------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .mission-divider {
+    transition: none;
+  }
+}
+
+.mission-guide { margin: 12px 0; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+.mission-guide summary { cursor: pointer; font-weight: 600; }
+.mission-guide li { margin: 8px 0; line-height: 1.6; }
+.mission-guide p { line-height: 1.6; }
+.mission-guide-trouble { margin-top: 8px; }
+.mission-guide-trouble > summary { font-weight: 500; }
+
+/* ---- 설정 → AI 작업 ----------------------------------------------------
+ * 카드 하나 = 설정 항목 하나. 카드마다 제목 아래 한 줄 설명을 두고, 그 안의
+ * 모든 칸은 "라벨 → 보조 설명 → 컨트롤" 순서로만 쌓는다(설정 페이지의
+ * .setting-row와 같은 리듬). 값이 짧은 칸은 두 칸씩 나란히 놓아 세로로
+ * 끝없이 이어지지 않게 하고, 줄 간격·컨트롤 높이는 기본 폼보다 넉넉히 준다.
+ */
+
+.mission-settings {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  max-width: 900px;
+}
+
+.mission-settings > .mission-guide { margin: 0; padding: 14px 18px; border-radius: 10px; }
+
+/* 저장 버튼은 카드 아래쪽에 있다 — 결과 문구는 스크롤을 따라와야 눈에 든다. */
+.mission-settings-status {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 18%);
+}
+
+.mission-settings-status p { margin: 0; line-height: 1.55; overflow-wrap: anywhere; }
+.mission-settings-status .mission-area-error { padding: 0; font-size: 13px; }
+.mission-settings-ok { color: var(--ok); }
+
+.mission-settings-card {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 22px 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+
+.mission-settings-card-head { display: grid; gap: 6px; }
+.mission-settings-card-head h3 { margin: 0; font-size: 15px; }
+.mission-settings-card-head p { margin: 0; color: var(--fg-muted); line-height: 1.6; }
+
+/* 카드 안의 작은 묶음(역할별 모델 · 대상 저장소 · 저장된 목록). */
+.mission-settings-block {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.mission-settings-block h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+
+/* ---- 한 칸 ---- */
+.mission-field { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.mission-field-label { font-weight: 600; }
+.mission-field-hint { color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
+
+.mission-field-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.mission-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 20px;
+  align-items: start;
+  min-width: 0;
+}
+
+.mission-field-grid > .mission-field.is-wide { grid-column: 1 / -1; }
+.mission-field.is-short input, .mission-field.is-short select { max-width: 280px; }
+
+/* 입력과 바로 옆의 동작 버튼(저장소 확인) — 버튼은 입력 아랫변에 맞춘다. */
+.mission-field-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.mission-field-row .mission-field { flex: 1 1 320px; }
+.mission-field-row button { min-height: 36px; }
+
+.mission-settings-card input, .mission-settings-card select { width: 100%; min-width: 0; box-sizing: border-box; }
+/* 기본 버튼(세로 3px)은 입력칸 옆에서 눌러야 할 자리가 너무 얇다 — 줄바꿈되는
+   라벨도 견디도록 min-height와 padding을 함께 준다. */
+.mission-settings button { min-height: 34px; padding: 7px 14px; border-radius: 6px; }
+
+/* ---- 동작 · 결과 ---- */
+.mission-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.mission-settings-actions-note { color: var(--fg-muted); font-size: 12px; line-height: 1.5; }
+.mission-settings-meta { display: grid; gap: 8px; justify-items: start; }
+.mission-settings-meta:empty { display: none; }
+.mission-settings-meta p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+
+/* ---- 저장된 목록 ---- */
+.mission-settings-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+.mission-settings-list > li {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow-wrap: anywhere;
+}
+
+.mission-settings-list code { color: var(--fg-muted); font-size: 12px; }
+.mission-settings-roles { display: grid; gap: 2px; margin: 2px 0 0; padding: 0; list-style: none; }
+.mission-settings-roles > li { margin: 0; color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
+.mission-settings-role { color: var(--fg); }
+.mission-settings-repo { margin: 0; color: var(--fg-muted); font-size: 12px; overflow-wrap: anywhere; }
+.mission-settings-repo code { color: var(--fg); }
+
+/* 내용 폭이 좁아지면(좁은 창) 두 칸 배치를 포기한다 — 잘린 입력보다 낫다. */
+@media (max-width: 900px) {
+  .mission-field-grid { grid-template-columns: minmax(0, 1fr); }
+  .mission-settings-card { padding: 18px 16px; }
+}
+
+.mission-finding-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 18rem;
+  overflow: auto;
+  font: inherit;
+}
+.mission-finding-form { display: grid; gap: 0.4rem; }
+.mission-finding-form textarea { width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; }
+.mission-finding-form button { justify-self: start; white-space: normal; }
+
+.mission-message-recovery:empty { display: none; }
+.mission-message-recovery { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mission-message-recovery-form { display: grid; gap: 8px; min-width: 0; width: 100%; }
+.mission-message-recovery-form textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; font: inherit; }
+.mission-message-recovery-form p { margin: 0; overflow-wrap: anywhere; }
+
+/* quick setup */
+.mission-quick-setup { display: grid; gap: 12px; min-width: 0; }
+.mission-quick-setup:not(.is-compact) { margin: 0; padding: 22px 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); }
+.mission-quick-setup h3 { margin: 0; }
+.mission-quick-setup > p { margin: 0; line-height: 1.5; }
+.mission-quick-setup-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.mission-quick-setup-toolbar .muted { margin-right: auto; }
+.mission-quick-setup-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; min-width: 0; }
+.mission-quick-setup-runtime { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); }
+.mission-quick-setup-runtime.is-missing { opacity: 0.6; }
+.mission-quick-setup-runtime p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.mission-quick-setup-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 8px; }
+.mission-quick-setup-head .muted { font-size: 12px; }
+.mission-quick-setup-path { display: block; font-size: 11px; color: var(--fg-muted); overflow-wrap: anywhere; word-break: break-all; }
+.mission-quick-setup-login { font-size: 12px; color: var(--fg-muted); }
+.mission-quick-setup-badge { display: grid; gap: 3px; padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--border); background: color-mix(in srgb, var(--border) 22%, transparent); font-size: 12px; line-height: 1.55; }
+.mission-quick-setup-badge.is-verified { border-left-color: var(--ok); }
+.mission-quick-setup-badge.is-partial { border-left-color: var(--warn); }
+.mission-quick-setup-badge.is-blocked { border-left-color: var(--danger); }
+/* Scoped under .mission-quick-setup so the dialog's `.mission-create-field label` (flex row) does not win. */
+.mission-quick-setup .mission-quick-setup-model { display: grid; align-items: stretch; gap: 4px; min-width: 0; }
+.mission-quick-setup .mission-quick-setup-model input,
+.mission-quick-setup .mission-quick-setup-model select { width: 100%; min-width: 0; box-sizing: border-box; }
+.mission-quick-setup-reason { font-size: 12px; color: var(--fg-muted); }
+.mission-quick-setup-warning { font-size: 12px; color: var(--warn); }
+.mission-quick-setup-runtime button { align-self: flex-start; max-width: 100%; white-space: normal; }
+.mission-quick-setup-status { font-size: 12px; }
+.mission-quick-setup-status.is-success { color: var(--ok); }
+.mission-quick-setup-status.is-blocked, .mission-quick-setup-status.is-error { color: var(--danger); }
+/* 직접 입력(고급) — 접힌 상태에서도 눌러야 할 자리가 분명하도록 한 덩어리로 보인다. */
+.mission-settings-advanced { border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.mission-settings-advanced > summary { padding: 11px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.mission-settings-advanced[open] > summary { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; }
+.mission-settings-advanced-body { display: grid; gap: 18px; margin: 0; padding: 18px 16px; min-width: 0; }
+
+/* mission create simplification */
+.mission-create-repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mission-create-repo-status { margin: 0; font-size: 11px; overflow-wrap: anywhere; }
+.mission-create-warning { margin: 0; padding: 6px 8px; border-left: 3px solid var(--warn); border-radius: 4px; font-size: 12px; line-height: 1.5; color: var(--warn); }
+.mission-create-section { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; min-width: 0; }
+.mission-create-section > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--fg-muted); overflow-wrap: anywhere; }
+.mission-create-section[open] > summary { margin-bottom: 8px; }
+.mission-create-section-values { font-weight: 400; }
+.mission-create-quick-setup { margin-top: 6px; min-width: 0; }
+.mission-create-binding-error { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.mission-create-binding-error p { margin: 0; overflow-wrap: anywhere; }
+.mission-create-submit-reason { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.mission-create > .mission-guide { margin: 0; }

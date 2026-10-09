@@ -1,0 +1,56 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Tauri
+src-tauri/gen/
+# Staged external binaries (prepare-bundle.mjs copies the daemon here)
+src-tauri/binaries/
+
+# Benchmark runs
+scripts/bench/results/
+
+# Generated bindings are committed for review parity (I02: diff must be empty
+# after regeneration), so src/generated stays tracked on purpose.
+
+# Local runtime data (never commit journals/DBs produced during dev runs)
+.data/
+*.mtj
+*.db
+*.db-wal
+*.db-shm
+
+# Local agent-tooling state (oh-my-claudecode / openagent / sisyphus)
+.omc/
+.omo/
+.sisyphus/
+
+# Editors/OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Coverage/benches artifacts
+/coverage/
+/bench-results/
+
+# Claude Code local state (worktrees, session data)
+.claude/
+
+# Local editor/tool artifacts (plan scratch, generated HTML previews)
+.zcode/
+/output/
+
+# Codegraph tool symlink (points outside the repository)
+.codegraph
+
+# Playwright failure-run output (baselines under __screenshots__ stay tracked)
+**/__results__/

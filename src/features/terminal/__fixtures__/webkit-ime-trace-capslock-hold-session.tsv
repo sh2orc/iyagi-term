@@ -1,0 +1,243 @@
+219759	kd	17	"Control"	0	1
+219911	kd	67	"c"	0	1
+220033	ku	67	"c"
+220110	kd	67	"c"	0	1
+220207	ku	67	"c"
+220262	kd	67	"c"	0	1
+220342	ku	67	"c"
+220405	kd	67	"c"	0	1
+220466	ku	67	"c"
+220557	kd	67	"c"	0	1
+220625	ku	67	"c"
+220694	ku	17	"Control"
+220959	kd	67	"c"	0	0
+221076	ku	67	"c"
+221160	kd	79	"o"	0	0
+221291	ku	79	"o"
+221558	kd	8	"Backspace"	0	0
+221617	ku	8	"Backspace"
+221691	kd	8	"Backspace"	0	0
+221759	ku	8	"Backspace"
+221825	kd	67	"c"	0	0
+221854	kd	8	"Backspace"	0	0
+221906	ku	8	"Backspace"
+221939	ku	67	"c"
+221981	kd	79	"o"	0	0
+222029	kd	68	"d"	0	0
+222086	ku	79	"o"
+222109	ku	68	"d"
+222192	kd	69	"e"	0	0
+222279	ku	69	"e"
+222403	kd	88	"x"	0	0
+222492	ku	88	"x"
+222615	kd	8	"Backspace"	0	0
+222686	ku	8	"Backspace"
+222785	kd	8	"Backspace"	0	0
+222847	ku	8	"Backspace"
+222939	kd	8	"Backspace"	0	0
+223000	ku	8	"Backspace"
+223089	kd	8	"Backspace"	0	0
+223222	kd	67	"c"	0	0
+223233	ku	8	"Backspace"
+223293	kd	79	"o"	0	0
+223300	ku	67	"c"
+223404	kd	68	"d"	0	0
+223417	ku	79	"o"
+223509	ku	68	"d"
+223608	kd	69	"e"	0	0
+223700	ku	69	"e"
+223825	kd	88	"x"	0	0
+223927	ku	88	"x"
+224028	kd	13	"Enter"	0	0
+224169	ku	13	"Enter"
+225464	kd	191	"/"	0	0
+225592	ku	191	"/"
+225786	kd	77	"m"	0	0
+225883	kd	79	"o"	0	0
+225938	ku	77	"m"
+225950	kd	68	"d"	0	0
+226013	ku	79	"o"
+226035	kd	69	"e"	0	0
+226073	ku	68	"d"
+226136	kd	76	"l"	0	0
+226166	ku	69	"e"
+226226	ku	76	"l"
+226316	kd	13	"Enter"	0	0
+226426	ku	13	"Enter"
+227581	kd	38	"ArrowUp"	0	0
+227717	ku	38	"ArrowUp"
+228568	kd	27	"Escape"	0	0
+228692	ku	27	"Escape"
+229049	kd	27	"Escape"	0	0
+229136	ku	27	"Escape"
+232039	kd	191	"/"	0	0
+232133	ku	191	"/"
+232322	kd	77	"m"	0	0
+232421	kd	79	"o"	0	0
+232466	ku	77	"m"
+232533	ku	79	"o"
+232556	kd	68	"d"	0	0
+232639	kd	69	"e"	0	0
+232683	ku	68	"d"
+232722	kd	76	"l"	0	0
+232733	ku	69	"e"
+232833	ku	76	"l"
+233022	kd	13	"Enter"	0	0
+233150	ku	13	"Enter"
+234890	kd	13	"Enter"	0	0
+235013	ku	13	"Enter"
+239350	kd	20	"CapsLock"	0	0
+239367	kd	0	"Unidentified"	0	0
+239511	ku	20	"CapsLock"
+241191	bi	insertText	"ㄱ"
+241193	inp	insertText	"ㄱ"	0	"ㄱ"
+241199	kd	229	"ㄱ"	0	0
+241271	kd	16	"Shift"	1	0
+241286	ku	82	"ㄲ"
+241321	bi	insertReplacementText	"계"
+241321	inp	insertReplacementText	"계"	1	"계"
+241323	kd	229	"ㅖ"	1	0
+241406	ku	80	"ㅖ"
+241416	ku	16	"Shift"
+241467	bi	insertReplacementText	"곗"
+241468	inp	insertReplacementText	"곗"	1	"곗"
+241469	kd	229	"ㅅ"	0	0
+241543	ku	84	"ㅅ"
+241562	bi	insertReplacementText	"계"
+241563	inp	insertReplacementText	"계"	1	"계"
+241565	bi	insertText	"소"
+241565	inp	insertText	"소"	0	"소"
+241566	kd	229	"ㅗ"	0	0
+241645	bi	insertReplacementText	"속"
+241645	inp	insertReplacementText	"속"	1	"속"
+241646	kd	229	"ㄱ"	0	0
+241650	ku	72	"ㅗ"
+241717	ku	82	"ㄱ"
+241786	bi	insertReplacementText	"속"
+241787	inp	insertReplacementText	"속"	0	""
+241796	kd	13	"Enter"	0	0
+241885	ku	13	"Enter"
+936796	bi	insertText	"ㄴ"
+936797	inp	insertText	"ㄴ"	0	"ㄴ"
+936800	kd	229	"ㄴ"	0	0
+936847	bi	insertReplacementText	"나"
+936847	inp	insertReplacementText	"나"	1	"나"
+936848	kd	229	"ㅏ"	0	0
+936883	ku	83	"ㄴ"
+936943	bi	insertReplacementText	"남"
+936944	inp	insertReplacementText	"남"	1	"남"
+936944	kd	229	"ㅁ"	0	0
+936963	ku	75	"ㅏ"
+937050	ku	65	"ㅁ"
+937122	bi	insertReplacementText	"남"
+937123	inp	insertReplacementText	"남"	0	""
+937127	bi	insertText	"ㅇ"
+937127	inp	insertText	"ㅇ"	0	"ㅇ"
+937129	kd	229	"ㅇ"	0	0
+937208	bi	insertReplacementText	"으"
+937208	inp	insertReplacementText	"으"	1	"으"
+937208	kd	229	"ㅡ"	0	0
+937213	ku	68	"ㅇ"
+937272	bi	insertReplacementText	"은"
+937272	inp	insertReplacementText	"은"	1	"은"
+937272	kd	229	"ㄴ"	0	0
+937279	ku	77	"ㅡ"
+937355	ku	83	"ㄴ"
+937489	bi	insertReplacementText	"은"
+937489	inp	insertReplacementText	"은"	0	""
+937494	bi	insertText	"ㄱ"
+937494	inp	insertText	"ㄱ"	0	"ㄱ"
+937495	kd	229	"ㄱ"	0	0
+937572	ku	82	"ㄱ"
+937593	bi	insertReplacementText	"거"
+937594	inp	insertReplacementText	"거"	1	"거"
+937594	kd	229	"ㅓ"	0	0
+937676	bi	insertReplacementText	"것"
+937676	inp	insertReplacementText	"것"	1	"것"
+937676	kd	229	"ㅅ"	0	0
+937696	ku	74	"ㅓ"
+937732	ku	84	"ㅅ"
+937832	bi	insertReplacementText	"것"
+937833	inp	insertReplacementText	"것"	0	""
+937841	bi	insertText	"ㄷ"
+937841	inp	insertText	"ㄷ"	0	"ㄷ"
+937844	kd	229	"ㄷ"	0	0
+937885	bi	insertReplacementText	"도"
+937885	inp	insertReplacementText	"도"	1	"도"
+937886	kd	229	"ㅗ"	0	0
+937917	ku	69	"ㄷ"
+937953	bi	insertReplacementText	"도"
+937954	inp	insertReplacementText	"도"	0	""
+937956	kd	32	" "	0	0
+937956	kp	32	" "
+937956	bi	insertText	" "
+937956	inp	insertText	" "	0	" "
+937979	ku	72	"ㅗ"
+938034	ku	32	" "
+938127	kd	16	"Shift"	1	0
+938201	bi	insertText	"ㄲ"
+938202	inp	insertText	"ㄲ"	1	" ㄲ"
+938205	kd	229	"ㄲ"	1	0
+938277	ku	16	"Shift"
+938280	ku	82	"ㄱ"
+938303	bi	insertReplacementText	"끄"
+938303	inp	insertReplacementText	"끄"	1	"끄"
+938304	kd	229	"ㅡ"	0	0
+938406	ku	77	"ㅡ"
+938479	bi	insertReplacementText	"끝"
+938480	inp	insertReplacementText	"끝"	1	"끝"
+938481	kd	229	"ㅌ"	0	0
+938563	bi	insertReplacementText	"끝"
+938564	inp	insertReplacementText	"끝"	0	""
+938572	bi	insertText	"ㄴ"
+938572	inp	insertText	"ㄴ"	0	"ㄴ"
+938574	kd	229	"ㄴ"	0	0
+938580	ku	88	"ㅌ"
+938638	bi	insertReplacementText	"내"
+938638	inp	insertReplacementText	"내"	1	"내"
+938639	kd	229	"ㅐ"	0	0
+938683	ku	83	"ㄴ"
+938737	bi	insertReplacementText	"내"
+938737	inp	insertReplacementText	"내"	0	""
+938739	kd	32	" "	0	0
+938739	kp	32	" "
+938740	bi	insertText	" "
+938740	inp	insertText	" "	0	" "
+938763	ku	79	"ㅐ"
+938809	ku	32	" "
+939150	kd	18	"Alt"	0	1
+939287	kd	37	"ArrowLeft"	0	1
+939350	ku	37	"ArrowLeft"
+939442	kd	37	"ArrowLeft"	0	1
+939508	ku	37	"ArrowLeft"
+939577	kd	37	"ArrowLeft"	0	1
+939709	ku	37	"ArrowLeft"
+939773	ku	18	"Alt"
+939932	kd	20	"CapsLock"	0	0
+939949	kd	0	"Unidentified"	0	0
+939965	ku	20	"CapsLock"
+940037	kd	191	"/"	0	0
+940120	ku	191	"/"
+940269	kd	71	"g"	0	0
+940333	kd	79	"o"	0	0
+940352	ku	71	"g"
+940441	ku	79	"o"
+940466	kd	65	"a"	0	0
+940554	kd	76	"l"	0	0
+940563	ku	65	"a"
+940652	kd	32	" "	0	0
+940652	kp	32	" "
+940652	bi	insertText	" "
+940653	inp	insertText	" "	1	"  "
+940663	ku	76	"l"
+940761	ku	32	" "
+941132	kd	13	"Enter"	0	0
+941270	ku	13	"Enter"
+1489721	kd	8	"Backspace"	0	0
+1489836	ku	8	"Backspace"
+1489926	kd	8	"Backspace"	0	0
+1490035	ku	8	"Backspace"
+1490142	kd	8	"Backspace"	0	0
+1490193	ku	8	"Backspace"
+1490567	kd	91	"Meta"	0	1
+1490948	ku	91	"Meta"

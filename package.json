@@ -1,0 +1,45 @@
+{
+  "name": "iyagi",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "iyagi — terminal platform managing resources of existing AI coding CLIs",
+  "scripts": {
+    "dev:frontend": "vite",
+    "build:frontend": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "build:webgl-addon": "node scripts/build-webgl-addon.mjs",
+    "test:unit": "vitest run",
+    "test:ui": "vitest run --config vitest.config.ts",
+    "test:mission-ui": "playwright test",
+    "tauri": "node scripts/tauri.mjs",
+    "dev:stage-daemon": "cargo build -p iyagi-termd && node scripts/prepare-bundle.mjs --profile debug",
+    "build:stage-daemon": "cargo build -p iyagi-termd --release && node scripts/prepare-bundle.mjs",
+    "prebuild:bundle": "node scripts/prepare-bundle.mjs",
+    "verify:contracts": "cargo test -p term-contracts && git diff --exit-code -- src/generated || (echo 'src/generated is stale: regenerate and commit' && exit 1)"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/addon-webgl": "0.19.0",
+    "@xterm/xterm": "6.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zustand": "4.5.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tauri-apps/cli": "2.11.2",
+    "@types/node": "22.20.1",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "happy-dom": "^20.14.5",
+    "typescript": "5.9.3",
+    "vite": "5.4.21",
+    "vitest": "2.1.8"
+  }
+}

@@ -1,0 +1,199 @@
+/*
+ * 데몬 새 기능 화면 연결(계약 A·C·D):
+ * 실험적 연결 배지·경고, 멈춘 실행 사용자 확인 정리, 작업 공간 정리.
+ */
+
+.mission-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------- 실험적 연결(A) */
+
+.mission-experimental-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.mission-experimental-warning {
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.result-review-checklist li.info {
+  color: var(--fg-muted);
+}
+
+.result-review-checklist li.info .result-review-glyph {
+  color: var(--warn);
+}
+
+/* ---------------------------------------------------------------- 멈춘 실행 확인(C) */
+
+.mission-attest {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mission-attest-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+
+.mission-attest-panel h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.mission-attest-panel p {
+  margin: 0;
+}
+
+.mission-attest-process {
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-attest-hints {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mission-attest-command {
+  display: block;
+  margin-top: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  font-size: 11px;
+  overflow-x: auto;
+  white-space: pre;
+  user-select: all;
+}
+
+.mission-attest-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.mission-attest-unverified {
+  color: var(--warn);
+}
+
+.mission-attest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mission-attested-label {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* ---------------------------------------------------------------- 작업 공간 정리(D) */
+
+.mission-list-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.mission-list-workspace-total {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-workspace-cleanup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.mission-list-row .mission-workspace-cleanup {
+  padding: 0 8px 6px;
+}
+
+.mission-workspace-cleanup-button {
+  font-size: 12px;
+}
+
+.mission-inline-confirm.mission-cleanup-confirm {
+  position: static;
+  max-width: 420px;
+}
+
+.mission-cleanup-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mission-workspace-cleanup-done {
+  margin: 0;
+}
+
+.mission-workspace-kept p {
+  margin: 0;
+}
+
+.mission-workspace-kept ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
+.mission-workspace-kept-path {
+  word-break: break-all;
+  font-size: 11px;
+}
+
+.mission-workspace-blocked {
+  font-size: 12px;
+}
+
+.mission-undo-toast-hint {
+  flex-basis: 100%;
+  color: var(--fg-muted);
+  font-size: 12px;
+}

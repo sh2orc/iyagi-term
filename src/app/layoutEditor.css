@@ -1,0 +1,419 @@
+/* 배치 편집 화면(LayoutEditorPage, 04-ui §2-6) — 설정 페이지와 같은 머리, 가운데 그룹 카드
+   보드(카드 순서 = 탭 순서), 오른쪽 실행 중인 터미널 목록. 끌어 놓기 미리보기는 workbench.css의
+   .layout-drag-* / .layout-drop-* 조각이 그린다. */
+
+.layout-editor-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.layout-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex: 0 0 auto;
+}
+
+.layout-editor-header h1 {
+  margin: 0;
+  font-size: 20px;
+  outline: none;
+}
+
+.layout-editor-header p {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: var(--fg-muted);
+}
+
+.layout-editor-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.layout-editor-actions button {
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.layout-editor-return kbd {
+  margin-left: 8px;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+}
+
+.layout-editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 그룹 카드 보드: 넘치면 세로로 스크롤한다(끄는 동안 위·아래 끝에서 자동 스크롤). gap은
+   layoutDragSession의 CARD_GAP_PX와 같아야 순서 삽입 막대가 카드 사이 한가운데에 선다. */
+.layout-board {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-auto-rows: minmax(240px, auto);
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+  padding: 22px 26px;
+  overflow: auto;
+}
+
+.layout-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.layout-group.current {
+  border-color: var(--accent-strong);
+}
+
+.layout-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.layout-group-grip {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 9px;
+  background-image: radial-gradient(circle, currentColor 0.8px, transparent 1.1px);
+  background-size: 3px 3px;
+  color: var(--fg-muted);
+  opacity: 0.7;
+}
+
+/* 이름과 ✎ 버튼을 붙여 둔다 — 이름이 길면 이름만 줄어든다. */
+.layout-group-name {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.layout-group-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-group-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ✎: 평소에는 흐리게, 카드 머리에 손을 올리거나 키보드로 오면 또렷하게. */
+.layout-group-rename {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  opacity: 0.55;
+}
+
+.layout-group-head:hover .layout-group-rename,
+.layout-group-rename:focus-visible {
+  opacity: 1;
+}
+
+.layout-group-current {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: 11px;
+}
+
+.layout-group-count {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.layout-group-count.full {
+  color: var(--warn);
+}
+
+.layout-group-head button {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  font-size: 12px;
+}
+
+.layout-group-delete {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.layout-group-delete:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.layout-group-body {
+  display: flex;
+  flex: 1;
+  min-height: 190px;
+  padding: 10px;
+}
+
+.layout-group-body > .layout-mini-split,
+.layout-group-body > .layout-block {
+  flex: 1;
+}
+
+.layout-group-empty,
+.layout-group-note {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.layout-group-mission .layout-group-note {
+  margin: 10px;
+  min-height: 120px;
+}
+
+/* 분할 미니맵: 탭의 실제 분할 모양·비율을 그대로 줄인다. */
+.layout-mini-split {
+  display: flex;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.layout-mini-split.column {
+  flex-direction: column;
+}
+
+.layout-mini-slot {
+  display: flex;
+  flex-basis: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.layout-mini-slot > .layout-mini-split,
+.layout-mini-slot > .layout-block {
+  flex: 1;
+}
+
+.layout-block {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  cursor: grab;
+  font-size: 12px;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.layout-block:hover {
+  border-color: var(--fg-muted);
+}
+
+.layout-block.focused {
+  border-color: var(--accent);
+}
+
+.layout-block.highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.layout-block.phase-exited,
+.layout-block.phase-failed {
+  opacity: 0.7;
+}
+
+.layout-block-title,
+.layout-roster-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-block-meta,
+.layout-roster-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.layout-block-cwd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layout-block-state.state-failed,
+.layout-block-state.state-exited {
+  color: var(--danger);
+}
+
+/* "+ 새 그룹": 누르면 빈 그룹, 터미널을 놓으면 그 터미널로 새 그룹. */
+.layout-group-new {
+  min-height: 240px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+.layout-group-new:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* 오른쪽: 실행 중인 터미널. 배치 안 됨은 점선 — 아직 어느 그룹에도 붙지 않았다. */
+.layout-roster {
+  width: 300px;
+  flex: 0 0 auto;
+  padding: 18px 14px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  overflow-y: auto;
+}
+
+.layout-roster h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.layout-roster h3 {
+  margin: 18px 0 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.layout-roster-count {
+  margin-left: 6px;
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.layout-roster-hint,
+.layout-roster-note,
+.layout-roster-empty {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.layout-roster ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layout-roster-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.layout-roster-item:hover {
+  border-color: var(--accent);
+}
+
+.layout-roster-item.unplaced {
+  border: 1px dashed var(--fg-muted);
+  background: transparent;
+}
+
+.layout-roster-chip {
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  text-overflow: ellipsis;
+}
+
+.layout-editor-page button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .layout-roster {
+    width: 240px;
+  }
+}

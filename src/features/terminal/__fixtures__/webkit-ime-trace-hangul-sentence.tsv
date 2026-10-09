@@ -1,0 +1,1922 @@
+0	ku	13
+723	kd	68	"d"	0	0
+841	ku	68
+1015	kd	8	"Backspace"	0	0
+1096	ku	8
+1196	kd	20	"CapsLock"	0	0
+1212	kd	0	"Unidentified"	0	0
+1264	ku	20
+1266	bi	insertText	"ㅇ"
+1266	inp	insertText	"ㅇ"	0	"ㅇ"
+1267	kd	229	"ㅇ"	0	0
+1326	bi	insertReplacementText	"아"
+1326	inp	insertReplacementText	"아"	1	"아"
+1329	kd	229	"ㅏ"	0	0
+1400	ku	68
+1418	bi	insertReplacementText	"앚"
+1419	inp	insertReplacementText	"앚"	1	"앚"
+1420	kd	229	"ㅈ"	0	0
+1429	ku	75
+1489	bi	insertReplacementText	"아"
+1489	inp	insertReplacementText	"아"	1	"아"
+1491	bi	insertText	"지"
+1491	inp	insertText	"지"	0	"지"
+1492	kd	229	"ㅣ"	0	0
+1562	bi	insertReplacementText	"직"
+1563	inp	insertReplacementText	"직"	1	"직"
+1563	kd	229	"ㄱ"	0	0
+1579	ku	87
+1608	ku	76
+1636	ku	82
+1732	bi	insertReplacementText	"직"
+1732	inp	insertReplacementText	"직"	0	""
+1735	bi	insertText	"ㄷ"
+1736	inp	insertText	"ㄷ"	0	"ㄷ"
+1737	kd	229	"ㄷ"	0	0
+1795	bi	insertReplacementText	"도"
+1795	inp	insertReplacementText	"도"	1	"도"
+1796	kd	229	"ㅗ"	0	0
+1829	ku	69
+1868	bi	insertReplacementText	"도"
+1869	inp	insertReplacementText	"도"	0	""
+1870	kd	32	" "	0	0
+1870	kp	32
+1871	bi	insertText	" "
+1871	inp	insertText	" "	0	" "
+1912	ku	72
+1934	bi	insertText	"ㅎ"
+1934	inp	insertText	"ㅎ"	1	" ㅎ"
+1935	kd	229	"ㅎ"	0	0
+1945	ku	32
+2029	ku	71
+2051	bi	insertReplacementText	"하"
+2051	inp	insertReplacementText	"하"	1	"하"
+2052	kd	229	"ㅏ"	0	0
+2103	bi	insertReplacementText	"한"
+2104	inp	insertReplacementText	"한"	1	"한"
+2104	kd	229	"ㄴ"	0	0
+2162	ku	75
+2229	ku	83
+2234	bi	insertReplacementText	"한"
+2234	inp	insertReplacementText	"한"	0	""
+2235	bi	insertText	"ㄱ"
+2236	inp	insertText	"ㄱ"	0	"ㄱ"
+2236	kd	229	"ㄱ"	0	0
+2325	ku	82
+2387	bi	insertReplacementText	"그"
+2387	inp	insertReplacementText	"그"	1	"그"
+2387	kd	229	"ㅡ"	0	0
+2440	bi	insertReplacementText	"글"
+2440	inp	insertReplacementText	"글"	1	"글"
+2440	kd	229	"ㄹ"	0	0
+2491	ku	77
+2521	ku	70
+2542	bi	insertReplacementText	"글"
+2542	inp	insertReplacementText	"글"	0	""
+2544	kd	32	" "	0	0
+2544	kp	32
+2544	bi	insertText	" "
+2544	inp	insertText	" "	0	" "
+2627	ku	32
+3634	bi	insertText	"ㅇ"
+3634	inp	insertText	"ㅇ"	1	" ㅇ"
+3635	kd	229	"ㅇ"	0	0
+3711	bi	insertReplacementText	"이"
+3711	inp	insertReplacementText	"이"	1	"이"
+3712	kd	229	"ㅣ"	0	0
+3757	bi	insertReplacementText	"입"
+3758	inp	insertReplacementText	"입"	1	"입"
+3758	kd	229	"ㅂ"	0	0
+3806	ku	68
+3846	ku	76
+3872	ku	81
+3892	bi	insertReplacementText	"입"
+3892	inp	insertReplacementText	"입"	0	""
+3894	bi	insertText	"ㄹ"
+3894	inp	insertText	"ㄹ"	0	"ㄹ"
+3895	kd	229	"ㄹ"	0	0
+3966	bi	insertReplacementText	"려"
+3967	inp	insertReplacementText	"려"	1	"려"
+3967	kd	229	"ㅕ"	0	0
+3979	ku	70
+4074	bi	insertReplacementText	"력"
+4075	inp	insertReplacementText	"력"	1	"력"
+4075	kd	229	"ㄱ"	0	0
+4081	ku	85
+4155	ku	82
+4327	bi	insertReplacementText	"력"
+4328	inp	insertReplacementText	"력"	0	""
+4330	bi	insertText	"ㅇ"
+4331	inp	insertText	"ㅇ"	0	"ㅇ"
+4332	kd	229	"ㅇ"	0	0
+4406	bi	insertReplacementText	"에"
+4407	inp	insertReplacementText	"에"	1	"에"
+4407	kd	229	"ㅔ"	0	0
+4429	ku	68
+4470	bi	insertReplacementText	"에"
+4470	inp	insertReplacementText	"에"	0	""
+4476	kd	32	" "	0	0
+4476	kp	32
+4477	bi	insertText	" "
+4477	inp	insertText	" "	0	" "
+4522	bi	insertText	"ㄷ"
+4522	inp	insertText	"ㄷ"	1	" ㄷ"
+4523	kd	229	"ㄷ"	0	0
+4546	ku	80
+4562	ku	32
+4597	bi	insertReplacementText	"대"
+4597	inp	insertReplacementText	"대"	1	"대"
+4598	kd	229	"ㅐ"	0	0
+4613	ku	69
+4682	ku	79
+4720	bi	insertReplacementText	"댛"
+4721	inp	insertReplacementText	"댛"	1	"댛"
+4721	kd	229	"ㅎ"	0	0
+4786	ku	71
+4820	bi	insertReplacementText	"대"
+4820	inp	insertReplacementText	"대"	1	"대"
+4821	bi	insertText	"해"
+4821	inp	insertText	"해"	0	"해"
+4822	kd	229	"ㅐ"	0	0
+4862	ku	79
+4883	bi	insertReplacementText	"햇"
+4883	inp	insertReplacementText	"햇"	1	"햇"
+4884	kd	229	"ㅅ"	0	0
+4941	bi	insertReplacementText	"해"
+4942	inp	insertReplacementText	"해"	1	"해"
+4943	bi	insertText	"서"
+4943	inp	insertText	"서"	0	"서"
+4944	kd	229	"ㅓ"	0	0
+4979	ku	84
+5002	bi	insertReplacementText	"서"
+5002	inp	insertReplacementText	"서"	0	""
+5004	kd	32	" "	0	0
+5004	kp	32
+5004	bi	insertText	" "
+5004	inp	insertText	" "	0	" "
+5056	ku	74
+5088	bi	insertText	"ㅇ"
+5088	inp	insertText	"ㅇ"	1	" ㅇ"
+5089	kd	229	"ㅇ"	0	0
+5112	ku	32
+5186	bi	insertReplacementText	"이"
+5186	inp	insertReplacementText	"이"	1	"이"
+5187	kd	229	"ㅣ"	0	0
+5221	ku	68
+5301	ku	76
+5315	bi	insertReplacementText	"잇"
+5316	inp	insertReplacementText	"잇"	1	"잇"
+5316	kd	229	"ㅅ"	0	0
+5403	bi	insertReplacementText	"이"
+5404	inp	insertReplacementText	"이"	1	"이"
+5405	bi	insertText	"슈"
+5405	inp	insertText	"슈"	0	"슈"
+5406	kd	229	"ㅠ"	0	0
+5413	ku	84
+5491	ku	66
+5520	bi	insertReplacementText	"슉"
+5521	inp	insertReplacementText	"슉"	1	"슉"
+5521	kd	229	"ㄱ"	0	0
+5613	ku	82
+5617	bi	insertReplacementText	"슈"
+5617	inp	insertReplacementText	"슈"	1	"슈"
+5618	bi	insertText	"가"
+5618	inp	insertText	"가"	0	"가"
+5619	kd	229	"ㅏ"	0	0
+5676	bi	insertReplacementText	"가"
+5676	inp	insertReplacementText	"가"	0	""
+5678	kd	32	" "	0	0
+5678	kp	32
+5678	bi	insertText	" "
+5679	inp	insertText	" "	0	" "
+5696	ku	75
+5777	ku	32
+5870	bi	insertText	"ㅈ"
+5870	inp	insertText	"ㅈ"	1	" ㅈ"
+5872	kd	229	"ㅈ"	0	0
+5956	ku	87
+5977	bi	insertReplacementText	"조"
+5977	inp	insertReplacementText	"조"	1	"조"
+5978	kd	229	"ㅗ"	0	0
+6071	bi	insertReplacementText	"존"
+6072	inp	insertReplacementText	"존"	1	"존"
+6072	kd	229	"ㄴ"	0	0
+6096	ku	72
+6122	ku	83
+6202	bi	insertReplacementText	"졵"
+6203	inp	insertReplacementText	"졵"	1	"졵"
+6203	kd	229	"ㅈ"	0	0
+6292	bi	insertReplacementText	"존"
+6293	inp	insertReplacementText	"존"	1	"존"
+6294	bi	insertText	"재"
+6294	inp	insertText	"재"	0	"재"
+6295	kd	229	"ㅐ"	0	0
+6335	ku	87
+6379	ku	79
+6404	bi	insertReplacementText	"쟇"
+6404	inp	insertReplacementText	"쟇"	1	"쟇"
+6405	kd	229	"ㅎ"	0	0
+6440	bi	insertReplacementText	"재"
+6441	inp	insertReplacementText	"재"	1	"재"
+6442	bi	insertText	"하"
+6442	inp	insertText	"하"	0	"하"
+6445	kd	229	"ㅏ"	0	0
+6496	ku	71
+6541	ku	75
+6576	bi	insertReplacementText	"함"
+6576	inp	insertReplacementText	"함"	1	"함"
+6576	kd	229	"ㅁ"	0	0
+6651	bi	insertReplacementText	"함"
+6651	inp	insertReplacementText	"함"	0	""
+6653	kd	190	"."	0	0
+6696	ku	65
+6756	kd	32	" "	0	0
+6756	kp	32
+6756	bi	insertText	" "
+6757	inp	insertText	" "	0	" "
+6787	ku	190
+6872	ku	32
+7714	bi	insertText	"ㅎ"
+7715	inp	insertText	"ㅎ"	1	" ㅎ"
+7716	kd	229	"ㅎ"	0	0
+7786	ku	71
+7820	bi	insertReplacementText	"하"
+7820	inp	insertReplacementText	"하"	1	"하"
+7821	kd	229	"ㅏ"	0	0
+7853	bi	insertReplacementText	"한"
+7853	inp	insertReplacementText	"한"	1	"한"
+7853	kd	229	"ㄴ"	0	0
+7879	ku	75
+7925	bi	insertReplacementText	"한"
+7925	inp	insertReplacementText	"한"	0	""
+7927	bi	insertText	"ㄱ"
+7927	inp	insertText	"ㄱ"	0	"ㄱ"
+7928	kd	229	"ㄱ"	0	0
+7997	ku	83
+8015	bi	insertReplacementText	"그"
+8016	inp	insertReplacementText	"그"	1	"그"
+8016	kd	229	"ㅡ"	0	0
+8029	ku	82
+8104	bi	insertReplacementText	"글"
+8104	inp	insertReplacementText	"글"	1	"글"
+8104	kd	229	"ㄹ"	0	0
+8129	ku	77
+8163	ku	70
+8544	bi	insertReplacementText	"그"
+8544	inp	insertReplacementText	"그"	1	"그"
+8545	kd	229	"Backspace"	0	0
+8598	ku	8
+8708	bi	insertReplacementText	"ㄱ"
+8709	inp	insertReplacementText	"ㄱ"	1	"ㄱ"
+8710	kd	229	"Backspace"	0	0
+8763	ku	8
+8863	bi	insertReplacementText	"ㄱ"
+8863	inp	insertReplacementText	"ㄱ"	0	""
+8865	kd	8	"Backspace"	0	0
+8927	ku	8
+9019	kd	8	"Backspace"	0	0
+9137	ku	8
+9420	bi	insertText	"ㅈ"
+9420	inp	insertText	"ㅈ"	0	"ㅈ"
+9429	kd	229	"ㅈ"	0	0
+9492	bi	insertReplacementText	"저"
+9493	inp	insertReplacementText	"저"	1	"저"
+9493	kd	229	"ㅓ"	0	0
+9496	ku	87
+9592	bi	insertReplacementText	"전"
+9592	inp	insertReplacementText	"전"	1	"전"
+9593	kd	229	"ㄴ"	0	0
+9613	ku	74
+9670	bi	insertReplacementText	"전"
+9671	inp	insertReplacementText	"전"	0	""
+9673	bi	insertText	"ㅊ"
+9673	inp	insertText	"ㅊ"	0	"ㅊ"
+9674	kd	229	"ㅊ"	0	0
+9713	ku	83
+9732	bi	insertReplacementText	"체"
+9733	inp	insertReplacementText	"체"	1	"체"
+9733	kd	229	"ㅔ"	0	0
+9779	ku	67
+9818	bi	insertReplacementText	"쳊"
+9818	inp	insertReplacementText	"쳊"	1	"쳊"
+9818	kd	229	"ㅈ"	0	0
+9829	ku	80
+9904	bi	insertReplacementText	"체"
+9904	inp	insertReplacementText	"체"	1	"체"
+9906	bi	insertText	"저"
+9906	inp	insertText	"저"	0	"저"
+9907	kd	229	"ㅓ"	0	0
+9962	bi	insertReplacementText	"적"
+9962	inp	insertReplacementText	"적"	1	"적"
+9963	kd	229	"ㄱ"	0	0
+9980	ku	87
+9996	ku	74
+10037	ku	82
+10118	bi	insertReplacementText	"적"
+10118	inp	insertReplacementText	"적"	0	""
+10121	bi	insertText	"ㅇ"
+10121	inp	insertText	"ㅇ"	0	"ㅇ"
+10122	kd	229	"ㅇ"	0	0
+10192	bi	insertReplacementText	"으"
+10193	inp	insertReplacementText	"으"	1	"으"
+10193	kd	229	"ㅡ"	0	0
+10236	ku	68
+10263	ku	77
+10284	bi	insertReplacementText	"을"
+10284	inp	insertReplacementText	"을"	1	"을"
+10284	kd	229	"ㄹ"	0	0
+10382	ku	70
+10403	bi	insertReplacementText	"으"
+10404	inp	insertReplacementText	"으"	1	"으"
+10406	bi	insertText	"로"
+10406	inp	insertText	"로"	0	"로"
+10407	kd	229	"ㅗ"	0	0
+10454	bi	insertReplacementText	"로"
+10454	inp	insertReplacementText	"로"	0	""
+10456	kd	32	" "	0	0
+10456	kp	32
+10456	bi	insertText	" "
+10457	inp	insertText	" "	0	" "
+10496	ku	72
+10531	ku	32
+10687	bi	insertText	"ㄷ"
+10687	inp	insertText	"ㄷ"	1	" ㄷ"
+10689	kd	229	"ㄷ"	0	0
+10753	bi	insertReplacementText	"다"
+10753	inp	insertReplacementText	"다"	1	"다"
+10754	kd	229	"ㅏ"	0	0
+10763	ku	69
+10838	bi	insertReplacementText	"닷"
+10839	inp	insertReplacementText	"닷"	1	"닷"
+10839	kd	229	"ㅅ"	0	0
+10863	ku	75
+10911	bi	insertReplacementText	"다"
+10911	inp	insertReplacementText	"다"	1	"다"
+10913	bi	insertText	"시"
+10913	inp	insertText	"시"	0	"시"
+10914	kd	229	"ㅣ"	0	0
+10930	ku	84
+10970	bi	insertReplacementText	"시"
+10971	inp	insertReplacementText	"시"	0	""
+10973	kd	32	" "	0	0
+10973	kp	32
+10973	bi	insertText	" "
+10973	inp	insertText	" "	0	" "
+11044	bi	insertText	"ㅎ"
+11044	inp	insertText	"ㅎ"	1	" ㅎ"
+11046	kd	229	"ㅎ"	0	0
+11063	ku	76
+11086	ku	32
+11136	bi	insertReplacementText	"하"
+11136	inp	insertReplacementText	"하"	1	"하"
+11136	kd	229	"ㅏ"	0	0
+11163	ku	71
+11226	bi	insertReplacementText	"한"
+11226	inp	insertReplacementText	"한"	1	"한"
+11227	kd	229	"ㄴ"	0	0
+11267	ku	75
+11362	bi	insertReplacementText	"한"
+11362	inp	insertReplacementText	"한"	0	""
+11364	bi	insertText	"ㅂ"
+11365	inp	insertText	"ㅂ"	0	"ㅂ"
+11365	kd	229	"ㅂ"	0	0
+11396	ku	83
+11482	bi	insertReplacementText	"버"
+11482	inp	insertReplacementText	"버"	1	"버"
+11482	kd	229	"ㅓ"	0	0
+11507	ku	81
+11614	ku	74
+11827	bi	insertReplacementText	"번"
+11828	inp	insertReplacementText	"번"	1	"번"
+11828	kd	229	"ㄴ"	0	0
+11897	ku	83
+12010	bi	insertReplacementText	"버"
+12011	inp	insertReplacementText	"버"	1	"버"
+12011	kd	229	"Backspace"	0	0
+12077	ku	8
+12157	bi	insertReplacementText	"ㅂ"
+12158	inp	insertReplacementText	"ㅂ"	1	"ㅂ"
+12158	kd	229	"Backspace"	0	0
+12230	ku	8
+12307	bi	insertReplacementText	"ㅂ"
+12307	inp	insertReplacementText	"ㅂ"	0	""
+12310	kd	8	"Backspace"	0	0
+12381	kd	32	" "	0	0
+12381	kp	32
+12382	bi	insertText	" "
+12382	inp	insertText	" "	0	" "
+12430	ku	8
+12467	ku	32
+12504	bi	insertText	"ㅂ"
+12504	inp	insertText	"ㅂ"	1	" ㅂ"
+12506	kd	229	"ㅂ"	0	0
+12592	bi	insertReplacementText	"버"
+12592	inp	insertReplacementText	"버"	1	"버"
+12593	kd	229	"ㅓ"	0	0
+12621	ku	81
+12678	bi	insertReplacementText	"번"
+12679	inp	insertReplacementText	"번"	1	"번"
+12679	kd	229	"ㄴ"	0	0
+12680	ku	74
+12755	bi	insertReplacementText	"번"
+12756	inp	insertReplacementText	"번"	0	""
+12758	kd	32	" "	0	0
+12759	kp	32
+12759	bi	insertText	" "
+12759	inp	insertText	" "	0	" "
+12796	ku	83
+12871	ku	32
+12901	bi	insertText	"ㄱ"
+12901	inp	insertText	"ㄱ"	1	" ㄱ"
+12902	kd	229	"ㄱ"	0	0
+12995	bi	insertReplacementText	"거"
+12995	inp	insertReplacementText	"거"	1	"거"
+12996	kd	229	"ㅓ"	0	0
+13013	ku	82
+13056	bi	insertReplacementText	"검"
+13056	inp	insertReplacementText	"검"	1	"검"
+13057	kd	229	"ㅁ"	0	0
+13097	ku	74
+13146	bi	insertReplacementText	"검"
+13146	inp	insertReplacementText	"검"	0	""
+13148	bi	insertText	"ㅌ"
+13148	inp	insertText	"ㅌ"	0	"ㅌ"
+13149	kd	229	"ㅌ"	0	0
+13230	ku	65
+13254	bi	insertReplacementText	"토"
+13254	inp	insertReplacementText	"토"	1	"토"
+13255	kd	229	"ㅗ"	0	0
+13263	ku	88
+13364	bi	insertReplacementText	"톻"
+13365	inp	insertReplacementText	"톻"	1	"톻"
+13366	kd	229	"ㅎ"	0	0
+13380	ku	72
+13462	ku	71
+13493	bi	insertReplacementText	"토"
+13494	inp	insertReplacementText	"토"	1	"토"
+13495	bi	insertText	"해"
+13495	inp	insertText	"해"	0	"해"
+13496	kd	229	"ㅐ"	0	0
+13545	bi	insertReplacementText	"햇"
+13546	inp	insertReplacementText	"햇"	1	"햇"
+13546	kd	229	"ㅅ"	0	0
+13592	ku	79
+13613	bi	insertReplacementText	"해"
+13613	inp	insertReplacementText	"해"	1	"해"
+13615	bi	insertText	"서"
+13615	inp	insertText	"서"	0	"서"
+13616	kd	229	"ㅓ"	0	0
+13646	ku	84
+13703	bi	insertReplacementText	"서"
+13703	inp	insertReplacementText	"서"	0	""
+13705	kd	32	" "	0	0
+13705	kp	32
+13705	bi	insertText	" "
+13705	inp	insertText	" "	0	" "
+13730	ku	74
+13786	ku	32
+13819	bi	insertText	"ㅎ"
+13820	inp	insertText	"ㅎ"	1	" ㅎ"
+13822	kd	229	"ㅎ"	0	0
+13896	bi	insertReplacementText	"하"
+13897	inp	insertReplacementText	"하"	1	"하"
+13897	kd	229	"ㅏ"	0	0
+13913	ku	71
+13986	bi	insertReplacementText	"한"
+13987	inp	insertReplacementText	"한"	1	"한"
+13987	kd	229	"ㄴ"	0	0
+14013	ku	75
+14086	ku	83
+14604	bi	insertReplacementText	"한"
+14605	inp	insertReplacementText	"한"	0	""
+14607	bi	insertText	"ㄱ"
+14607	inp	insertText	"ㄱ"	0	"ㄱ"
+14608	kd	229	"ㄱ"	0	0
+14703	bi	insertReplacementText	"그"
+14704	inp	insertReplacementText	"그"	1	"그"
+14704	kd	229	"ㅡ"	0	0
+14713	ku	82
+14787	bi	insertReplacementText	"글"
+14788	inp	insertReplacementText	"글"	1	"글"
+14788	kd	229	"ㄹ"	0	0
+14796	ku	77
+14852	ku	70
+14962	bi	insertReplacementText	"긁"
+14962	inp	insertReplacementText	"긁"	1	"긁"
+14963	kd	229	"ㄱ"	0	0
+15012	bi	insertReplacementText	"글"
+15012	inp	insertReplacementText	"글"	1	"글"
+15013	bi	insertText	"고"
+15013	inp	insertText	"고"	0	"고"
+15014	kd	229	"ㅗ"	0	0
+15063	ku	82
+15084	bi	insertReplacementText	"과"
+15084	inp	insertReplacementText	"과"	1	"과"
+15085	kd	229	"ㅏ"	0	0
+15113	ku	72
+15186	bi	insertReplacementText	"과"
+15187	inp	insertReplacementText	"과"	0	""
+15190	kd	32	" "	0	0
+15190	kp	32
+15190	bi	insertText	" "
+15190	inp	insertText	" "	0	" "
+15197	ku	75
+15332	ku	32
+15565	bi	insertText	"ㅇ"
+15565	inp	insertText	"ㅇ"	1	" ㅇ"
+15566	kd	229	"ㅇ"	0	0
+15635	ku	68
+15651	bi	insertReplacementText	"여"
+15651	inp	insertReplacementText	"여"	1	"여"
+15652	kd	229	"ㅕ"	0	0
+15721	bi	insertReplacementText	"영"
+15721	inp	insertReplacementText	"영"	1	"영"
+15721	kd	229	"ㅇ"	0	0
+15747	ku	85
+15784	ku	68
+15875	bi	insertReplacementText	"영"
+15875	inp	insertReplacementText	"영"	0	""
+15878	bi	insertText	"ㅇ"
+15878	inp	insertText	"ㅇ"	0	"ㅇ"
+15879	kd	229	"ㅇ"	0	0
+15918	bi	insertReplacementText	"어"
+15919	inp	insertReplacementText	"어"	1	"어"
+15919	kd	229	"ㅓ"	0	0
+15992	ku	68
+16011	ku	74
+16242	bi	insertReplacementText	"어"
+16244	inp	insertReplacementText	"어"	0	""
+16251	kd	32	" "	0	0
+16251	kp	32
+16251	bi	insertText	" "
+16253	inp	insertText	" "	0	" "
+16370	ku	32
+16415	bi	insertText	"ㅎ"
+16416	inp	insertText	"ㅎ"	1	" ㅎ"
+16420	kd	229	"ㅎ"	0	0
+16511	bi	insertReplacementText	"하"
+16511	inp	insertReplacementText	"하"	1	"하"
+16511	kd	229	"ㅏ"	0	0
+16530	ku	71
+16572	bi	insertReplacementText	"한"
+16572	inp	insertReplacementText	"한"	1	"한"
+16573	kd	229	"ㄴ"	0	0
+16597	ku	75
+16621	bi	insertReplacementText	"한"
+16621	inp	insertReplacementText	"한"	0	""
+16624	bi	insertText	"ㄱ"
+16624	inp	insertText	"ㄱ"	0	"ㄱ"
+16625	kd	229	"ㄱ"	0	0
+16697	ku	83
+16713	ku	82
+16732	bi	insertReplacementText	"그"
+16733	inp	insertReplacementText	"그"	1	"그"
+16733	kd	229	"ㅡ"	0	0
+16804	bi	insertReplacementText	"글"
+16804	inp	insertReplacementText	"글"	1	"글"
+16804	kd	229	"ㄹ"	0	0
+16837	ku	77
+16892	ku	70
+17000	bi	insertReplacementText	"긁"
+17001	inp	insertReplacementText	"긁"	1	"긁"
+17001	kd	229	"ㄱ"	0	0
+17073	bi	insertReplacementText	"글"
+17073	inp	insertReplacementText	"글"	1	"글"
+17075	bi	insertText	"고"
+17075	inp	insertText	"고"	0	"고"
+17076	kd	229	"ㅗ"	0	0
+17113	ku	82
+17135	bi	insertReplacementText	"과"
+17135	inp	insertReplacementText	"과"	1	"과"
+17135	kd	229	"ㅏ"	0	0
+17163	ku	72
+17207	bi	insertReplacementText	"과"
+17207	inp	insertReplacementText	"과"	0	""
+17209	kd	32	" "	0	0
+17209	kp	32
+17209	bi	insertText	" "
+17209	inp	insertText	" "	0	" "
+17247	ku	75
+17298	bi	insertText	"ㅎ"
+17299	inp	insertText	"ㅎ"	1	" ㅎ"
+17300	kd	229	"ㅎ"	0	0
+17330	ku	32
+17380	ku	71
+17404	bi	insertReplacementText	"하"
+17404	inp	insertReplacementText	"하"	1	"하"
+17405	kd	229	"ㅏ"	0	0
+17450	bi	insertReplacementText	"한"
+17450	inp	insertReplacementText	"한"	1	"한"
+17450	kd	229	"ㄴ"	0	0
+17506	ku	75
+17556	bi	insertReplacementText	"한"
+17556	inp	insertReplacementText	"한"	0	""
+17558	bi	insertText	"ㄱ"
+17558	inp	insertText	"ㄱ"	0	"ㄱ"
+17559	kd	229	"ㄱ"	0	0
+17597	ku	83
+17647	bi	insertReplacementText	"그"
+17647	inp	insertReplacementText	"그"	1	"그"
+17647	kd	229	"ㅡ"	0	0
+17649	ku	82
+17720	bi	insertReplacementText	"글"
+17720	inp	insertReplacementText	"글"	1	"글"
+17720	kd	229	"ㄹ"	0	0
+17746	ku	77
+17809	bi	insertReplacementText	"글"
+17810	inp	insertReplacementText	"글"	0	""
+17811	kd	32	" "	0	0
+17811	kp	32
+17811	bi	insertText	" "
+17812	inp	insertText	" "	0	" "
+17830	ku	70
+17897	ku	32
+18334	bi	insertText	"ㄱ"
+18334	inp	insertText	"ㄱ"	1	" ㄱ"
+18335	kd	229	"ㄱ"	0	0
+18398	bi	insertReplacementText	"그"
+18399	inp	insertReplacementText	"그"	1	"그"
+18399	kd	229	"ㅡ"	0	0
+18437	ku	82
+18504	bi	insertReplacementText	"글"
+18505	inp	insertReplacementText	"글"	1	"글"
+18505	kd	229	"ㄹ"	0	0
+18530	ku	77
+18597	ku	70
+18620	bi	insertReplacementText	"그"
+18621	inp	insertReplacementText	"그"	1	"그"
+18621	bi	insertText	"리"
+18621	inp	insertText	"리"	0	"리"
+18622	kd	229	"ㅣ"	0	0
+18669	bi	insertReplacementText	"릭"
+18669	inp	insertReplacementText	"릭"	1	"릭"
+18670	kd	229	"ㄱ"	0	0
+18680	ku	76
+18753	bi	insertReplacementText	"리"
+18754	inp	insertReplacementText	"리"	1	"리"
+18755	bi	insertText	"고"
+18755	inp	insertText	"고"	0	"고"
+18755	kd	229	"ㅗ"	0	0
+18797	ku	82
+18816	bi	insertReplacementText	"고"
+18816	inp	insertReplacementText	"고"	0	""
+18817	kd	32	" "	0	0
+18817	kp	32
+18817	bi	insertText	" "
+18818	inp	insertText	" "	0	" "
+18847	ku	72
+18915	ku	32
+19099	bi	insertText	"ㅅ"
+19099	inp	insertText	"ㅅ"	1	" ㅅ"
+19102	kd	229	"ㅅ"	0	0
+19170	bi	insertReplacementText	"스"
+19170	inp	insertReplacementText	"스"	1	"스"
+19171	kd	229	"ㅡ"	0	0
+19180	ku	84
+19271	bi	insertReplacementText	"슾"
+19271	inp	insertReplacementText	"슾"	1	"슾"
+19272	kd	229	"ㅍ"	0	0
+19280	ku	77
+19337	ku	86
+19372	bi	insertReplacementText	"스"
+19372	inp	insertReplacementText	"스"	1	"스"
+19380	bi	insertText	"페"
+19380	inp	insertText	"페"	0	"페"
+19381	kd	229	"ㅔ"	0	0
+19430	bi	insertReplacementText	"펭"
+19431	inp	insertReplacementText	"펭"	1	"펭"
+19431	kd	229	"ㅇ"	0	0
+19456	ku	80
+19531	ku	68
+19569	bi	insertReplacementText	"페"
+19570	inp	insertReplacementText	"페"	1	"페"
+19570	bi	insertText	"이"
+19571	inp	insertText	"이"	0	"이"
+19571	kd	229	"ㅣ"	0	0
+19597	ku	76
+19637	bi	insertReplacementText	"잇"
+19637	inp	insertReplacementText	"잇"	1	"잇"
+19637	kd	229	"ㅅ"	0	0
+19706	bi	insertReplacementText	"이"
+19706	inp	insertReplacementText	"이"	1	"이"
+19707	bi	insertText	"스"
+19707	inp	insertText	"스"	0	"스"
+19708	kd	229	"ㅡ"	0	0
+19730	ku	84
+19775	bi	insertReplacementText	"스"
+19775	inp	insertReplacementText	"스"	0	""
+19778	kd	32	" "	0	0
+19778	kp	32
+19778	bi	insertText	" "
+19778	inp	insertText	" "	0	" "
+19813	ku	77
+19876	ku	32
+20688	kd	8	"Backspace"	0	0
+20776	ku	8
+20854	bi	insertText	"ㄴ"
+20854	inp	insertText	"ㄴ"	1	" ㄴ"
+20856	kd	229	"ㄴ"	0	0
+20930	bi	insertReplacementText	"나"
+20931	inp	insertReplacementText	"나"	1	"나"
+20931	kd	229	"ㅏ"	0	0
+20987	ku	83
+21057	bi	insertReplacementText	"나"
+21057	inp	insertReplacementText	"나"	0	""
+21059	kd	32	" "	0	0
+21059	kp	32
+21059	bi	insertText	" "
+21059	inp	insertText	" "	0	" "
+21063	ku	75
+21180	ku	32
+22002	bi	insertText	"ㅁ"
+22003	inp	insertText	"ㅁ"	1	" ㅁ"
+22004	kd	229	"ㅁ"	0	0
+22056	bi	insertReplacementText	"무"
+22056	inp	insertReplacementText	"무"	1	"무"
+22057	kd	229	"ㅜ"	0	0
+22146	bi	insertReplacementText	"문"
+22146	inp	insertReplacementText	"문"	1	"문"
+22146	kd	229	"ㄴ"	0	0
+22163	ku	65
+22197	ku	78
+22273	ku	83
+22354	bi	insertReplacementText	"묹"
+22355	inp	insertReplacementText	"묹"	1	"묹"
+22355	kd	229	"ㅈ"	0	0
+22457	ku	87
+22871	bi	insertReplacementText	"문"
+22872	inp	insertReplacementText	"문"	1	"문"
+22872	kd	229	"Backspace"	0	0
+22897	ku	8
+23000	bi	insertReplacementText	"무"
+23001	inp	insertReplacementText	"무"	1	"무"
+23001	kd	229	"Backspace"	0	0
+23056	ku	8
+23150	bi	insertReplacementText	"ㅁ"
+23151	inp	insertReplacementText	"ㅁ"	1	"ㅁ"
+23151	kd	229	"Backspace"	0	0
+23236	ku	8
+23300	bi	insertReplacementText	"ㅁ"
+23300	inp	insertReplacementText	"ㅁ"	0	""
+23302	bi	insertText	"ㅌ"
+23302	inp	insertText	"ㅌ"	0	"ㅌ"
+23302	kd	229	"ㅌ"	0	0
+23406	bi	insertReplacementText	"트"
+23406	inp	insertReplacementText	"트"	1	"트"
+23406	kd	229	"ㅡ"	0	0
+23418	ku	88
+23523	ku	77
+23553	bi	insertReplacementText	"특"
+23554	inp	insertReplacementText	"특"	1	"특"
+23554	kd	229	"ㄱ"	0	0
+23630	ku	82
+23789	bi	insertReplacementText	"튻"
+23790	inp	insertReplacementText	"튻"	1	"튻"
+23790	kd	229	"ㅅ"	0	0
+23856	bi	insertReplacementText	"특"
+23857	inp	insertReplacementText	"특"	1	"특"
+23858	bi	insertText	"수"
+23858	inp	insertText	"수"	0	"수"
+23859	kd	229	"ㅜ"	0	0
+23897	ku	84
+23917	bi	insertReplacementText	"수"
+23917	inp	insertReplacementText	"수"	0	""
+23919	kd	32	" "	0	0
+23919	kp	32
+23919	bi	insertText	" "
+23919	inp	insertText	" "	0	" "
+23964	ku	78
+24032	ku	32
+24202	kd	8	"Backspace"	0	0
+24247	ku	8
+24349	kd	8	"Backspace"	0	0
+24413	ku	8
+24515	kd	8	"Backspace"	0	0
+24580	ku	8
+24665	kd	8	"Backspace"	0	0
+24745	ku	8
+24769	bi	insertText	"ㅌ"
+24769	inp	insertText	"ㅌ"	1	" ㅌ"
+24771	kd	229	"ㅌ"	0	0
+24864	ku	88
+24908	bi	insertReplacementText	"트"
+24908	inp	insertReplacementText	"트"	1	"트"
+24909	kd	229	"ㅡ"	0	0
+25026	bi	insertReplacementText	"특"
+25027	inp	insertReplacementText	"특"	1	"특"
+25027	kd	229	"ㄱ"	0	0
+25047	ku	77
+25110	ku	82
+25192	bi	insertReplacementText	"튻"
+25193	inp	insertReplacementText	"튻"	1	"튻"
+25193	kd	229	"ㅅ"	0	0
+25255	bi	insertReplacementText	"특"
+25256	inp	insertReplacementText	"특"	1	"특"
+25257	bi	insertText	"수"
+25257	inp	insertText	"수"	0	"수"
+25258	kd	229	"ㅜ"	0	0
+25297	ku	84
+25347	ku	78
+25367	bi	insertReplacementText	"수"
+25367	inp	insertReplacementText	"수"	0	""
+25368	kd	32	" "	0	0
+25368	kp	32
+25368	bi	insertText	" "
+25368	inp	insertText	" "	0	" "
+25457	ku	32
+25476	bi	insertText	"ㅁ"
+25476	inp	insertText	"ㅁ"	1	" ㅁ"
+25478	kd	229	"ㅁ"	0	0
+25542	bi	insertReplacementText	"무"
+25542	inp	insertReplacementText	"무"	1	"무"
+25543	kd	229	"ㅜ"	0	0
+25611	bi	insertReplacementText	"문"
+25612	inp	insertReplacementText	"문"	1	"문"
+25612	kd	229	"ㄴ"	0	0
+25630	ku	65
+25651	ku	78
+25714	ku	83
+25776	bi	insertReplacementText	"묹"
+25776	inp	insertReplacementText	"묹"	1	"묹"
+25777	kd	229	"ㅈ"	0	0
+25836	bi	insertReplacementText	"문"
+25837	inp	insertReplacementText	"문"	1	"문"
+25839	bi	insertText	"자"
+25839	inp	insertText	"자"	0	"자"
+25840	kd	229	"ㅏ"	0	0
+25913	bi	insertReplacementText	"잗"
+25913	inp	insertReplacementText	"잗"	1	"잗"
+25914	kd	229	"ㄷ"	0	0
+25914	ku	75
+25930	ku	87
+25997	ku	69
+26021	bi	insertReplacementText	"자"
+26022	inp	insertReplacementText	"자"	1	"자"
+26023	bi	insertText	"드"
+26023	inp	insertText	"드"	0	"드"
+26024	kd	229	"ㅡ"	0	0
+26094	bi	insertReplacementText	"들"
+26095	inp	insertReplacementText	"들"	1	"들"
+26095	kd	229	"ㄹ"	0	0
+26114	ku	77
+26164	ku	70
+26270	bi	insertReplacementText	"들"
+26270	inp	insertReplacementText	"들"	0	""
+26273	bi	insertText	"ㅇ"
+26274	inp	insertText	"ㅇ"	0	"ㅇ"
+26275	kd	229	"ㅇ"	0	0
+26354	bi	insertReplacementText	"이"
+26355	inp	insertReplacementText	"이"	1	"이"
+26355	kd	229	"ㅣ"	0	0
+26387	ku	68
+26420	bi	insertReplacementText	"이"
+26420	inp	insertReplacementText	"이"	0	""
+26422	kd	32	" "	0	0
+26422	kp	32
+26423	bi	insertText	" "
+26423	inp	insertText	" "	0	" "
+26464	ku	76
+26547	ku	32
+26840	bi	insertText	"ㅁ"
+26841	inp	insertText	"ㅁ"	1	" ㅁ"
+26845	kd	229	"ㅁ"	0	0
+26905	bi	insertReplacementText	"며"
+26906	inp	insertReplacementText	"며"	1	"며"
+26907	kd	229	"ㅕ"	0	0
+26938	bi	insertReplacementText	"명"
+26939	inp	insertReplacementText	"명"	1	"명"
+26939	kd	229	"ㅇ"	0	0
+26997	ku	65
+27014	ku	85
+27036	ku	68
+27142	bi	insertReplacementText	"명"
+27143	inp	insertReplacementText	"명"	0	""
+27145	bi	insertText	"ㅎ"
+27146	inp	insertText	"ㅎ"	0	"ㅎ"
+27147	kd	229	"ㅎ"	0	0
+27187	bi	insertReplacementText	"호"
+27188	inp	insertReplacementText	"호"	1	"호"
+27188	kd	229	"ㅗ"	0	0
+27214	ku	71
+27235	bi	insertReplacementText	"화"
+27236	inp	insertReplacementText	"화"	1	"화"
+27236	kd	229	"ㅏ"	0	0
+27264	ku	72
+27291	bi	insertReplacementText	"확"
+27292	inp	insertReplacementText	"확"	1	"확"
+27292	kd	229	"ㄱ"	0	0
+27321	ku	75
+27392	ku	82
+27488	bi	insertReplacementText	"확"
+27489	inp	insertReplacementText	"확"	0	""
+27491	bi	insertText	"ㅎ"
+27491	inp	insertText	"ㅎ"	0	"ㅎ"
+27493	kd	229	"ㅎ"	0	0
+27549	bi	insertReplacementText	"하"
+27549	inp	insertReplacementText	"하"	1	"하"
+27550	kd	229	"ㅏ"	0	0
+27564	ku	71
+27637	bi	insertReplacementText	"학"
+27637	inp	insertReplacementText	"학"	1	"학"
+27638	kd	229	"ㄱ"	0	0
+27664	ku	75
+27726	bi	insertReplacementText	"하"
+27727	inp	insertReplacementText	"하"	1	"하"
+27728	bi	insertText	"게"
+27729	inp	insertText	"게"	0	"게"
+27730	kd	229	"ㅔ"	0	0
+27764	ku	82
+27802	bi	insertReplacementText	"게"
+27802	inp	insertReplacementText	"게"	0	""
+27804	kd	32	" "	0	0
+27804	kp	32
+27804	bi	insertText	" "
+27804	inp	insertText	" "	0	" "
+27830	ku	80
+27873	bi	insertText	"ㅇ"
+27873	inp	insertText	"ㅇ"	1	" ㅇ"
+27875	kd	229	"ㅇ"	0	0
+27914	ku	32
+27964	bi	insertReplacementText	"이"
+27965	inp	insertReplacementText	"이"	1	"이"
+27965	kd	229	"ㅣ"	0	0
+28035	ku	68
+28056	bi	insertReplacementText	"입"
+28056	inp	insertReplacementText	"입"	1	"입"
+28056	kd	229	"ㅂ"	0	0
+28097	ku	76
+28138	bi	insertReplacementText	"입"
+28138	inp	insertReplacementText	"입"	0	""
+28145	bi	insertText	"ㄹ"
+28145	inp	insertText	"ㄹ"	0	"ㄹ"
+28146	kd	229	"ㄹ"	0	0
+28164	ku	81
+28240	bi	insertReplacementText	"려"
+28241	inp	insertReplacementText	"려"	1	"려"
+28241	kd	229	"ㅕ"	0	0
+28247	ku	70
+28296	bi	insertReplacementText	"력"
+28297	inp	insertReplacementText	"력"	1	"력"
+28297	kd	229	"ㄱ"	0	0
+28337	ku	85
+28386	ku	82
+28457	bi	insertReplacementText	"력"
+28457	inp	insertReplacementText	"력"	0	""
+28459	bi	insertText	"ㅎ"
+28459	inp	insertText	"ㅎ"	0	"ㅎ"
+28460	kd	229	"ㅎ"	0	0
+28522	bi	insertReplacementText	"하"
+28522	inp	insertReplacementText	"하"	1	"하"
+28523	kd	229	"ㅏ"	0	0
+28547	ku	71
+28597	ku	75
+28617	bi	insertReplacementText	"한"
+28618	inp	insertReplacementText	"한"	1	"한"
+28618	kd	229	"ㄴ"	0	0
+28685	ku	83
+28722	bi	insertReplacementText	"하"
+28723	inp	insertReplacementText	"하"	1	"하"
+28725	bi	insertText	"느"
+28725	inp	insertText	"느"	0	"느"
+28726	kd	229	"ㅡ"	0	0
+28771	bi	insertReplacementText	"는"
+28772	inp	insertReplacementText	"는"	1	"는"
+28772	kd	229	"ㄴ"	0	0
+28814	ku	77
+28901	ku	83
+28903	bi	insertReplacementText	"는"
+28904	inp	insertReplacementText	"는"	0	""
+28905	kd	32	" "	0	0
+28905	kp	32
+28905	bi	insertText	" "
+28906	inp	insertText	" "	0	" "
+28983	ku	32
+29195	bi	insertText	"ㄱ"
+29195	inp	insertText	"ㄱ"	1	" ㄱ"
+29198	kd	229	"ㄱ"	0	0
+29286	bi	insertReplacementText	"거"
+29287	inp	insertReplacementText	"거"	1	"거"
+29287	kd	229	"ㅓ"	0	0
+29314	ku	82
+29387	ku	74
+29543	bi	insertReplacementText	"것"
+29543	inp	insertReplacementText	"것"	1	"것"
+29544	kd	229	"ㅅ"	0	0
+29642	ku	84
+29752	bi	insertReplacementText	"것"
+29752	inp	insertReplacementText	"것"	0	""
+29755	bi	insertText	"ㅇ"
+29756	inp	insertText	"ㅇ"	0	"ㅇ"
+29757	kd	229	"ㅇ"	0	0
+29838	bi	insertReplacementText	"이"
+29838	inp	insertReplacementText	"이"	1	"이"
+29839	kd	229	"ㅣ"	0	0
+29847	ku	68
+29885	bi	insertReplacementText	"이"
+29885	inp	insertReplacementText	"이"	0	""
+29887	kd	32	" "	0	0
+29887	kp	32
+29887	bi	insertText	" "
+29888	inp	insertText	" "	0	" "
+29931	ku	76
+29987	ku	32
+30040	bi	insertText	"ㄱ"
+30041	inp	insertText	"ㄱ"	1	" ㄱ"
+30043	kd	229	"ㄱ"	0	0
+30097	bi	insertReplacementText	"그"
+30097	inp	insertReplacementText	"그"	1	"그"
+30097	kd	229	"ㅡ"	0	0
+30122	ku	82
+30202	bi	insertReplacementText	"귿"
+30202	inp	insertReplacementText	"귿"	1	"귿"
+30203	kd	229	"ㄷ"	0	0
+30231	ku	77
+30292	bi	insertReplacementText	"그"
+30292	inp	insertReplacementText	"그"	1	"그"
+30294	bi	insertText	"대"
+30295	inp	insertText	"대"	0	"대"
+30296	kd	229	"ㅐ"	0	0
+30314	ku	69
+30397	bi	insertReplacementText	"댈"
+30397	inp	insertReplacementText	"댈"	1	"댈"
+30398	kd	229	"ㄹ"	0	0
+30422	ku	79
+30482	bi	insertReplacementText	"대"
+30483	inp	insertReplacementText	"대"	1	"대"
+30484	bi	insertText	"로"
+30484	inp	insertText	"로"	0	"로"
+30485	kd	229	"ㅗ"	0	0
+30497	ku	70
+30520	bi	insertReplacementText	"로"
+30521	inp	insertReplacementText	"로"	0	""
+30522	kd	32	" "	0	0
+30522	kp	32
+30522	bi	insertText	" "
+30522	inp	insertText	" "	0	" "
+30582	bi	insertText	"ㅂ"
+30582	inp	insertText	"ㅂ"	1	" ㅂ"
+30583	kd	229	"ㅂ"	0	0
+30583	ku	72
+30631	ku	32
+30647	ku	81
+30668	bi	insertReplacementText	"바"
+30668	inp	insertReplacementText	"바"	1	"바"
+30668	kd	229	"ㅏ"	0	0
+30738	bi	insertReplacementText	"반"
+30738	inp	insertReplacementText	"반"	1	"반"
+30738	kd	229	"ㄴ"	0	0
+30774	bi	insertReplacementText	"반"
+30775	inp	insertReplacementText	"반"	0	""
+30777	bi	insertText	"ㅇ"
+30777	inp	insertText	"ㅇ"	0	"ㅇ"
+30778	kd	229	"ㅇ"	0	0
+30798	ku	75
+30842	ku	83
+30872	ku	68
+30907	bi	insertReplacementText	"여"
+30907	inp	insertReplacementText	"여"	1	"여"
+30908	kd	229	"ㅕ"	0	0
+30960	bi	insertReplacementText	"영"
+30960	inp	insertReplacementText	"영"	1	"영"
+30960	kd	229	"ㅇ"	0	0
+31007	ku	85
+31055	ku	68
+31131	bi	insertReplacementText	"영"
+31131	inp	insertReplacementText	"영"	0	""
+31132	bi	insertText	"ㄷ"
+31133	inp	insertText	"ㄷ"	0	"ㄷ"
+31134	kd	229	"ㄷ"	0	0
+31188	bi	insertReplacementText	"도"
+31189	inp	insertReplacementText	"도"	1	"도"
+31189	kd	229	"ㅗ"	0	0
+31225	bi	insertReplacementText	"되"
+31225	inp	insertReplacementText	"되"	1	"되"
+31226	kd	229	"ㅣ"	0	0
+31247	ku	69
+31264	ku	72
+31296	bi	insertReplacementText	"됮"
+31297	inp	insertReplacementText	"됮"	1	"됮"
+31297	kd	229	"ㅈ"	0	0
+31314	ku	76
+31418	bi	insertReplacementText	"되"
+31419	inp	insertReplacementText	"되"	1	"되"
+31421	bi	insertText	"지"
+31421	inp	insertText	"지"	0	"지"
+31422	kd	229	"ㅣ"	0	0
+31431	ku	87
+31532	ku	76
+31943	bi	insertReplacementText	"ㅈ"
+31944	inp	insertReplacementText	"ㅈ"	1	"ㅈ"
+31944	kd	229	"Backspace"	0	0
+31987	ku	8
+32093	bi	insertReplacementText	"ㅈ"
+32094	inp	insertReplacementText	"ㅈ"	0	""
+32096	kd	8	"Backspace"	0	0
+32148	ku	8
+32209	kd	8	"Backspace"	0	0
+32286	ku	8
+32329	bi	insertText	"ㄴ"
+32330	inp	insertText	"ㄴ"	0	"ㄴ"
+32332	kd	229	"ㄴ"	0	0
+32422	bi	insertReplacementText	"느"
+32423	inp	insertReplacementText	"느"	1	"느"
+32424	kd	229	"ㅡ"	0	0
+32431	ku	83
+32505	bi	insertReplacementText	"는"
+32505	inp	insertReplacementText	"는"	1	"는"
+32506	kd	229	"ㄴ"	0	0
+32514	ku	77
+32614	ku	83
+32757	bi	insertReplacementText	"느"
+32758	inp	insertReplacementText	"느"	1	"느"
+32759	kd	229	"Backspace"	0	0
+32792	ku	8
+32921	bi	insertReplacementText	"ㄴ"
+32922	inp	insertReplacementText	"ㄴ"	1	"ㄴ"
+32922	kd	229	"Backspace"	0	0
+32965	ku	8
+33056	bi	insertReplacementText	"ㄴ"
+33057	inp	insertReplacementText	"ㄴ"	0	""
+33058	kd	8	"Backspace"	0	0
+33122	ku	8
+33230	bi	insertText	"ㄷ"
+33230	inp	insertText	"ㄷ"	0	"ㄷ"
+33233	kd	229	"ㄷ"	0	0
+33310	bi	insertReplacementText	"도"
+33311	inp	insertReplacementText	"도"	1	"도"
+33311	kd	229	"ㅗ"	0	0
+33335	ku	69
+33369	bi	insertReplacementText	"되"
+33370	inp	insertReplacementText	"되"	1	"되"
+33370	kd	229	"ㅣ"	0	0
+33407	ku	72
+33457	bi	insertReplacementText	"된"
+33457	inp	insertReplacementText	"된"	1	"된"
+33458	kd	229	"ㄴ"	0	0
+33481	ku	76
+33514	ku	83
+33577	bi	insertReplacementText	"되"
+33578	inp	insertReplacementText	"되"	1	"되"
+33579	bi	insertText	"느"
+33579	inp	insertText	"느"	0	"느"
+33580	kd	229	"ㅡ"	0	0
+33624	bi	insertReplacementText	"는"
+33624	inp	insertReplacementText	"는"	1	"는"
+33625	kd	229	"ㄴ"	0	0
+33664	ku	77
+33693	ku	83
+33772	bi	insertReplacementText	"늕"
+33773	inp	insertReplacementText	"늕"	1	"늕"
+33774	kd	229	"ㅈ"	0	0
+33878	bi	insertReplacementText	"는"
+33878	inp	insertReplacementText	"는"	1	"는"
+33881	bi	insertText	"지"
+33881	inp	insertText	"지"	0	"지"
+33882	kd	229	"ㅣ"	0	0
+33914	ku	87
+33953	bi	insertReplacementText	"지"
+33953	inp	insertReplacementText	"지"	0	""
+33955	kd	32	" "	0	0
+33955	kp	32
+33955	bi	insertText	" "
+33955	inp	insertText	" "	0	" "
+33998	ku	76
+34037	ku	32
+34090	bi	insertText	"ㄱ"
+34090	inp	insertText	"ㄱ"	1	" ㄱ"
+34092	kd	229	"ㄱ"	0	0
+34146	bi	insertReplacementText	"그"
+34147	inp	insertReplacementText	"그"	1	"그"
+34147	kd	229	"ㅡ"	0	0
+34181	ku	82
+34258	bi	insertReplacementText	"글"
+34259	inp	insertReplacementText	"글"	1	"글"
+34259	kd	229	"ㄹ"	0	0
+34264	ku	77
+34352	ku	70
+34402	bi	insertReplacementText	"그"
+34403	inp	insertReplacementText	"그"	1	"그"
+34404	bi	insertText	"래"
+34404	inp	insertText	"래"	0	"래"
+34405	kd	229	"ㅐ"	0	0
+34503	ku	79
+34703	bi	insertReplacementText	"ㄹ"
+34704	inp	insertReplacementText	"ㄹ"	1	"ㄹ"
+34705	kd	229	"Backspace"	0	0
+34772	ku	8
+34915	bi	insertReplacementText	"리"
+34916	inp	insertReplacementText	"리"	1	"리"
+34917	kd	229	"ㅣ"	0	0
+35020	bi	insertReplacementText	"릭"
+35021	inp	insertReplacementText	"릭"	1	"릭"
+35021	kd	229	"ㄱ"	0	0
+35031	ku	76
+35137	bi	insertReplacementText	"리"
+35138	inp	insertReplacementText	"리"	1	"리"
+35141	bi	insertText	"고"
+35141	inp	insertText	"고"	0	"고"
+35142	kd	229	"ㅗ"	0	0
+35148	ku	82
+35204	bi	insertReplacementText	"고"
+35205	inp	insertReplacementText	"고"	0	""
+35206	kd	32	" "	0	0
+35206	kp	32
+35206	bi	insertText	" "
+35206	inp	insertText	" "	0	" "
+35255	ku	72
+35298	ku	32
+35397	bi	insertText	"ㅅ"
+35398	inp	insertText	"ㅅ"	1	" ㅅ"
+35400	kd	229	"ㅅ"	0	0
+35464	ku	84
+35709	bi	insertReplacementText	"ㅅ"
+35710	inp	insertReplacementText	"ㅅ"	0	""
+35711	kd	8	"Backspace"	0	0
+35793	ku	8
+35960	bi	insertText	"ㄱ"
+35960	inp	insertText	"ㄱ"	0	"ㄱ"
+35962	kd	229	"ㄱ"	0	0
+36038	bi	insertReplacementText	"그"
+36039	inp	insertReplacementText	"그"	1	"그"
+36039	kd	229	"ㅡ"	0	0
+36083	ku	82
+36109	bi	insertReplacementText	"그"
+36110	inp	insertReplacementText	"그"	0	""
+36112	kd	32	" "	0	0
+36112	kp	32
+36112	bi	insertText	" "
+36112	inp	insertText	" "	0	" "
+36164	ku	77
+36212	ku	32
+36233	bi	insertText	"ㅅ"
+36234	inp	insertText	"ㅅ"	1	" ㅅ"
+36236	kd	229	"ㅅ"	0	0
+36315	bi	insertReplacementText	"시"
+36315	inp	insertReplacementText	"시"	1	"시"
+36316	kd	229	"ㅣ"	0	0
+36331	ku	84
+36438	ku	76
+36562	bi	insertReplacementText	"식"
+36563	inp	insertReplacementText	"식"	1	"식"
+36564	kd	229	"ㄱ"	0	0
+36628	bi	insertReplacementText	"시"
+36628	inp	insertReplacementText	"시"	1	"시"
+36630	bi	insertText	"그"
+36631	inp	insertText	"그"	0	"그"
+36632	kd	229	"ㅡ"	0	0
+36681	ku	82
+36738	ku	77
+36786	bi	insertReplacementText	"근"
+36787	inp	insertReplacementText	"근"	1	"근"
+36787	kd	229	"ㄴ"	0	0
+36880	bi	insertReplacementText	"그"
+36881	inp	insertReplacementText	"그"	1	"그"
+36882	bi	insertText	"너"
+36882	inp	insertText	"너"	0	"너"
+36883	kd	229	"ㅓ"	0	0
+36898	ku	83
+36955	bi	insertReplacementText	"널"
+36955	inp	insertReplacementText	"널"	1	"널"
+36956	kd	229	"ㄹ"	0	0
+36964	ku	74
+37052	ku	70
+37198	bi	insertReplacementText	"널"
+37199	inp	insertReplacementText	"널"	0	""
+37200	bi	insertText	"ㅇ"
+37201	inp	insertText	"ㅇ"	0	"ㅇ"
+37202	kd	229	"ㅇ"	0	0
+37337	ku	68
+37357	bi	insertReplacementText	"이"
+37358	inp	insertReplacementText	"이"	1	"이"
+37358	kd	229	"ㅣ"	0	0
+37425	bi	insertReplacementText	"이"
+37426	inp	insertReplacementText	"이"	0	""
+37427	kd	32	" "	0	0
+37427	kp	32
+37427	bi	insertText	" "
+37427	inp	insertText	" "	0	" "
+37464	ku	76
+37488	ku	32
+37566	bi	insertText	"ㄷ"
+37567	inp	insertText	"ㄷ"	1	" ㄷ"
+37569	kd	229	"ㄷ"	0	0
+37640	bi	insertReplacementText	"드"
+37641	inp	insertReplacementText	"드"	1	"드"
+37641	kd	229	"ㅡ"	0	0
+37664	ku	69
+37733	bi	insertReplacementText	"들"
+37735	inp	insertReplacementText	"들"	1	"들"
+37735	kd	229	"ㄹ"	0	0
+37748	ku	77
+37789	ku	70
+37867	bi	insertReplacementText	"들"
+37867	inp	insertReplacementText	"들"	0	""
+37869	bi	insertText	"ㅇ"
+37869	inp	insertText	"ㅇ"	0	"ㅇ"
+37870	kd	229	"ㅇ"	0	0
+37904	bi	insertReplacementText	"어"
+37905	inp	insertReplacementText	"어"	1	"어"
+37905	kd	229	"ㅓ"	0	0
+37938	ku	68
+37998	ku	74
+38018	bi	insertReplacementText	"억"
+38019	inp	insertReplacementText	"억"	1	"억"
+38019	kd	229	"ㄱ"	0	0
+38122	bi	insertReplacementText	"어"
+38123	inp	insertReplacementText	"어"	1	"어"
+38125	bi	insertText	"가"
+38125	inp	insertText	"가"	0	"가"
+38126	kd	229	"ㅏ"	0	0
+38131	ku	82
+38198	ku	75
+38218	bi	insertReplacementText	"간"
+38219	inp	insertReplacementText	"간"	1	"간"
+38219	kd	229	"ㄴ"	0	0
+38267	ku	83
+38322	bi	insertReplacementText	"가"
+38323	inp	insertReplacementText	"가"	1	"가"
+38325	bi	insertText	"느"
+38325	inp	insertText	"느"	0	"느"
+38326	kd	229	"ㅡ"	0	0
+38355	bi	insertReplacementText	"는"
+38356	inp	insertReplacementText	"는"	1	"는"
+38356	kd	229	"ㄴ"	0	0
+38414	ku	77
+38448	ku	83
+38533	bi	insertReplacementText	"늕"
+38534	inp	insertReplacementText	"늕"	1	"늕"
+38535	kd	229	"ㅈ"	0	0
+38619	bi	insertReplacementText	"는"
+38620	inp	insertReplacementText	"는"	1	"는"
+38623	bi	insertText	"지"
+38623	inp	insertText	"지"	0	"지"
+38624	kd	229	"ㅣ"	0	0
+38648	ku	87
+38724	bi	insertReplacementText	"지"
+38724	inp	insertReplacementText	"지"	0	""
+38727	kd	32	" "	0	0
+38727	kp	32
+38727	bi	insertText	" "
+38727	inp	insertText	" "	0	" "
+38752	ku	76
+38838	ku	32
+39272	bi	insertText	"ㅈ"
+39273	inp	insertText	"ㅈ"	1	" ㅈ"
+39277	kd	229	"ㅈ"	0	0
+39357	bi	insertReplacementText	"저"
+39358	inp	insertReplacementText	"저"	1	"저"
+39358	kd	229	"ㅓ"	0	0
+39364	ku	87
+39435	bi	insertReplacementText	"전"
+39436	inp	insertReplacementText	"전"	1	"전"
+39436	kd	229	"ㄴ"	0	0
+39464	ku	74
+39555	bi	insertReplacementText	"전"
+39556	inp	insertReplacementText	"전"	0	""
+39560	bi	insertText	"ㅊ"
+39560	inp	insertText	"ㅊ"	0	"ㅊ"
+39561	kd	229	"ㅊ"	0	0
+39581	ku	83
+39637	bi	insertReplacementText	"체"
+39637	inp	insertReplacementText	"체"	1	"체"
+39638	kd	229	"ㅔ"	0	0
+39681	ku	67
+39710	bi	insertReplacementText	"체"
+39711	inp	insertReplacementText	"체"	0	""
+39713	kd	32	" "	0	0
+39713	kp	32
+39713	bi	insertText	" "
+39714	inp	insertText	" "	0	" "
+39772	ku	80
+39826	ku	32
+39938	bi	insertText	"ㄱ"
+39939	inp	insertText	"ㄱ"	1	" ㄱ"
+39941	kd	229	"ㄱ"	0	0
+39981	bi	insertReplacementText	"거"
+39982	inp	insertReplacementText	"거"	1	"거"
+39982	kd	229	"ㅓ"	0	0
+40037	ku	82
+40058	bi	insertReplacementText	"검"
+40059	inp	insertReplacementText	"검"	1	"검"
+40059	kd	229	"ㅁ"	0	0
+40086	ku	74
+40162	bi	insertReplacementText	"검"
+40162	inp	insertReplacementText	"검"	0	""
+40164	bi	insertText	"ㅌ"
+40165	inp	insertText	"ㅌ"	0	"ㅌ"
+40166	kd	229	"ㅌ"	0	0
+40204	ku	65
+40268	bi	insertReplacementText	"토"
+40269	inp	insertReplacementText	"토"	1	"토"
+40269	kd	229	"ㅗ"	0	0
+40298	ku	88
+40398	ku	72
+40418	bi	insertReplacementText	"톻"
+40419	inp	insertReplacementText	"톻"	1	"톻"
+40419	kd	229	"ㅎ"	0	0
+40475	bi	insertReplacementText	"토"
+40476	inp	insertReplacementText	"토"	1	"토"
+40478	bi	insertText	"해"
+40478	inp	insertText	"해"	0	"해"
+40479	kd	229	"ㅐ"	0	0
+40515	ku	71
+40581	ku	79
+40602	bi	insertReplacementText	"햅"
+40603	inp	insertReplacementText	"햅"	1	"햅"
+40603	kd	229	"ㅂ"	0	0
+40672	bi	insertReplacementText	"해"
+40673	inp	insertReplacementText	"해"	1	"해"
+40675	bi	insertText	"보"
+40675	inp	insertText	"보"	0	"보"
+40677	kd	229	"ㅗ"	0	0
+40722	bi	insertReplacementText	"봐"
+40723	inp	insertReplacementText	"봐"	1	"봐"
+40723	kd	229	"ㅏ"	0	0
+40731	ku	81
+40748	ku	72
+40835	bi	insertReplacementText	"봐"
+40835	inp	insertReplacementText	"봐"	0	""
+40838	kd	32	" "	0	0
+40838	kp	32
+40838	bi	insertText	" "
+40839	inp	insertText	" "	0	" "
+40865	ku	75
+40952	ku	32
+41992	bi	insertText	"ㅇ"
+41994	inp	insertText	"ㅇ"	1	" ㅇ"
+42003	kd	229	"ㅇ"	0	0
+42119	ku	68
+42125	bi	insertReplacementText	"이"
+42126	inp	insertReplacementText	"이"	1	"이"
+42127	kd	229	"ㅣ"	0	0
+42222	bi	insertReplacementText	"잇"
+42223	inp	insertReplacementText	"잇"	1	"잇"
+42223	kd	229	"ㅅ"	0	0
+42231	ku	76
+42318	ku	84
+42355	bi	insertReplacementText	"이"
+42356	inp	insertReplacementText	"이"	1	"이"
+42358	bi	insertText	"슈"
+42358	inp	insertText	"슈"	0	"슈"
+42359	kd	229	"ㅠ"	0	0
+42405	bi	insertReplacementText	"슉"
+42406	inp	insertReplacementText	"슉"	1	"슉"
+42406	kd	229	"ㄱ"	0	0
+42415	ku	66
+42513	ku	82
+42548	bi	insertReplacementText	"슈"
+42548	inp	insertReplacementText	"슈"	1	"슈"
+42551	bi	insertText	"가"
+42551	inp	insertText	"가"	0	"가"
+42552	kd	229	"ㅏ"	0	0
+42608	bi	insertReplacementText	"가"
+42609	inp	insertReplacementText	"가"	0	""
+42612	kd	32	" "	0	0
+42612	kp	32
+42612	bi	insertText	" "
+42613	inp	insertText	" "	0	" "
+42631	ku	75
+42671	bi	insertText	"ㅇ"
+42672	inp	insertText	"ㅇ"	1	" ㅇ"
+42680	kd	229	"ㅇ"	0	0
+42698	ku	32
+42752	ku	68
+42772	bi	insertReplacementText	"이"
+42773	inp	insertReplacementText	"이"	1	"이"
+42773	kd	229	"ㅣ"	0	0
+42815	kd	16	"Shift"	1	0
+42862	bi	insertReplacementText	"있"
+42862	inp	insertReplacementText	"있"	1	"있"
+42863	kd	229	"ㅆ"	1	0
+42881	ku	76
+42934	ku	84
+42977	ku	16
+43022	bi	insertReplacementText	"있"
+43022	inp	insertReplacementText	"있"	0	""
+43025	bi	insertText	"ㅇ"
+43025	inp	insertText	"ㅇ"	0	"ㅇ"
+43026	kd	229	"ㅇ"	0	0
+43074	bi	insertReplacementText	"으"
+43074	inp	insertReplacementText	"으"	1	"으"
+43074	kd	229	"ㅡ"	0	0
+43145	bi	insertReplacementText	"음"
+43146	inp	insertReplacementText	"음"	1	"음"
+43146	kd	229	"ㅁ"	0	0
+43157	ku	68
+43181	ku	77
+43266	bi	insertReplacementText	"으"
+43267	inp	insertReplacementText	"으"	1	"으"
+43268	bi	insertText	"며"
+43269	inp	insertText	"며"	0	"며"
+43270	kd	229	"ㅕ"	0	0
+43298	ku	65
+43321	bi	insertReplacementText	"면"
+43322	inp	insertReplacementText	"면"	1	"면"
+43322	kd	229	"ㄴ"	0	0
+43382	ku	85
+43446	bi	insertReplacementText	"면"
+43446	inp	insertReplacementText	"면"	0	""
+43450	kd	32	" "	0	0
+43450	kp	32
+43450	bi	insertText	" "
+43450	inp	insertText	" "	0	" "
+43481	ku	83
+43565	ku	32
+43925	bi	insertText	"ㅅ"
+43926	inp	insertText	"ㅅ"	1	" ㅅ"
+43927	kd	229	"ㅅ"	0	0
+43991	bi	insertReplacementText	"서"
+43992	inp	insertReplacementText	"서"	1	"서"
+43992	kd	229	"ㅓ"	0	0
+44015	ku	84
+44091	bi	insertReplacementText	"설"
+44092	inp	insertReplacementText	"설"	1	"설"
+44092	kd	229	"ㄹ"	0	0
+44115	ku	74
+44148	ku	70
+44227	bi	insertReplacementText	"섥"
+44228	inp	insertReplacementText	"섥"	1	"섥"
+44229	kd	229	"ㄱ"	0	0
+44265	kd	16	"Shift"	1	0
+44303	bi	insertReplacementText	"설"
+44304	inp	insertReplacementText	"설"	1	"설"
+44306	bi	insertText	"계"
+44306	inp	insertText	"계"	0	"계"
+44307	kd	229	"ㅖ"	1	0
+44348	ku	82
+44365	ku	16
+44386	ku	80
+44452	bi	insertReplacementText	"곔"
+44453	inp	insertReplacementText	"곔"	1	"곔"
+44453	kd	229	"ㅁ"	0	0
+44526	bi	insertReplacementText	"계"
+44527	inp	insertReplacementText	"계"	1	"계"
+44529	bi	insertText	"무"
+44529	inp	insertText	"무"	0	"무"
+44531	kd	229	"ㅜ"	0	0
+44605	bi	insertReplacementText	"문"
+44606	inp	insertReplacementText	"문"	1	"문"
+44606	kd	229	"ㄴ"	0	0
+44615	ku	65
+44642	ku	78
+44724	bi	insertReplacementText	"문"
+44724	inp	insertReplacementText	"문"	0	""
+44726	bi	insertText	"ㅅ"
+44726	inp	insertText	"ㅅ"	0	"ㅅ"
+44727	kd	229	"ㅅ"	0	0
+44748	ku	83
+44818	ku	84
+44821	bi	insertReplacementText	"서"
+44822	inp	insertReplacementText	"서"	1	"서"
+44822	kd	229	"ㅓ"	0	0
+44885	bi	insertReplacementText	"서"
+44886	inp	insertReplacementText	"서"	0	""
+44888	kd	32	" "	0	0
+44888	kp	32
+44888	bi	insertText	" "
+44889	inp	insertText	" "	0	" "
+44915	ku	74
+44947	bi	insertText	"ㅁ"
+44947	inp	insertText	"ㅁ"	1	" ㅁ"
+44949	kd	229	"ㅁ"	0	0
+44971	ku	32
+45043	bi	insertReplacementText	"마"
+45044	inp	insertReplacementText	"마"	1	"마"
+45044	kd	229	"ㅏ"	0	0
+45071	bi	insertReplacementText	"만"
+45071	inp	insertReplacementText	"만"	1	"만"
+45071	kd	229	"ㄴ"	0	0
+45081	ku	65
+45142	bi	insertReplacementText	"만"
+45142	inp	insertReplacementText	"만"	0	""
+45143	bi	insertText	"ㄷ"
+45143	inp	insertText	"ㄷ"	0	"ㄷ"
+45144	kd	229	"ㄷ"	0	0
+45152	ku	75
+45212	ku	83
+45242	ku	69
+45263	bi	insertReplacementText	"드"
+45263	inp	insertReplacementText	"드"	1	"드"
+45263	kd	229	"ㅡ"	0	0
+45308	bi	insertReplacementText	"들"
+45309	inp	insertReplacementText	"들"	1	"들"
+45309	kd	229	"ㄹ"	0	0
+45331	ku	77
+45381	ku	70
+45464	bi	insertReplacementText	"들"
+45464	inp	insertReplacementText	"들"	0	""
+45466	bi	insertText	"ㅇ"
+45466	inp	insertText	"ㅇ"	0	"ㅇ"
+45467	kd	229	"ㅇ"	0	0
+45546	bi	insertReplacementText	"어"
+45546	inp	insertReplacementText	"어"	1	"어"
+45547	kd	229	"ㅓ"	0	0
+45592	ku	68
+45635	ku	74
+45705	bi	insertReplacementText	"엇"
+45706	inp	insertReplacementText	"엇"	1	"엇"
+45706	kd	229	"ㅅ"	0	0
+45803	bi	insertReplacementText	"어"
+45804	inp	insertReplacementText	"어"	1	"어"
+45806	bi	insertText	"서"
+45807	inp	insertText	"서"	0	"서"
+45808	kd	229	"ㅓ"	0	0
+45815	ku	84
+45860	bi	insertReplacementText	"서"
+45861	inp	insertReplacementText	"서"	0	""
+45863	kd	32	" "	0	0
+45863	kp	32
+45863	bi	insertText	" "
+45863	inp	insertText	" "	0	" "
+45898	ku	74
+45948	kd	16	"Shift"	1	0
+45948	ku	32
+46099	ku	16
+46204	bi	insertText	"ㅈ"
+46205	inp	insertText	"ㅈ"	1	" ㅈ"
+46210	kd	229	"ㅈ"	0	0
+46252	bi	insertReplacementText	"지"
+46252	inp	insertReplacementText	"지"	1	"지"
+46253	kd	229	"ㅣ"	0	0
+46281	ku	87
+46356	bi	insertReplacementText	"진"
+46357	inp	insertReplacementText	"진"	1	"진"
+46357	kd	229	"ㄴ"	0	0
+46398	ku	76
+46427	ku	83
+46447	bi	insertReplacementText	"짆"
+46448	inp	insertReplacementText	"짆"	1	"짆"
+46449	kd	229	"ㅎ"	0	0
+46532	ku	71
+46553	bi	insertReplacementText	"진"
+46554	inp	insertReplacementText	"진"	1	"진"
+46556	bi	insertText	"해"
+46556	inp	insertText	"해"	0	"해"
+46557	kd	229	"ㅐ"	0	0
+46611	bi	insertReplacementText	"행"
+46611	inp	insertReplacementText	"행"	1	"행"
+46611	kd	229	"ㅇ"	0	0
+46638	ku	79
+46698	ku	68
+46774	bi	insertReplacementText	"행"
+46775	inp	insertReplacementText	"행"	0	""
+46778	bi	insertText	"ㅎ"
+46778	inp	insertText	"ㅎ"	0	"ㅎ"
+46779	kd	229	"ㅎ"	0	0
+46838	bi	insertReplacementText	"해"
+46839	inp	insertReplacementText	"해"	1	"해"
+46839	kd	229	"ㅐ"	0	0
+46877	ku	71
+46907	ku	79
+47016	bi	insertReplacementText	"해"
+47016	inp	insertReplacementText	"해"	0	""
+47019	kd	190	"."	0	0
+47069	kd	32	" "	0	0
+47069	kp	32
+47069	bi	insertText	" "
+47070	inp	insertText	" "	0	" "
+47121	ku	190
+47150	bi	insertText	"ㄴ"
+47150	inp	insertText	"ㄴ"	1	" ㄴ"
+47153	kd	229	"ㄴ"	0	0
+47181	ku	32
+47226	bi	insertReplacementText	"나"
+47226	inp	insertReplacementText	"나"	1	"나"
+47227	kd	229	"ㅏ"	0	0
+47304	bi	insertReplacementText	"낭"
+47305	inp	insertReplacementText	"낭"	1	"낭"
+47305	kd	229	"ㅇ"	0	0
+47331	ku	75
+47332	ku	83
+47408	bi	insertReplacementText	"나"
+47408	inp	insertReplacementText	"나"	1	"나"
+47410	bi	insertText	"에"
+47410	inp	insertText	"에"	0	"에"
+47412	kd	229	"ㅔ"	0	0
+47432	ku	68
+47476	ku	80
+47500	bi	insertReplacementText	"엑"
+47501	inp	insertReplacementText	"엑"	1	"엑"
+47501	kd	229	"ㄱ"	0	0
+47571	bi	insertReplacementText	"에"
+47572	inp	insertReplacementText	"에"	1	"에"
+47574	bi	insertText	"게"
+47574	inp	insertText	"게"	0	"게"
+47575	kd	229	"ㅔ"	0	0
+47601	ku	82
+47617	bi	insertReplacementText	"게"
+47618	inp	insertReplacementText	"게"	0	""
+47619	kd	32	" "	0	0
+47619	kp	32
+47619	bi	insertText	" "
+47619	inp	insertText	" "	0	" "
+47672	ku	80
+47691	bi	insertText	"ㅁ"
+47691	inp	insertText	"ㅁ"	1	" ㅁ"
+47692	kd	229	"ㅁ"	0	0
+47731	ku	32
+47796	bi	insertReplacementText	"무"
+47796	inp	insertReplacementText	"무"	1	"무"
+47797	kd	229	"ㅜ"	0	0
+47885	bi	insertReplacementText	"묻"
+47886	inp	insertReplacementText	"묻"	1	"묻"
+47886	kd	229	"ㄷ"	0	0
+47898	ku	78
+47915	ku	65
+48017	ku	69
+48038	bi	insertReplacementText	"묻"
+48039	inp	insertReplacementText	"묻"	0	""
+48042	bi	insertText	"ㅈ"
+48042	inp	insertText	"ㅈ"	0	"ㅈ"
+48043	kd	229	"ㅈ"	0	0
+48165	ku	87
+48184	bi	insertReplacementText	"지"
+48185	inp	insertReplacementText	"지"	1	"지"
+48185	kd	229	"ㅣ"	0	0
+48221	bi	insertReplacementText	"짐"
+48222	inp	insertReplacementText	"짐"	1	"짐"
+48222	kd	229	"ㅁ"	0	0
+48248	ku	76
+48321	bi	insertReplacementText	"지"
+48322	inp	insertReplacementText	"지"	1	"지"
+48324	bi	insertText	"마"
+48324	inp	insertText	"마"	0	"마"
+48326	kd	229	"ㅏ"	0	0
+48348	ku	65
+48371	bi	insertReplacementText	"말"
+48371	inp	insertReplacementText	"말"	1	"말"
+48372	kd	229	"ㄹ"	0	0
+48437	ku	75
+48453	ku	70
+48516	bi	insertReplacementText	"맑"
+48517	inp	insertReplacementText	"맑"	1	"맑"
+48517	kd	229	"ㄱ"	0	0
+48592	bi	insertReplacementText	"말"
+48594	inp	insertReplacementText	"말"	1	"말"
+48596	bi	insertText	"고"
+48597	inp	insertText	"고"	0	"고"
+48598	kd	229	"ㅗ"	0	0
+48651	ku	82
+48654	bi	insertReplacementText	"고"
+48654	inp	insertReplacementText	"고"	0	""
+48655	kd	32	" "	0	0
+48655	kp	32
+48655	bi	insertText	" "
+48656	inp	insertText	" "	0	" "
+48714	ku	72
+48769	ku	32
+49093	bi	insertText	"ㅈ"
+49094	inp	insertText	"ㅈ"	1	" ㅈ"
+49097	kd	229	"ㅈ"	0	0
+49121	bi	insertReplacementText	"자"
+49122	inp	insertReplacementText	"자"	1	"자"
+49122	kd	229	"ㅏ"	0	0
+49157	ku	87
+49204	ku	75
+49289	bi	insertReplacementText	"장"
+49290	inp	insertReplacementText	"장"	1	"장"
+49290	kd	229	"ㅇ"	0	0
+49372	bi	insertReplacementText	"자"
+49372	inp	insertReplacementText	"자"	1	"자"
+49375	bi	insertText	"유"
+49375	inp	insertText	"유"	0	"유"
+49376	kd	229	"ㅠ"	0	0
+49398	ku	68
+49455	bi	insertReplacementText	"율"
+49456	inp	insertReplacementText	"율"	1	"율"
+49457	kd	229	"ㄹ"	0	0
+49482	ku	66
+49548	ku	70
+49642	bi	insertReplacementText	"율"
+49643	inp	insertReplacementText	"율"	0	""
+49646	bi	insertText	"ㅈ"
+49646	inp	insertText	"ㅈ"	0	"ㅈ"
+49647	kd	229	"ㅈ"	0	0
+49690	bi	insertReplacementText	"저"
+49691	inp	insertReplacementText	"저"	1	"저"
+49691	kd	229	"ㅓ"	0	0
+49751	bi	insertReplacementText	"적"
+49752	inp	insertReplacementText	"적"	1	"적"
+49752	kd	229	"ㄱ"	0	0
+49782	ku	87
+49798	ku	74
+49822	ku	82
+49897	bi	insertReplacementText	"적"
+49897	inp	insertReplacementText	"적"	0	""
+49900	bi	insertText	"ㅇ"
+49900	inp	insertText	"ㅇ"	0	"ㅇ"
+49901	kd	229	"ㅇ"	0	0
+49990	bi	insertReplacementText	"으"
+49991	inp	insertReplacementText	"으"	1	"으"
+49991	kd	229	"ㅡ"	0	0
+49998	ku	68
+50056	ku	77
+50089	bi	insertReplacementText	"을"
+50089	inp	insertReplacementText	"을"	1	"을"
+50090	kd	229	"ㄹ"	0	0
+50165	bi	insertReplacementText	"으"
+50166	inp	insertReplacementText	"으"	1	"으"
+50167	bi	insertText	"로"
+50167	inp	insertText	"로"	0	"로"
+50168	kd	229	"ㅗ"	0	0
+50215	ku	70
+50234	bi	insertReplacementText	"로"
+50235	inp	insertReplacementText	"로"	0	""
+50236	kd	32	" "	0	0
+50236	kp	32
+50236	bi	insertText	" "
+50237	inp	insertText	" "	0	" "
+50286	ku	72
+50332	ku	32
+50398	kd	16	"Shift"	1	0
+50467	bi	insertText	"ㄲ"
+50468	inp	insertText	"ㄲ"	1	" ㄲ"
+50473	kd	229	"ㄲ"	1	0
+50523	ku	16
+50554	ku	82
+50586	bi	insertReplacementText	"끄"
+50587	inp	insertReplacementText	"끄"	1	"끄"
+50588	kd	229	"ㅡ"	0	0
+50662	bi	insertReplacementText	"끝"
+50663	inp	insertReplacementText	"끝"	1	"끝"
+50663	kd	229	"ㅌ"	0	0
+50688	ku	77
+50749	ku	88
+50782	kd	16	"Shift"	1	0
+50889	bi	insertReplacementText	"끝"
+50890	inp	insertReplacementText	"끝"	0	""
+50894	bi	insertText	"ㄲ"
+50895	inp	insertText	"ㄲ"	0	"ㄲ"
+50896	kd	229	"ㄲ"	1	0
+50938	bi	insertReplacementText	"까"
+50939	inp	insertReplacementText	"까"	1	"까"
+50939	kd	229	"ㅏ"	1	0
+50965	ku	16
+50982	ku	82
+51057	bi	insertReplacementText	"깢"
+51059	inp	insertReplacementText	"깢"	1	"깢"
+51060	kd	229	"ㅈ"	0	0
+51065	ku	75
+51111	bi	insertReplacementText	"까"
+51112	inp	insertReplacementText	"까"	1	"까"
+51114	bi	insertText	"지"
+51114	inp	insertText	"지"	0	"지"
+51115	kd	229	"ㅣ"	0	0
+51165	ku	87
+51204	bi	insertReplacementText	"지"
+51205	inp	insertReplacementText	"지"	0	""
+51206	kd	32	" "	0	0
+51206	kp	32
+51206	bi	insertText	" "
+51207	inp	insertText	" "	0	" "
+51232	ku	76
+51298	ku	32
+51337	bi	insertText	"ㅅ"
+51337	inp	insertText	"ㅅ"	1	" ㅅ"
+51339	kd	229	"ㅅ"	0	0
+51422	bi	insertReplacementText	"수"
+51422	inp	insertReplacementText	"수"	1	"수"
+51423	kd	229	"ㅜ"	0	0
+51432	ku	84
+51504	ku	78
+51518	bi	insertReplacementText	"숳"
+51519	inp	insertReplacementText	"숳"	1	"숳"
+51519	kd	229	"ㅎ"	0	0
+51587	ku	71
+51681	bi	insertReplacementText	"숳"
+51681	inp	insertReplacementText	"숳"	0	""
+51682	bi	insertText	"ㅇ"
+51683	inp	insertText	"ㅇ"	0	"ㅇ"
+51684	kd	229	"ㅇ"	0	0
+51784	ku	68
+51997	bi	insertReplacementText	"ㅇ"
+51998	inp	insertReplacementText	"ㅇ"	0	""
+52001	kd	8	"Backspace"	0	0
+52048	ku	8
+52129	kd	8	"Backspace"	0	0
+52215	ku	8
+52489	bi	insertText	"ㅅ"
+52490	inp	insertText	"ㅅ"	0	"ㅅ"
+52494	kd	229	"ㅅ"	0	0
+52583	bi	insertReplacementText	"수"
+52584	inp	insertReplacementText	"수"	1	"수"
+52584	kd	229	"ㅜ"	0	0
+52599	ku	84
+52686	ku	78
+52716	bi	insertReplacementText	"숳"
+52717	inp	insertReplacementText	"숳"	1	"숳"
+52717	kd	229	"ㅎ"	0	0
+52802	ku	71
+52822	bi	insertReplacementText	"수"
+52823	inp	insertReplacementText	"수"	1	"수"
+52825	bi	insertText	"해"
+52825	inp	insertText	"해"	0	"해"
+52827	kd	229	"ㅐ"	0	0
+52907	ku	79
+52927	bi	insertReplacementText	"행"
+52928	inp	insertReplacementText	"행"	1	"행"
+52928	kd	229	"ㅇ"	0	0
+53042	ku	68
+53061	bi	insertReplacementText	"행"
+53062	inp	insertReplacementText	"행"	0	""
+53065	kd	13	"Enter"	0	0

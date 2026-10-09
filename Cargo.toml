@@ -1,0 +1,71 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/term-contracts",
+    "crates/term-core",
+    "crates/term-platform",
+    "crates/term-pty",
+    "crates/term-storage",
+    "crates/term-secrets",
+    "crates/iyagi-termd",
+    "crates/term-fixture",
+    "crates/iyagi-bench",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "Apache-2.0"
+authors = ["iyagi"]
+
+[workspace.dependencies]
+# Cross-crate contract layer: every wire/persistence type lives in
+# term-contracts so core/pty/platform/storage never disagree on shapes.
+term-contracts = { path = "crates/term-contracts" }
+term-core = { path = "crates/term-core" }
+term-platform = { path = "crates/term-platform" }
+term-pty = { path = "crates/term-pty" }
+term-storage = { path = "crates/term-storage" }
+# App-local encrypted secret store shared by the Tauri shell (writes the Z.ai
+# key) and iyagi-termd (resolves it for claude_provider routing).
+term-secrets = { path = "crates/term-secrets" }
+
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+uuid = { version = "1.25.0", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net", "fs", "process"] }
+portable-pty = "0.9.0"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+# 0.38.4 fixes macOS available-memory accounting under compression.
+sysinfo = "0.38.4"
+ts-rs = { version = "12.0.1", features = ["serde-json-impl", "uuid-impl", "no-serde-warnings"] }
+base64 = "0.22"
+sha2 = "0.10"
+crc32fast = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+libc = "0.2"
+windows = { version = "0.62" }
+
+[profile.dev]
+debug = 1
+
+# CLI entrypoint verification hashes large native binaries. Keep hashing fast
+# in development/test builds without relaxing the bounded installation probe.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.test]
+debug = 1
+
+[profile.release]
+codegen-units = 16
+lto = "thin"
+opt-level = 3
+strip = "symbols"

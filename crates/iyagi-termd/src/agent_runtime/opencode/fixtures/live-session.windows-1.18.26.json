@@ -1,0 +1,30 @@
+{
+ "version": "opencode 1.18.26 live",
+ "model": "zai-coding-plan/glm-5.3",
+ "first": {
+  "label": "run-first",
+  "argv": [
+   "opencode",
+   "run",
+   "-m",
+   "zai-coding-plan/glm-5.3",
+   "Reply with exactly: ok"
+  ],
+  "exit_code": 0,
+  "stdout": "ok"
+ },
+ "resumed": {
+  "label": "run-continue-last",
+  "argv": [
+   "opencode",
+   "run",
+   "-m",
+   "zai-coding-plan/glm-5.3",
+   "-c",
+   "Reply with exactly: resumed"
+  ],
+  "exit_code": 0,
+  "stdout": "resumed",
+  "note": "-c continues the most recent owned session (this probe's first run); explicit --session with an older TUI session id hung and was killed — recorded honestly as unproven for arbitrary historical sessions"
+ }
+}

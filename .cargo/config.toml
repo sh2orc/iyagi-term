@@ -1,0 +1,9 @@
+# ts-rs writes every generated TS binding here (relative to this file, i.e. the
+# repo root) so `src/generated` stays the single committed parity artifact.
+# Regeneration must produce an empty `git diff` (ticket I02 / 06-verification §6).
+[env]
+TS_RS_EXPORT_DIR = { value = "src/generated", relative = true }
+# serde_json serializes u64 as JSON numbers and the webview's JSON.parse yields
+# `number`, never BigInt. All wire u64 fields stay far below 2^53 (SQLite signed
+# INTEGER bound), so `number` is both truthful and lossless here.
+TS_RS_LARGE_INT = "number"

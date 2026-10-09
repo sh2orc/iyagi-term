@@ -1,0 +1,54 @@
+0	kd	20	"CapsLock"	0	0
+45	ku	20	"CapsLock"
+562	kd	68	"ㅇ"	0	0
+613	ku	68	"ㅇ"
+741	kd	75	"ㅏ"	0	0
+799	ku	75	"ㅏ"
+912	kd	83	"s"	0	0
+989	ku	83	"ㄴ"
+1121	bi	insertText	"ㄴ"
+1122	inp	insertText	"ㄴ"	0	"ㄴ"
+1128	kd	229	"ㄴ"	0	0
+1129	ku	83	"ㄴ"
+1253	bi	insertReplacementText	"녀"
+1253	inp	insertReplacementText	"녀"	1	"녀"
+1254	kd	229	"ㅕ"	0	0
+1355	ku	85	"ㅕ"
+1434	bi	insertReplacementText	"녕"
+1435	inp	insertReplacementText	"녕"	1	"녕"
+1435	kd	229	"ㅇ"	0	0
+1514	ku	68	"ㅇ"
+1619	bi	insertReplacementText	"녕"
+1619	inp	insertReplacementText	"녕"	0	""
+1622	bi	insertText	"ㅎ"
+1623	inp	insertText	"ㅎ"	0	"ㅎ"
+1624	kd	229	"ㅎ"	0	0
+1697	ku	71	"ㅎ"
+1875	ku	75	"ㅏ"
+1881	bi	insertReplacementText	"하"
+1883	inp	insertReplacementText	"하"	1	"하"
+1884	kd	229	"ㅏ"	0	0
+2069	ku	84	"ㅅ"
+2074	bi	insertReplacementText	"핫"
+2075	inp	insertReplacementText	"핫"	1	"핫"
+2076	kd	229	"ㅅ"	0	0
+2256	ku	80	"ㅔ"
+2263	bi	insertReplacementText	"하"
+2264	inp	insertReplacementText	"하"	1	"하"
+2266	bi	insertText	"세"
+2266	inp	insertText	"세"	0	"세"
+2269	kd	229	"ㅔ"	0	0
+2336	bi	insertReplacementText	"셍"
+2337	inp	insertReplacementText	"셍"	1	"셍"
+2338	kd	229	"ㅇ"	0	0
+2508	ku	68	"ㅇ"
+2515	bi	insertReplacementText	"세"
+2516	inp	insertReplacementText	"세"	1	"세"
+2518	bi	insertText	"요"
+2518	inp	insertText	"요"	0	"요"
+2520	kd	229	"ㅛ"	0	0
+2598	ku	89	"ㅛ"
+2705	bi	insertReplacementText	"요"
+2706	inp	insertReplacementText	"요"	0	""
+2713	kd	13	"Enter"	0	0
+2772	ku	13	"Enter"

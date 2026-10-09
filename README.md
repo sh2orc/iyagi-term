@@ -46,6 +46,14 @@ It is built on Tauri 2 + React + xterm.js with a user-privileged Rust execution-
 daemon (`iyagi-termd`). Model selection, LLM calls and conversation management stay with each
 CLI; IYAGI owns execution, process groups and resource governance.
 
+<p align="center">
+  <a href="docs/media/iyagi-term-intro.mp4">
+    <img src="docs/media/iyagi-term-intro.webp" alt="IYAGI Term in 30 seconds: existing AI coding CLIs, admission control, resource guard, and sessions that outlive the window" width="800">
+  </a>
+  <br>
+  <sub>30-second intro · <a href="docs/media/iyagi-term-intro.mp4">MP4, 1080p</a></sub>
+</p>
+
 ## Download
 
 <p align="center">

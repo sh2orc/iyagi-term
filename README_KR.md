@@ -45,6 +45,14 @@ IYAGI Terminal은 기존 AI 코딩 CLI(Codex·Claude Code·OpenCode)를 그대�
 Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택·LLM 호출·대화 관리는 각 CLI가
 계속 담당하고, IYAGI가 실행·프로세스 그룹·자원 거버넌스를 소유합니다.
 
+<p align="center">
+  <a href="docs/media/iyagi-term-intro.mp4">
+    <img src="docs/media/iyagi-term-intro.webp" alt="30초로 보는 IYAGI Term: 기존 AI 코딩 CLI 실행, admission 제어, 자원 가드, 창을 닫아도 유지되는 세션" width="800">
+  </a>
+  <br>
+  <sub>30초 소개 영상(영어) · <a href="docs/media/iyagi-term-intro.mp4">MP4, 1080p</a></sub>
+</p>
+
 ## 다운로드
 
 <p align="center">

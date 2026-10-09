@@ -7,3 +7,5 @@
 # CRLF checkout would make every trailing flag read "1\r" and break the
 # replay harness on Windows.
 *.tsv text eol=lf
+*.webp binary
+*.mp4 binary

@@ -10,8 +10,8 @@
  * certificate leaf`가 되어 다시 빌드해도 같은 앱으로 남는다.
  *
  * - build: APPLE_SIGNING_IDENTITY를 넘겨 번들러가 .app과 사이드카(iyagi-termd)를 그
- *   인증서로 서명하게 한다. hardened runtime은 끈다 — 공증용 설정이고, 지금까지의
- *   ad-hoc 빌드와 실행 동작을 바꾸지 않기 위해서다.
+ *   인증서로 서명하게 한다. build는 Developer ID 인증서가 하나 있으면 우선 사용하고
+ *   hardened runtime을 켠다. 로컬 개발 인증서와 ad-hoc 빌드는 기존 설정을 유지한다.
  * - dev: `tauri dev`는 번들 없이 target/<profile>의 실행 파일을 곧바로 띄우므로
  *   runner(scripts/macos-sign-runner.sh)가 cargo 빌드 직후 서명한다.
  * - macOS dev는 인증서가 없어도 runner를 거친다 — runner가 실행 파일을
@@ -48,7 +48,7 @@ if (identity) {
   env.IYAGI_SIGNING_IDENTITY = identity;
   if (command === "build" && !process.env.APPLE_SIGNING_IDENTITY) {
     env.APPLE_SIGNING_IDENTITY = identity;
-    injected.push("--config", JSON.stringify({ bundle: { macOS: { hardenedRuntime: false } } }));
+    injected.push("--config", JSON.stringify({ bundle: { macOS: { hardenedRuntime: identity.startsWith("Developer ID Application:") } } }));
   }
   console.error(`tauri.mjs: signing this ${command} with the local identity "${identity}" (stable macOS permissions)`);
 } else if (command === "build" && process.platform === "darwin" && !process.env.APPLE_SIGNING_IDENTITY) {
@@ -85,6 +85,14 @@ function localSigningIdentity() {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
+    if (command === "build" && process.env.IYAGI_SIGNING_IDENTITY === undefined && !process.env.APPLE_SIGNING_IDENTITY) {
+      const developerIds = [...listing.matchAll(/"(Developer ID Application:[^"]+)"/g)].map((match) => match[1]);
+      if (developerIds.length > 1) {
+        console.error("tauri.mjs: multiple Developer ID certificates found; set APPLE_SIGNING_IDENTITY explicitly");
+        process.exit(1);
+      }
+      if (developerIds.length === 1) return developerIds[0];
+    }
     // 행 형식: `  1) 34367B57…C65 "iyagi-dev"` — 이름(따옴표) 또는 SHA-1로 지정할 수 있다.
     const found = listing
       .split("\n")

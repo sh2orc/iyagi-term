@@ -56,18 +56,17 @@ CLI; IYAGI owns execution, process groups and resource governance.
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `4e0b9b50bd9aa030ea29aad88df316798d099730183a5e04910389c293d890da` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `5290b210fe8f84ed15a57a32b796250c219d06c3a70932a99cbc8ba1ad2a460f` |
 
 <details>
-<summary>First launch on macOS (ad-hoc signed, not notarized)</summary>
+<summary>Signing & trust on macOS</summary>
 
-Approve the app with right-click → **Open** (on newer macOS: System Settings › Privacy & Security →
-Open Anyway) so the consent is recorded for this app. Avoid `xattr -d com.apple.quarantine` — it
-strips the Gatekeeper check instead of recording consent.
+The build is signed with a Developer ID and notarized (ticket stapled to the DMG), so it opens
+without Gatekeeper warnings — `spctl` reports `source=Notarized Developer ID`.
 
-The SHA-256 travels in the same repository as the DMG, so it detects transport corruption, not a
-compromise of the repository itself — see [releases/README.md](releases/README.md) for the release
-integrity roadmap.
+The published SHA-256 travels in the same repository as the DMG, so it detects transport
+corruption, not a compromise of the repository itself — see [releases/README.md](releases/README.md)
+for the release integrity roadmap.
 </details>
 
 <details>

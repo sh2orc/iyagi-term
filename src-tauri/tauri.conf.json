@@ -36,6 +36,9 @@
       "icons/icon.icns"
     ],
     "resources": [],
+    "macOS": {
+      "hardenedRuntime": true
+    },
     "externalBin": [
       "binaries/iyagi-termd"
     ],

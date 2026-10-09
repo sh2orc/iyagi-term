@@ -55,16 +55,15 @@ Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `4e0b9b50bd9aa030ea29aad88df316798d099730183a5e04910389c293d890da` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `5290b210fe8f84ed15a57a32b796250c219d06c3a70932a99cbc8ba1ad2a460f` |
 
 <details>
-<summary>macOS 첫 실행 안내 (ad-hoc 서명, 미공증)</summary>
+<summary>macOS 서명과 신뢰</summary>
 
-처음 실행할 때는 우클릭 → **열기**(최신 macOS는 시스템 설정 › 개인정보 보호 및 보안 → 그래도 열기)로
-이 앱에 대한 승인을 남기세요. `xattr -d com.apple.quarantine`은 승인을 기록하는 대신 Gatekeeper
-검사 자체를 지워버리므로 쓰지 않는 것이 안전합니다.
+빌드는 Developer ID로 서명하고 공증했으며(티켓을 DMG에 스테이플) Gatekeeper 경고 없이 열립니다 —
+`spctl`은 `source=Notarized Developer ID`로 판정합니다.
 
-위 SHA-256은 DMG와 같은 저장소에 게시되어 있어 전송 중 손상은 감지하지만 저장소 자체가 침해된
+게시된 SHA-256은 DMG와 같은 저장소에 있어 전송 중 손상은 감지하지만 저장소 자체가 침해된
 경우는 검증하지 못합니다 — 릴리스 무결성 로드맵은 [releases/README.md](releases/README.md)를
 참고하세요.
 </details>

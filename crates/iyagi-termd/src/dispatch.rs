@@ -1026,9 +1026,12 @@ fn workload_update_policy(
     // Admission-condition re-check (budget/slots) against the live host.
     let host = state.admission_host();
     let admission = state.config.admission_config(state.logical_cpus);
-    let budget = admission.managed_budget_bytes(host.total_bytes);
+    // 호스트 전체 크기를 아직 모르면(첫 표본 전) 예산도 모른다 — 0 바이트
+    // 예산으로 보고 모든 변경을 거절하지 않는다(CPU 슬롯은 그대로 본다).
+    let over_budget = host.total_bytes > 0
+        && policy.reservation_bytes.get() > admission.managed_budget_bytes(host.total_bytes);
     let slots = admission.cpu_slot_capacity();
-    if policy.reservation_bytes.get() > budget || policy.cpu_slots > slots {
+    if over_budget || policy.cpu_slots > slots {
         return Err(RpcError::new(
             ErrorCode::ResourceUnschedulable,
             "policy exceeds the managed budget or CPU slot capacity",

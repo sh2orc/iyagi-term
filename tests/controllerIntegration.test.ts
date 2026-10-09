@@ -569,8 +569,9 @@ describe("controller end-to-end (mock daemon)", () => {
 
     // pane 닫기 = 세션 종료(04 §2): 닫은 pane의 workload만 끝나고 남은 pane은 살아 있다.
     const secondLeaf = useWorkbenchStore.getState().focusedLeafId as string;
+    // launch 응답이 pane에 실리는 것은 호출 뒤 몇 틱이다 — 실릴 때까지 기다린다.
+    await vi.waitFor(() => expect(useWorkbenchStore.getState().panes[secondLeaf].workloadId).toBeTruthy());
     const closedWorkloadId = useWorkbenchStore.getState().panes[secondLeaf].workloadId;
-    expect(closedWorkloadId).toBeTruthy();
     await controller.closePane(secondLeaf);
     expect(Object.keys(useWorkbenchStore.getState().panes).length).toBe(1);
 

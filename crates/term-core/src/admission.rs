@@ -101,12 +101,18 @@ impl AdmissionConfig {
             return QueueReason::WaitTelemetry;
         }
 
-        let budget = self.managed_budget_bytes(input.total_bytes);
+        // An unknown host total (no sample yet under fail-open, or the metric
+        // is unavailable) is an unknown budget, not a zero one: judging it as
+        // 0 bytes would refuse every managed launch as unschedulable. Only the
+        // byte checks that need it are skipped; CPU slots still apply.
+        let budget = (input.total_bytes > 0).then(|| self.managed_budget_bytes(input.total_bytes));
         let slot_capacity = self.cpu_slot_capacity();
         let request = &input.request;
 
         // (3) The request alone exceeds policy: only a config change helps.
-        if request.reservation_bytes > budget || request.cpu_slots > slot_capacity {
+        if budget.is_some_and(|b| request.reservation_bytes > b)
+            || request.cpu_slots > slot_capacity
+        {
             return QueueReason::ResourceUnschedulable;
         }
 
@@ -137,9 +143,13 @@ impl AdmissionConfig {
             .iter()
             .try_fold(0u64, |acc, w| acc.checked_add(w.reservation_bytes))
             .unwrap_or(u64::MAX);
-        let within_budget = match active_reserved.checked_add(request.reservation_bytes) {
-            Some(sum) => sum <= budget,
-            None => false, // overflow: certainly over budget, deny
+        let within_budget = match (
+            budget,
+            active_reserved.checked_add(request.reservation_bytes),
+        ) {
+            (None, _) => true, // unknown total: nothing to compare against
+            (Some(budget), Some(sum)) => sum <= budget,
+            (Some(_), None) => false, // overflow: certainly over budget, deny
         };
         if !within_budget {
             return QueueReason::WaitReservationBudget;
@@ -508,5 +518,26 @@ mod tests {
         let mut reconciling = input(T, Some(10 * GIB), 120_000, Vec::new());
         reconciling.reconciliation_required = true;
         assert_eq!(config().decide(&reconciling), QueueReason::WaitTelemetry);
+    }
+
+    /// No host sample ever arrived (total unknown = 0): the budget is
+    /// unknown, not zero. Fail-open must admit instead of declaring every
+    /// request RESOURCE_UNSCHEDULABLE; CPU slots, which need no host sample,
+    /// still gate.
+    #[test]
+    fn unknown_host_total_is_not_a_zero_budget() {
+        let never_sampled = input(0, None, 31_000, Vec::new());
+        assert_eq!(config().decide(&never_sampled), QueueReason::Admit);
+
+        let mut too_many_slots = input(0, None, 31_000, Vec::new());
+        too_many_slots.request.cpu_slots = 5;
+        assert_eq!(
+            config().decide(&too_many_slots),
+            QueueReason::ResourceUnschedulable
+        );
+
+        // Before the fail-open threshold it is an ordinary telemetry wait.
+        let starting_up = input(0, None, 800, Vec::new());
+        assert_eq!(config().decide(&starting_up), QueueReason::WaitTelemetry);
     }
 }

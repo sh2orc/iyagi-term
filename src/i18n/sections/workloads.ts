@@ -90,6 +90,7 @@ export const ko = {
   "managed.cancel": "취소",
   "managed.submit": "실행 등록",
   "managed.queuedToast": "대기열에 등록했습니다 — 입장 허용 시 터미널에 연결합니다.",
+  "managed.reservationFitted": "예약 메모리가 이 컴퓨터의 관리 실행 예산보다 커서 {size}로 줄여 등록했습니다",
 
   // 관리 실행 대화상자 — 오류/toast
   "managed.errorCapabilities": "capability 조회 실패",
@@ -195,6 +196,7 @@ export const en: Record<keyof typeof ko, string> = {
   "managed.cancel": "Cancel",
   "managed.submit": "Launch",
   "managed.queuedToast": "Added to the queue — the terminal will attach once the run is admitted.",
+  "managed.reservationFitted": "The memory reservation was larger than this computer's managed budget — registered with {size}",
 
   // Managed run dialog — errors/toast
   "managed.errorCapabilities": "Failed to fetch capabilities",

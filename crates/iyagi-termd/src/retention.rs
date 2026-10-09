@@ -202,7 +202,7 @@ fn disk_free_bytes(state: &DaemonState) -> Option<u64> {
 /// 살아 있는 세션은 절대 건드리지 않는다(삭제 판정은 [`sweep`]의 규칙:
 /// 종료·비고정·비활성). 이 반응이 디스크를 다 채우지는 못해도 증가를
 /// 멈추고 다음 스윕까지의 창을 벌어 준다.
-fn relieve_disk_headroom(state: &Arc<DaemonState>) {
+pub(crate) fn relieve_disk_headroom(state: &Arc<DaemonState>) {
     let Some(free) = disk_free_bytes(state) else {
         return;
     };

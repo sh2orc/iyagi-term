@@ -52,6 +52,7 @@ import { isTerminalReport } from "./broadcast";
 import { paneLimitText, splitNoSpaceText } from "../monitor/statusStrings";
 import { inspectPaste, preparePaste, bracketedPasteEnabled, unwrapBracketedPaste } from "../security/paste";
 import { acceptReportedCwd } from "./osc";
+import { ancestorDirs, filesystemRoot } from "./cwdFallback";
 import { isCleanExit, pasteTooLargeText, type PanePhase } from "../monitor/statusStrings";
 import {
   PANE_RELIEF_NONE,
@@ -242,6 +243,13 @@ function defaultShellPolicy(): LaunchRequest["policy"] {
     cpu_max_cores: null,
     pids_max: null,
   };
+}
+
+/** 받아들여진 시작 요청: 데몬 응답, 실제로 연 경로, 대체 경로로 간 첫 사유(없으면 null). */
+interface LaunchAttempt {
+  outcome: Awaited<ReturnType<DaemonClient["workloadLaunch"]>>;
+  cwd: string;
+  cwdReason: string | null;
 }
 
 /** 같은 에이전트 대화를 실행 중인 작업·pane(찾은 만큼). */
@@ -1864,16 +1872,25 @@ export class SessionController {
   }
 
   /**
-   * 시작 cwd 후보를 앞선 순서대로(중복 없이): 이 플랫폼에서 쓸 수 있는 선호 경로들 →
-   * 프로젝트 root → 사용자 home. 첫 값은 `pickCwd(preferred[0])`와 같다 — 나머지는
-   * 그 경로가 사라졌을 때(CWD_UNAVAILABLE) 이어서 시도한다.
+   * 시작 cwd 후보를 앞선 순서대로(중복 없이): 이 플랫폼에서 쓸 수 있는 선호 경로마다
+   * 그 경로 → 가까운 상위 경로들, 그다음 프로젝트 root(→ 상위) → 사용자 home →
+   * 파일시스템 뿌리. 첫 값은 `pickCwd(preferred[0])`와 같다 — 나머지는 그 경로를
+   * 쓸 수 없을 때(CWD_UNAVAILABLE) 이어서 시도한다. 뿌리는 늘 있으므로 마지막 자리다.
    */
   private cwdCandidates(...preferred: Array<string | null | undefined>): string[] {
+    const platform = this.deps.platform;
     const candidates: string[] = [];
-    const accepted = preferred.map(cwd => (cwd ? acceptReportedCwd(cwd, this.deps.platform) : null));
-    for (const cwd of [...accepted, this.config.projectRoot, this.config.home]) {
+    const add = (cwd: string | null | undefined): void => {
       if (cwd && !candidates.includes(cwd)) candidates.push(cwd);
+    };
+    const accepted = preferred.map(cwd => (cwd ? acceptReportedCwd(cwd, platform) : null));
+    for (const cwd of [...accepted, this.config.projectRoot]) {
+      if (!cwd) continue;
+      add(cwd);
+      ancestorDirs(cwd, platform).forEach(add);
     }
+    add(this.config.home);
+    add(filesystemRoot(this.config.home, platform));
     return candidates;
   }
 
@@ -1952,8 +1969,14 @@ export class SessionController {
   // ------------------------------------------------------------- launching
 
   /**
-   * `fallbackCwds`: cwd가 사라졌을 때(CWD_UNAVAILABLE) 차례로 시도할 경로 — 일반 셸을
-   * 이어 여는 경로만 준다(에이전트 재개는 대화가 cwd에 묶여 있어 주지 않는다).
+   * 일반 셸·셸 프로필은 열리는 쪽으로 버틴다(04-ui §2-4):
+   *  - 시작 경로를 쓸 수 없으면(CWD_UNAVAILABLE — 지운 디렉터리, 빠진 디스크, 권한 없음)
+   *    가까운 상위 경로 → 프로젝트 root → home → 뿌리 순으로 연다. `fallbackCwds`를
+   *    주면 그 목록을 쓴다(끝난 창을 이을 때 처음 실행한 경로를 끼워 넣는다).
+   *  - 셸 실행 파일이 없거나(PROGRAM_NOT_FOUND) PTY를 띄우지 못하면(SPAWN_FAILED)
+   *    플랫폼 기본 셸 → /bin/sh로 바꿔 연다.
+   * 바꿔 열었으면 무엇을 바꿨는지 알린다. 에이전트 대화 재개(`agent`가 붙은 셸)는 대화가
+   * 그 경로·그 CLI에 묶여 있어 바꿔 열지 않고, 사유를 남겨 "새 셸"로 잇게 한다.
    * `grid`: 이미 그려진 화면에서 잇는 PTY의 첫 크기(없으면 80×24 뒤 fit이 맞춘다).
    */
   private async launchShell(
@@ -1970,6 +1993,9 @@ export class SessionController {
       label: t("terminal.fallbackShell"),
     };
     this.nextShell = null; // 1회용: 다음 생성은 다시 기본 프로필
+    const resuming = shell.agent !== undefined;
+    const fallbackCwds = resuming ? [] : options.fallbackCwds ?? this.cwdCandidates(cwd).filter(c => c !== cwd);
+    const shells = resuming ? [shell] : this.shellCandidates(shell);
     // 새 pane의 PTY는 처음부터 창 크기로 연다: pane이 mount되어 격자를 재기까지
     // 한두 프레임 기다린다 — 80×24로 열렸다가 붙은 뒤 fit으로 펴지는 왕복을 없앤다.
     const grid = options.grid ?? (await this.measuredGrid(pane.viewId));
@@ -2006,7 +2032,8 @@ export class SessionController {
       if (routing.provider) request.claude_provider = routing.provider;
     }
     try {
-      const { outcome, cwd: launchedCwd } = await this.launchInAvailableCwd(request, options.fallbackCwds ?? []);
+      const launched = await this.launchWithFallbacks(request, shells, fallbackCwds);
+      const { outcome } = launched;
       if (!outcome.session_id) throw new Error(t("terminal.session.notCreated"));
       if (!useWorkbenchStore.getState().panes[leafId]) {
         if (this.detachedPendingLaunches.delete(leafId)) {
@@ -2026,9 +2053,19 @@ export class SessionController {
         this.recoveryOrigins.delete(leafId);
         useWorkbenchStore.getState().markWorkloadRecovered(recoveredFrom, outcome.workload_id);
       }
-      useWorkbenchStore.getState().paneTitle(leafId, shell.label, launchedCwd);
-      // 대체 경로로 열었으면 알린다 — 헤더 경로만 바뀌면 왜 다른 곳에서 열렸는지 모른다.
-      if (launchedCwd !== cwd) this.toast(t("terminal.session.cwdFallback", { cwd: launchedCwd }));
+      useWorkbenchStore.getState().paneTitle(leafId, launched.shell.label, launched.cwd);
+      // 대체 경로·셸로 열었으면 알린다 — 헤더만 바뀌면 왜 다른 곳·다른 셸로 열렸는지 모른다.
+      const notices: string[] = [];
+      if (launched.cwd !== cwd) {
+        const key = launched.cwdReason === "cwd_permission_denied"
+          ? "terminal.session.cwdFallbackDenied"
+          : "terminal.session.cwdFallback";
+        notices.push(t(key, { from: cwd, cwd: launched.cwd }));
+      }
+      if (launched.shell !== shell) {
+        notices.push(t("terminal.session.shellFallback", { shell: shell.label, fallback: launched.shell.label }));
+      }
+      if (notices.length > 0) this.toast(notices.join(" · "));
       this.workloadSession.set(outcome.workload_id, outcome.session_id);
       this.liveSessions.add(outcome.session_id);
       await this.attachPane(leafId, outcome.session_id);
@@ -2036,28 +2073,72 @@ export class SessionController {
       this.detachedPendingLaunches.delete(leafId);
       useWorkbenchStore
         .getState()
-        .panePhase(leafId, "failed", errorMessage(error, t("terminal.session.launchFailed")));
+        .panePhase(leafId, "failed", launchFailureMessage(error, { cwd, program: shell.program, resuming }));
     }
   }
 
   /**
-   * 시작 경로가 사라졌으면(CWD_UNAVAILABLE — 지운 worktree·디렉터리) 다음 후보 경로로
-   * 다시 시작한다(04-ui §2-4). 다른 실패와 마지막 후보의 실패는 그대로 던진다.
+   * 일반 셸의 후보: 고른 셸 → 플랫폼 기본 셸 → (POSIX) /bin/sh. 같은 실행 파일은 한 번만.
+   * 대체 셸의 이름은 실행 파일 이름이다("zsh"·"sh") — 무엇으로 열렸는지 그대로 보인다.
+   */
+  private shellCandidates(shell: ShellSpec): ShellSpec[] {
+    const platform = this.deps.platform;
+    const candidates: ShellSpec[] = [shell];
+    const add = (program: string, argv: string[]): void => {
+      if (candidates.some(c => c.program === program)) return;
+      candidates.push({ program, argv, label: program.slice(program.search(/[^\\/]*$/)) });
+    };
+    add(defaultShellProgram(platform), defaultShellArgv(platform));
+    if (platform !== "windows") add("/bin/sh", []);
+    return candidates;
+  }
+
+  /**
+   * 셸 후보마다 경로 후보를 차례로 시도한다. 셸을 바꾸는 것은 그 셸이 없거나 뜨지
+   * 못했을 때(PROGRAM_NOT_FOUND·SPAWN_FAILED)뿐이고, 다른 실패와 마지막 후보의
+   * 실패는 그대로 던진다. 다시 보내는 요청은 새 request_id를 쓴다(내용이 다르다).
+   */
+  private async launchWithFallbacks(
+    request: LaunchRequest,
+    shells: readonly ShellSpec[],
+    fallbackCwds: readonly string[],
+  ): Promise<LaunchAttempt & { shell: ShellSpec }> {
+    for (let index = 0; ; index += 1) {
+      const shell = shells[index];
+      const attempt = index === 0
+        ? request
+        : { ...request, request_id: this.uuid(), ...cleanShellCommand(this.deps.platform, shell) };
+      try {
+        return { ...(await this.launchInAvailableCwd(attempt, fallbackCwds)), shell };
+      } catch (error) {
+        const shellFailed = error instanceof RpcClientError &&
+          (error.code === "PROGRAM_NOT_FOUND" || error.code === "SPAWN_FAILED");
+        if (!shellFailed || index + 1 >= shells.length) throw error;
+      }
+    }
+  }
+
+  /**
+   * 시작 경로를 쓸 수 없으면(CWD_UNAVAILABLE) 다음 후보 경로로 다시 시작한다(04-ui §2-4).
+   * 첫 거절의 사유(reason_code — 사라짐·권한 없음)를 함께 돌려 알림 문구를 고르게 한다.
+   * 다른 실패와 마지막 후보의 실패는 그대로 던진다.
    */
   private async launchInAvailableCwd(
     request: LaunchRequest,
     fallbackCwds: readonly string[],
-  ): Promise<{ outcome: Awaited<ReturnType<DaemonClient["workloadLaunch"]>>; cwd: string }> {
+  ): Promise<LaunchAttempt> {
     let attempt = request;
+    let cwdReason: string | null = null;
     for (const next of fallbackCwds) {
       try {
-        return { outcome: await this.deps.client.workloadLaunch(attempt), cwd: attempt.cwd };
+        return { outcome: await this.deps.client.workloadLaunch(attempt), cwd: attempt.cwd, cwdReason };
       } catch (error) {
         if (!(error instanceof RpcClientError) || error.code !== "CWD_UNAVAILABLE") throw error;
+        cwdReason ??= error.details?.reason_code ?? "cwd_missing";
       }
       attempt = { ...attempt, request_id: this.uuid(), cwd: next };
     }
-    return { outcome: await this.deps.client.workloadLaunch(attempt), cwd: attempt.cwd };
+    return { outcome: await this.deps.client.workloadLaunch(attempt), cwd: attempt.cwd, cwdReason };
   }
 
   private readonly pendingWorkloadConnections = new Set<string>();
@@ -2734,9 +2815,12 @@ export class SessionController {
   }
 
   private async restartExitedPane(pane: PaneMeta, newShell: boolean): Promise<void> {
-    const resume = newShell ? null : await this.findResumableSession(pane.workloadId, pane.sessionId, pane.resume);
+    const found = newShell ? null : await this.findResumableSession(pane.workloadId, pane.sessionId, pane.resume);
     const current = useWorkbenchStore.getState().panes[pane.leafId];
     if (this.disposed || current?.viewId !== pane.viewId || current.sessionId !== pane.sessionId) return;
+    // 같은 대화가 다른 창에서 이미 실행 중이면 이 창은 일반 터미널과 같다(종료 오버레이도
+    // "새 세션으로 다시 시작"만 보였다) — 그 창으로 옮겨 가지 않고 이 자리에서 새 셸을 연다.
+    const resume = found && !this.activeAgentSession(found, pane.workloadId) ? found : null;
     // 이 자리에서 새로 시작하는 실행이 끝난 작업을 이어받는다(최근 종료에서 뺀다).
     if (pane.workloadId) this.linkRecovery(pane.leafId, pane.workloadId);
     if (resume) {
@@ -2745,7 +2829,8 @@ export class SessionController {
     }
     if (!newShell && pane.resume) return;
     // 일반 셸 또는 명시적인 새 셸은 새 PTY를 사용한다. 마지막 경로가 사라졌으면 대체 경로로 연다.
-    const cwds = this.cwdCandidates(current.cwd);
+    // 재개에 실패한 창은 아직 경로가 없을 수 있다 — 그 대화의 경로(→ 상위)를 잇는다.
+    const cwds = this.cwdCandidates(current.cwd, current.resume?.cwd);
     this.resetPaneForFreshPty(pane.leafId, current);
     await this.launchShell(pane.leafId, cwds[0], { fallbackCwds: cwds.slice(1) });
   }
@@ -3741,4 +3826,39 @@ function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof RpcClientError) return `${fallback} (${error.code}): ${error.message}`;
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+/**
+ * 세션 시작 실패 문구. 대체 경로·셸까지 다 써도 실패했을 때만 여기에 온다 — 흔한
+ * 사유는 무엇을 하면 되는지까지 말하고, 진단용 코드는 끝에 남긴다. 나머지는
+ * `errorMessage`의 형식 그대로다.
+ */
+function launchFailureMessage(
+  error: unknown,
+  context: { cwd: string; program: string; resuming: boolean },
+): string {
+  const failed = t("terminal.session.launchFailed");
+  if (!(error instanceof RpcClientError)) return errorMessage(error, failed);
+  let hint: string | null = null;
+  switch (error.code) {
+    case "CWD_UNAVAILABLE":
+      hint = context.resuming
+        ? t("terminal.resume.cwdUnavailable", { cwd: context.cwd })
+        : t("terminal.session.cwdUnavailable", { cwd: context.cwd });
+      break;
+    case "PROGRAM_NOT_FOUND":
+      hint = t("terminal.session.programMissing", { program: context.program });
+      break;
+    case "SPAWN_FAILED":
+      hint = t("terminal.session.spawnFailedHint");
+      break;
+    case "SESSION_LIMIT":
+      hint = t("terminal.session.limitHint", { count: SESSIONS_LIMIT });
+      break;
+    case "JOURNAL_LIMIT":
+    case "DISK_FULL":
+      hint = t("terminal.session.storageFull");
+      break;
+  }
+  return hint ? `${failed} — ${hint} (${error.code})` : errorMessage(error, failed);
 }

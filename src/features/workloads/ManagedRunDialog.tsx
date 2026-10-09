@@ -38,6 +38,7 @@ import { getManagedRunDeps } from "./managedRunDeps";
 import { composeLaunchRequest } from "./launchComposer";
 import { CLAUDE_PROVIDER_DAEMON_OUTDATED_KEY, claudeProviderFor } from "./claudeProvider";
 import { formatLaunchError } from "./managedRunErrors";
+import { formatGiB } from "../monitor/format";
 import { usePreferences } from "../../store/preferences";
 import { autonomyEnabled, effectiveLaunchCommand } from "./autonomy";
 import { AutonomyToggle } from "./AutonomyToggle";
@@ -192,12 +193,29 @@ export function ManagedRunDialog(props: ManagedRunDialogProps): JSX.Element {
   const canLaunch =
     !!client && !!compose?.ok && !gate.blocked && !launching && !programInvalid && budget?.ok !== false && !routingRefused;
 
+  /**
+   * 이 컴퓨터가 받을 수 없는 크기의 예약은 데몬이 거절하지 않고 받을 수 있는 최대로
+   * 줄여 받는다(effective_policy) — 줄었으면 그 값을 알린다.
+   */
+  const fittedNotice = (outcome: LaunchOutcome): string | null => {
+    const asked = Number(compose?.ok ? compose.request.policy.reservation_bytes : NaN);
+    const got = Number(outcome.effective_policy?.reservation_bytes);
+    return Number.isFinite(asked) && Number.isFinite(got) && got < asked
+      ? t("managed.reservationFitted", { size: formatGiB(got) })
+      : null;
+  };
+
   const routeOutcome = (outcome: LaunchOutcome): void => {
     const store = useWorkbenchStore.getState();
     if (props.onLaunched) {
       props.onLaunched(outcome);
       return;
     }
+    const notify = (message: string): void => {
+      if (controller) controller.toast(message);
+      else store.setToast(message);
+    };
+    const fitted = fittedNotice(outcome);
     if (outcome.session_id) {
       // 즉시 입장 허용 — 전용 PTY에 writer로 연결(04 §1).
       if (controller) {
@@ -205,13 +223,12 @@ export function ManagedRunDialog(props: ManagedRunDialogProps): JSX.Element {
       } else {
         store.toggleQueueDrawer(true);
       }
+      if (fitted) notify(fitted);
       return;
     }
     // 대기: placeholder pane/PTY를 미리 만들지 않는다(04 §1, U14).
     store.toggleQueueDrawer(true);
-    const queuedToast = t("managed.queuedToast");
-    if (controller) controller.toast(queuedToast);
-    else store.setToast(queuedToast);
+    notify(fitted ? `${t("managed.queuedToast")} · ${fitted}` : t("managed.queuedToast"));
   };
 
   const submit = async (): Promise<void> => {

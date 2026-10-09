@@ -13,7 +13,8 @@ use term_contracts::error::ErrorCode;
 use term_contracts::gate::GateTarget;
 use term_contracts::ids::{RequestId, SessionId, WorkloadId};
 use term_contracts::launch::{
-    launch_fingerprint, Enforcement, LaunchMode, LaunchRequest, LaunchValidation, Priority,
+    launch_fingerprint, Enforcement, LaunchMode, LaunchPolicy, LaunchRequest, LaunchValidation,
+    Priority,
 };
 use term_contracts::metrics::UsageCoverage;
 use term_contracts::session::{ExitReason, SessionExit};
@@ -107,14 +108,23 @@ pub fn launch(state: Arc<DaemonState>, request: LaunchRequest) -> Result<LaunchO
              (or the interpreter plus an argv prefix) instead",
         ));
     }
-    let canonical_cwd = std::fs::canonicalize(std::path::Path::new(&request.cwd))
-        .map_err(|_| RpcError::new(ErrorCode::CwdUnavailable, "cwd cannot be canonicalized"))?;
-    if !canonical_cwd.is_dir() {
-        return Err(RpcError::new(
-            ErrorCode::CwdUnavailable,
-            "cwd is not a directory",
-        ));
+    // 셸 pane은 `/usr/bin/env -u … <셸> …`로 온다(UI가 상속된 색 변수를
+    // 지운다). env는 늘 있으므로 감싼 셸이 지워졌으면 PTY가 뜨자마자 127로
+    // 끝난 터미널만 남는다 — 감싼 실행 파일이 절대 경로면 여기서 같은
+    // PROGRAM_NOT_FOUND로 거절해 UI가 기본 셸로 바꿔 열 수 있게 한다.
+    if let Some(wrapped) = env_wrapped_program(&request.program, &request.argv) {
+        if !std::path::Path::new(wrapped).is_file() {
+            return Err(
+                RpcError::new(ErrorCode::ProgramNotFound, "program file not found").with_details(
+                    serde_json::json!({
+                        "reason_code": "wrapped_program_missing",
+                        "program": wrapped,
+                    }),
+                ),
+            );
+        }
     }
+    let canonical_cwd = usable_cwd(&request.cwd)?;
 
     // A recorded runtime ID does not prove that Claude saved a conversation.
     // Check again here for old workspace markers and removed transcripts,
@@ -226,10 +236,11 @@ fn launch_shell(
     }
 
     let (workload_id, session_id) = (WorkloadId::generate(), SessionId::generate());
-    record_intent(state, request, &workload_id, &session_id)?;
+    record_intent(state, request, &request.policy, &workload_id, &session_id)?;
     let entry = register_workload(
         state,
         request,
+        request.policy.clone(),
         workload_id.clone(),
         session_id.clone(),
         None,
@@ -378,6 +389,19 @@ fn launch_managed(
         ));
     }
 
+    // 이 호스트가 절대 받을 수 없는 크기는 거절하지 않고 받을 수 있는 최대로
+    // 줄여 받는다(`fit_policy_to_host`). 지문·중복 판정은 원래 요청 그대로다.
+    let policy = fit_policy_to_host(state, &request.policy);
+    if policy != request.policy {
+        tracing::info!(
+            requested_reservation = request.policy.reservation_bytes.get(),
+            reservation = policy.reservation_bytes.get(),
+            requested_cpu_slots = request.policy.cpu_slots,
+            cpu_slots = policy.cpu_slots,
+            "managed policy fitted to this host instead of RESOURCE_UNSCHEDULABLE"
+        );
+    }
+
     // Capability gate: `require` + a platform-unsupported requested limit
     // fails before anything is created (spec §2: require는 실행 전에 실패).
     let missing = missing_capabilities(state, request);
@@ -408,14 +432,14 @@ fn launch_managed(
         env_overrides: env,
         cols: request.cols,
         rows: request.rows,
-        policy: request.policy.clone(),
+        policy: policy.clone(),
     };
 
     // Admission decide + reserve atomically (term-core reservation ledger).
     let host = state.admission_host();
     let admission = AdmissionRequest {
-        reservation_bytes: request.policy.reservation_bytes.get(),
-        cpu_slots: request.policy.cpu_slots,
+        reservation_bytes: policy.reservation_bytes.get(),
+        cpu_slots: policy.cpu_slots,
     };
     match state
         .ledger
@@ -437,7 +461,7 @@ fn launch_managed(
             // returns the queue result immediately (spec §4). A concurrent
             // duplicate may have recorded this request in between — resolve
             // to the existing workload instead of a phantom queue entry.
-            match record_intent(state, request, &workload_id, &session_id) {
+            match record_intent(state, request, &policy, &workload_id, &session_id) {
                 Ok(RecordOutcome::Created) => {}
                 Ok(RecordOutcome::Existing {
                     workload_id: existing,
@@ -450,6 +474,7 @@ fn launch_managed(
             register_workload(
                 state,
                 request,
+                policy.clone(),
                 workload_id.clone(),
                 session_id.clone(),
                 Some(descriptor),
@@ -466,7 +491,7 @@ fn launch_managed(
                 workload_id,
                 session_id,
                 state: WorkloadState::Queued,
-                effective_policy: request.policy.clone(),
+                effective_policy: policy,
                 missing_capabilities: missing,
             });
         }
@@ -475,7 +500,7 @@ fn launch_managed(
 
     // Admitted: persist intent FIRST (§7.1 invariant: intent commit before
     // STARTING commit before any child exists).
-    match record_intent(state, request, &workload_id, &session_id) {
+    match record_intent(state, request, &policy, &workload_id, &session_id) {
         Ok(RecordOutcome::Created) => {}
         Ok(RecordOutcome::Existing {
             workload_id: existing,
@@ -492,6 +517,7 @@ fn launch_managed(
     let entry = register_workload(
         state,
         request,
+        policy,
         workload_id.clone(),
         session_id.clone(),
         Some(descriptor),
@@ -1032,9 +1058,13 @@ fn title_of(request: &LaunchRequest) -> String {
     }
 }
 
+/// `policy`는 실제로 적용할 정책이다(관리 실행은 호스트에 맞춰 줄였을 수
+/// 있다). 지문은 언제나 요청 원문으로 만든다 — 같은 요청의 재전송이 충돌로
+/// 보이지 않게.
 fn record_intent(
     state: &Arc<DaemonState>,
     request: &LaunchRequest,
+    policy: &LaunchPolicy,
     workload_id: &WorkloadId,
     session_id: &SessionId,
 ) -> Result<RecordOutcome, RpcError> {
@@ -1055,7 +1085,7 @@ fn record_intent(
         session_id: session_id.clone(),
         mode: request.mode,
         priority: request.priority,
-        policy: request.policy.clone(),
+        policy: policy.clone(),
         journal_relative_path: format!("journals/{session_id}.mtj"),
         journal_limit_bytes: state.config.journal_session_bytes(),
         cols: request.cols,
@@ -1082,6 +1112,7 @@ fn record_intent(
 fn register_workload(
     state: &Arc<DaemonState>,
     request: &LaunchRequest,
+    policy: LaunchPolicy,
     workload_id: WorkloadId,
     session_id: SessionId,
     descriptor: Option<WorkloadDescriptor>,
@@ -1096,7 +1127,7 @@ fn register_workload(
         title: title_of(request),
         cwd: request.cwd.clone(),
         program: request.program.clone(),
-        policy: request.policy.clone(),
+        policy,
         priority: request.priority,
         descriptor,
         queue_reason: None,
@@ -1154,6 +1185,28 @@ fn enqueue_workload(
 /// unsupported by the OS or permission-gated (Linux without a delegated
 /// cgroup subtree). `require` fails preflight on any of them; observe/prefer
 /// launch anyway and carry the list in the outcome (03 §5).
+/// 이 호스트가 절대 받을 수 없는 관리 실행 요청(예약 > 관리 예산 B,
+/// cpu_slots > 슬롯 수 C)을 받을 수 있는 최대로 줄인 정책. 예약은 승인
+/// 회계일 뿐 강제 상한(`memory_max_bytes`)이 아니어서 줄여도 실행 자체는
+/// 같다 — 설정을 고치라고 거절(RESOURCE_UNSCHEDULABLE)하는 대신 받아들이고,
+/// 줄인 값은 `effective_policy`로 돌려준다. 호스트 전체 크기를 아직 모르면
+/// 예산도 모르므로 바이트는 그대로 둔다.
+fn fit_policy_to_host(state: &DaemonState, policy: &LaunchPolicy) -> LaunchPolicy {
+    let admission = state.config.admission_config(state.logical_cpus);
+    let total = state.admission_host().total_bytes;
+    let mut fitted = policy.clone();
+    if total > 0 {
+        let budget = admission.managed_budget_bytes(total);
+        if policy.reservation_bytes.get() > budget {
+            if let Ok(bytes) = term_contracts::U64String::new(budget) {
+                fitted.reservation_bytes = bytes;
+            }
+        }
+    }
+    fitted.cpu_slots = policy.cpu_slots.min(admission.cpu_slot_capacity());
+    fitted
+}
+
 pub fn missing_capabilities(state: &Arc<DaemonState>, request: &LaunchRequest) -> Vec<String> {
     let caps = state.caps.lock().unwrap_or_else(|p| p.into_inner()).clone();
     let unsupported = |c: &term_contracts::snapshot::LimitCapability| {
@@ -1303,13 +1356,28 @@ fn start_session_actor(
     group: Option<term_platform::GroupHandle>,
     redactor: Option<Arc<SecretRedactor>>,
 ) -> Result<(), RpcError> {
-    let (journal, journal_inner, journal_segments) = match SharedJournal::open(
-        state,
-        session_id,
-        Arc::clone(&state.journal_budget),
-        state.config.journal_session_bytes(),
-        state.config.journal_segment_bytes(),
-    ) {
+    let open_journal = || {
+        SharedJournal::open(
+            state,
+            session_id,
+            Arc::clone(&state.journal_budget),
+            state.config.journal_session_bytes(),
+            state.config.journal_segment_bytes(),
+        )
+    };
+    // 전역 저널 예산이 높은 수위를 넘었으면 새 저널을 열기 전에 끝난 세션의
+    // 저널부터 비운다. retention 루프는 1분마다라, 그 사이에 열린 새 세션은
+    // 헤더조차 못 쓰거나(JOURNAL_LIMIT) 첫 출력에서 예산에 막혀 멈춘다.
+    // 수위 아래면 잠금 한 번으로 끝난다.
+    crate::retention::relieve_space_pressure(state);
+    let opened = open_journal().or_else(|first| {
+        // 디스크가 찼거나 그사이 예산이 다시 찼다: 한 번 더 정리하고 다시 연다.
+        tracing::warn!(session = %session_id, error = %first, "journal open failed; relieving space and retrying once");
+        crate::retention::relieve_disk_headroom(state);
+        crate::retention::relieve_space_pressure(state);
+        open_journal()
+    });
+    let (journal, journal_inner, journal_segments) = match opened {
         Ok(pair) => pair,
         Err(e) => {
             tracing::error!(session = %session_id, error = %e, "journal open failed; session cannot start");
@@ -1694,6 +1762,84 @@ const STATUS_COMMITMENT_LIMIT: u32 = 0xC000012D;
 #[cfg_attr(not(windows), allow(dead_code))]
 fn is_commitment_limit_exit(code: i32) -> bool {
     code as u32 == STATUS_COMMITMENT_LIMIT
+}
+
+/// 시작 경로 검사(01 §4 CWD_UNAVAILABLE). 실패에는 `reason_code`
+/// (`cwd_missing`·`cwd_permission_denied`·`cwd_not_directory`·
+/// `cwd_unavailable`)를 실어 UI가 사유를 알리며 가까운 상위 경로로 다시
+/// 시도하게 한다(04-ui §2-4). 검색 권한(x)까지 여기서 본다 — 없으면 자식의
+/// chdir이 SPAWN_FAILED로 끝나 경로 문제인 줄 모르고, 대체 경로도 못 탄다.
+fn usable_cwd(cwd: &str) -> Result<std::path::PathBuf, RpcError> {
+    let unavailable = |reason: &str, message: &'static str| {
+        RpcError::new(ErrorCode::CwdUnavailable, message)
+            .with_details(serde_json::json!({ "reason_code": reason }))
+    };
+    let canonical =
+        std::fs::canonicalize(std::path::Path::new(cwd)).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                unavailable("cwd_missing", "cwd cannot be canonicalized")
+            }
+            // macOS 개인정보 보호 폴더(TCC)의 EPERM도 여기로 온다.
+            std::io::ErrorKind::PermissionDenied => {
+                unavailable("cwd_permission_denied", "cwd is not accessible")
+            }
+            _ => unavailable("cwd_unavailable", "cwd cannot be canonicalized"),
+        })?;
+    if !canonical.is_dir() {
+        return Err(unavailable("cwd_not_directory", "cwd is not a directory"));
+    }
+    if !directory_searchable(&canonical) {
+        return Err(unavailable(
+            "cwd_permission_denied",
+            "cwd is not accessible",
+        ));
+    }
+    Ok(canonical)
+}
+
+/// 이 프로세스가 디렉터리로 chdir할 수 있는가(검색 권한).
+#[cfg(unix)]
+fn directory_searchable(dir: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: NUL로 끝나는 유효한 경로 문자열을 넘기고, 포인터는 호출 동안 산다.
+    unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 }
+}
+
+#[cfg(not(unix))]
+fn directory_searchable(_dir: &std::path::Path) -> bool {
+    true
+}
+
+/// `program`이 `env`일 때 env가 실행할 실행 파일(argv에서 옵션·`NAME=값`
+/// 다음의 첫 낱말). 판단할 수 없는 옵션을 만나거나 PATH 검색(상대 이름)이면
+/// None — 그때는 아무것도 거절하지 않는다.
+fn env_wrapped_program<'a>(program: &str, argv: &'a [String]) -> Option<&'a str> {
+    if !cfg!(unix) || std::path::Path::new(program).file_name()? != "env" {
+        return None;
+    }
+    let mut args = argv.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-u" | "--unset" => {
+                args.next()?;
+            }
+            "-i" | "--ignore-environment" | "-" => {}
+            "--" => {
+                return args
+                    .next()
+                    .map(String::as_str)
+                    .filter(|p| p.starts_with('/'))
+            }
+            a if a.starts_with("--unset=") => {}
+            a if a.starts_with('-') => return None,
+            a if a.contains('=') => {}
+            a => return Some(a).filter(|p| p.starts_with('/')),
+        }
+    }
+    None
 }
 
 /// 실행 파일 확장자가 셸 shim(`.cmd/.bat/.ps1`)인지 — 대소문자 무시.
@@ -2219,6 +2365,89 @@ mod env_identity_tests {
         );
         assert_eq!(env.len(), 2);
         assert!(env.contains_key(ENV_SESSION_ID) && env.contains_key(ENV_WORKLOAD_ID));
+    }
+}
+
+#[cfg(test)]
+mod launch_check_tests {
+    use super::*;
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// UI가 보내는 셸 래퍼(`env -u … <셸> -l -i`)에서 셸 자리를 찾는다.
+    #[cfg(unix)]
+    #[test]
+    fn env_wrapped_program_finds_the_shell_after_env_options() {
+        let ui = argv(&[
+            "-u",
+            "NO_COLOR",
+            "-u",
+            "FORCE_COLOR",
+            "/opt/homebrew/bin/fish",
+            "-l",
+        ]);
+        assert_eq!(
+            env_wrapped_program("/usr/bin/env", &ui),
+            Some("/opt/homebrew/bin/fish")
+        );
+        let assigned = argv(&["-i", "LANG=C", "--unset=X", "--", "/bin/zsh"]);
+        assert_eq!(
+            env_wrapped_program("/usr/bin/env", &assigned),
+            Some("/bin/zsh")
+        );
+        // PATH 검색·모르는 옵션·env가 아닌 실행 파일은 판단하지 않는다.
+        assert_eq!(env_wrapped_program("/usr/bin/env", &argv(&["zsh"])), None);
+        assert_eq!(
+            env_wrapped_program("/usr/bin/env", &argv(&["-S", "zsh -l"])),
+            None
+        );
+        assert_eq!(env_wrapped_program("/bin/zsh", &argv(&["/bin/sh"])), None);
+        assert_eq!(env_wrapped_program("/usr/bin/env", &argv(&["-u"])), None);
+    }
+
+    fn reason(err: &RpcError) -> &str {
+        err.details
+            .as_ref()
+            .and_then(|d| d["reason_code"].as_str())
+            .unwrap_or_default()
+    }
+
+    /// 쓸 수 없는 시작 경로는 사유와 함께 CWD_UNAVAILABLE이다 — UI가 그
+    /// 사유로 알리며 상위 경로로 다시 시도한다.
+    #[test]
+    fn usable_cwd_reports_why_a_directory_cannot_be_used() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(usable_cwd(dir.path().to_str().unwrap()).is_ok());
+
+        let gone = dir.path().join("gone");
+        let err = usable_cwd(gone.to_str().unwrap()).unwrap_err();
+        assert_eq!(err.code, ErrorCode::CwdUnavailable);
+        assert_eq!(reason(&err), "cwd_missing");
+
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let err = usable_cwd(file.to_str().unwrap()).unwrap_err();
+        assert_eq!(reason(&err), "cwd_not_directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn usable_cwd_rejects_a_directory_the_daemon_cannot_enter() {
+        use std::os::unix::fs::PermissionsExt as _;
+        // root는 권한 비트를 무시한다 — 그 환경에서는 볼 것이 없다.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let err = usable_cwd(locked.to_str().unwrap()).unwrap_err();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(err.code, ErrorCode::CwdUnavailable);
+        assert_eq!(reason(&err), "cwd_permission_denied");
     }
 }
 

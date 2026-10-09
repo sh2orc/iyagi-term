@@ -941,6 +941,40 @@ describe("비정상 종료 복구 회귀", () => {
     controller.dispose();
   });
 
+  it("같은 대화가 다른 탭에서 실행 중이면 종료 pane의 다시 시작은 그 탭으로 옮겨 가지 않고 이 자리에서 새 셸을 연다", async () => {
+    const probe = launchProbe();
+    // 이 pane의 작업에는 끝난 대화 기록이 있지만, 같은 대화가 첫 탭에서 돌고 있다.
+    probe.client.agentSessionList = vi.fn().mockResolvedValue([record()]);
+    useWorkbenchStore.setState({
+      tabs: [
+        { kind: "terminal", id: "tab-1", title: "탭 1", root: makeLeaf("leaf-live", "view-live", "s-live") },
+        { kind: "terminal", id: "tab-2", title: "탭 2", root: makeLeaf("leaf-1", "view-1", "s-old") },
+      ],
+      panes: {
+        "leaf-live": savedPane({ leafId: "leaf-live", viewId: "view-live", sessionId: "s-live", workloadId: "w-live", phase: "live" }),
+        "leaf-1": savedPane({ phase: "exited" }),
+      },
+      activeTabId: "tab-2",
+      focusedLeafId: "leaf-1",
+      workloads: [{
+        workload_id: "w-live", session_id: "s-live", state: "RUNNING", mode: "shell",
+        agent: { agent: "claude", pid: 7, detected_at_ms: 1, session_id: "agent-session-0001" },
+      } as never],
+    });
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
+    try {
+      controller.retryPane("leaf-1");
+      await new Promise(done => setTimeout(done, 0));
+      expect(useWorkbenchStore.getState().activeTabId).toBe("tab-2");
+      expect(useWorkbenchStore.getState().focusedLeafId).toBe("leaf-1");
+      expect(probe.launches).toHaveLength(1);
+      expect(probe.launches[0].argv).not.toContain("agent-session-0001");
+      expect(useWorkbenchStore.getState().panes["leaf-1"].sessionId).toBe("s-1");
+    } finally {
+      controller.dispose();
+    }
+  });
+
   it.each(["claude", "codex", "opencode"] as const)("%s: 최근 200건 밖의 기록도 원래 pane에서 복구한다", async (agent) => {
     const client = new MockDaemonClient({ resourceIntervalMs: 0 });
     client.seedAgentSessions([record({ agent }), ...Array.from({ length: 200 }, (_, i) => record({

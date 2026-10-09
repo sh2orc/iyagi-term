@@ -1,10 +1,12 @@
 /**
  * 끝난 일반 터미널을 이어서 열 때(최근 종료의 터미널 연결·창의 재실행)의 계약:
  * 1) 셸이 마지막으로 알린 경로(OSC 7이 갱신한 pane cwd)에서 연다.
- * 2) 그 경로가 사라졌으면(CWD_UNAVAILABLE) 처음 실행한 경로 → 프로젝트 root → home
- *    순으로 열고 알린다(04-ui §2-4). 다른 실패와 에이전트 대화 재개는 다시 시도하지 않는다.
- * 3) 보존한 화면에서 잇는 새 PTY는 지금 격자 크기로 시작한다(80×24로 접었다 펴지 않게).
- * 4) 끝난 세션에 붙어 있던 view는 데몬에서 뗀다(출력 펌프·저널 보존이 풀리게).
+ * 2) 그 경로가 사라졌으면(CWD_UNAVAILABLE) 가까운 상위 경로 → 처음 실행한 경로 →
+ *    프로젝트 root → home → 뿌리 순으로 열고 알린다(04-ui §2-4).
+ * 3) 경로가 아니라 셸이 뜨지 못하면(SPAWN_FAILED) 같은 경로에서 기본 셸로 바꿔 열어 본다.
+ *    에이전트 대화 재개는 경로도 셸도 바꾸지 않고 사유를 남긴다.
+ * 4) 보존한 화면에서 잇는 새 PTY는 지금 격자 크기로 시작한다(80×24로 접었다 펴지 않게).
+ * 5) 끝난 세션에 붙어 있던 view는 데몬에서 뗀다(출력 펌프·저널 보존이 풀리게).
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +24,7 @@ import { TerminalRegistry, type TerminalLike } from "./registry";
 const ROOT = "/work/iyagi";
 const HOME = "/home/me";
 const LAST_CWD = `${ROOT}/crates/iyagi-termd`;
+const LAST_PARENT = `${ROOT}/crates`;
 
 function fakeTerminal(): TerminalLike & { rows: number } {
   return {
@@ -48,7 +51,11 @@ interface Probe {
   detaches: Array<{ session_id: string; view_id: string }>;
 }
 
-function probe(options: { missingCwds?: string[]; failWith?: RpcClientError } = {}): Probe {
+function probe(options: {
+  missingCwds?: string[];
+  failWith?: RpcClientError;
+  failFor?: (request: LaunchRequest) => RpcClientError | null;
+} = {}): Probe {
   const launches: LaunchRequest[] = [];
   const detaches: Array<{ session_id: string; view_id: string }> = [];
   const client = {
@@ -57,6 +64,8 @@ function probe(options: { missingCwds?: string[]; failWith?: RpcClientError } = 
     workloadLaunch: async (request: LaunchRequest) => {
       launches.push(request);
       if (options.failWith) throw options.failWith;
+      const failure = options.failFor?.(request);
+      if (failure) throw failure;
       if (options.missingCwds?.includes(request.cwd)) {
         throw new RpcClientError("CWD_UNAVAILABLE", "cwd cannot be canonicalized");
       }
@@ -139,40 +148,78 @@ describe("최근 종료의 터미널 연결: 끝난 일반 터미널을 그 자�
     } finally { controller.dispose(); }
   });
 
-  it("마지막 경로가 사라졌으면 처음 실행한 경로에서 새 요청으로 열고 알린다", async () => {
+  it("마지막 경로가 사라졌으면 가장 가까운 상위 경로에서 새 요청으로 열고 알린다", async () => {
     const { client, launches } = probe({ missingCwds: [LAST_CWD] });
     seed(exitedPane());
     const controller = controllerFor(client);
     try {
       await controller.attachWorkloadTerminal("w-old");
       await vi.waitFor(() => expect(pane().sessionId).toBe("s-2"));
-      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, ROOT]);
+      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, LAST_PARENT]);
       expect(launches[1].request_id).not.toBe(launches[0].request_id);
-      expect(pane().cwd).toBe(ROOT);
+      expect(pane().cwd).toBe(LAST_PARENT);
       expect(pane().phase).not.toBe("failed");
-      expect(useWorkbenchStore.getState().toast).toBe(t("terminal.session.cwdFallback", { cwd: ROOT }));
+      expect(useWorkbenchStore.getState().toast).toBe(
+        t("terminal.session.cwdFallback", { from: LAST_CWD, cwd: LAST_PARENT }),
+      );
     } finally { controller.dispose(); }
   });
 
-  it("후보 경로가 모두 사라졌으면 home까지 시도한 뒤 실패를 남긴다", async () => {
-    const { client, launches } = probe({ missingCwds: [LAST_CWD, ROOT, HOME] });
+  it("상위 경로도 사라졌으면 더 위로 올라가 처음 실행한 경로(프로젝트 root)에서 연다", async () => {
+    const { client, launches } = probe({ missingCwds: [LAST_CWD, LAST_PARENT] });
+    seed(exitedPane());
+    const controller = controllerFor(client);
+    try {
+      await controller.attachWorkloadTerminal("w-old");
+      await vi.waitFor(() => expect(pane().sessionId).toBe("s-3"));
+      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, LAST_PARENT, ROOT]);
+      expect(pane().cwd).toBe(ROOT);
+    } finally { controller.dispose(); }
+  });
+
+  it("권한이 없어 거절된 경로는 그 사유로 알린다", async () => {
+    const { client } = probe({
+      failFor: request => request.cwd === LAST_CWD
+        ? new RpcClientError("CWD_UNAVAILABLE", "cwd is not accessible", false, { reason_code: "cwd_permission_denied" })
+        : null,
+    });
+    seed(exitedPane());
+    const controller = controllerFor(client);
+    try {
+      await controller.attachWorkloadTerminal("w-old");
+      await vi.waitFor(() => expect(pane().sessionId).toBe("s-2"));
+      expect(useWorkbenchStore.getState().toast).toBe(
+        t("terminal.session.cwdFallbackDenied", { from: LAST_CWD, cwd: LAST_PARENT }),
+      );
+    } finally { controller.dispose(); }
+  });
+
+  it("후보 경로가 모두 없으면 home과 뿌리까지 시도한 뒤 무엇을 못 열었는지 남긴다", async () => {
+    const everything = [LAST_CWD, LAST_PARENT, ROOT, HOME, "/"];
+    const { client, launches } = probe({ missingCwds: everything });
     seed(exitedPane());
     const controller = controllerFor(client);
     try {
       await controller.attachWorkloadTerminal("w-old");
       await vi.waitFor(() => expect(pane().phase).toBe("failed"));
-      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, ROOT, HOME]);
+      expect(launches.map(request => request.cwd)).toEqual(everything);
+      expect(pane().error).toContain(t("terminal.session.cwdUnavailable", { cwd: LAST_CWD }));
+      expect(pane().error).toContain("CWD_UNAVAILABLE");
     } finally { controller.dispose(); }
   });
 
-  it("경로가 사라진 것이 아닌 실패는 다른 경로로 다시 시도하지 않는다", async () => {
-    const { client, launches } = probe({ failWith: new RpcClientError("SPAWN_FAILED", "spawn failed") });
+  it("경로가 아니라 셸이 뜨지 못하면 같은 경로에서 기본 셸로 바꿔 열어 보고, 다 실패하면 사유를 남긴다", async () => {
+    const { client, launches } = probe({ failWith: new RpcClientError("SPAWN_FAILED", "pty spawn failed") });
     seed(exitedPane());
     const controller = controllerFor(client);
     try {
       await controller.attachWorkloadTerminal("w-old");
       await vi.waitFor(() => expect(pane().phase).toBe("failed"));
-      expect(launches).toHaveLength(1);
+      // 다른 경로로는 가지 않는다 — 셸만 /bin/zsh → /bin/sh로 바꾼다.
+      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, LAST_CWD]);
+      expect(launches[0].argv).toContain("/bin/zsh");
+      expect(launches[1].argv).toContain("/bin/sh");
+      expect(pane().error).toContain(t("terminal.session.spawnFailedHint"));
     } finally { controller.dispose(); }
   });
 });
@@ -185,7 +232,7 @@ describe("창의 재실행과 대화 재개", () => {
     try {
       controller.retryPane("leaf-1");
       await vi.waitFor(() => expect(pane().sessionId).toBe("s-2"));
-      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, ROOT]);
+      expect(launches.map(request => request.cwd)).toEqual([LAST_CWD, LAST_PARENT]);
       expect(detaches).toEqual([{ session_id: "s-old", view_id: "view-1" }]);
     } finally { controller.dispose(); }
   });
@@ -203,6 +250,26 @@ describe("창의 재실행과 대화 재개", () => {
       expect(launches).toHaveLength(1);
       expect(launches[0].cwd).toBe(ROOT);
       expect(pane().phase).toBe("failed");
+      expect(pane().error).toContain(t("terminal.resume.cwdUnavailable", { cwd: ROOT }));
+    } finally { controller.dispose(); }
+  });
+
+  it("경로를 잃은 대화의 ‘새 셸’은 그 대화 경로의 가까운 상위 경로에서 연다", async () => {
+    const { client, launches } = probe({ missingCwds: [ROOT, LAST_CWD] });
+    const resume: AgentResumeInfo = {
+      recordId: "rec-1", agent: "claude", agentSessionId: "agent-session-0001",
+      cwd: ROOT, title: "iyagi", program: "/opt/bin/claude",
+    };
+    seed(exitedPane({ resume, cwd: null }));
+    const controller = controllerFor(client);
+    try {
+      await controller.resumeAgentSession(resume, { leafId: "leaf-1" });
+      expect(pane().phase).toBe("failed");
+      controller.retryPane("leaf-1", { newShell: true });
+      await vi.waitFor(() => expect(pane().sessionId).not.toBeNull());
+      // 재개 1번(ROOT, 실패) 뒤 새 셸: ROOT(없음) → home. /work는 뿌리 바로 아래라 건너뛴다.
+      expect(launches.map(request => request.cwd)).toEqual([ROOT, ROOT, HOME]);
+      expect(launches[1].argv).toContain("/bin/zsh");
     } finally { controller.dispose(); }
   });
 });

@@ -937,10 +937,13 @@ impl DaemonState {
                 reconciliation_required: reconciliation,
                 pressure,
             },
+            // 첫 표본 전: 표본의 나이는 데몬이 뜬 뒤 흐른 시간이다. u64::MAX로
+            // 두면 기동 직후의 관리 실행이 곧장 fail-open으로 넘어가 "전체 0
+            // 바이트" 호스트로 판정됐다 — 잠깐 WAIT_TELEMETRY로 기다리면 된다.
             None => term_core::AdmissionHost {
                 total_bytes: 0,
                 available_bytes: None,
-                sample_age_ms: u64::MAX,
+                sample_age_ms: now,
                 reconciliation_required: reconciliation,
                 pressure,
             },

@@ -1,3 +1,0 @@
-{"iyagi_recording":1,"exit_code":0,"line_delay_ms":0}
-{"type":"system","subtype":"init","session_id":"claude-sess-e19","model":"claude-test-model","tools":[],"mcp_servers":[]}
-{"type":"stream_event","event":{"type":"message_delta","delta":{"type":"text_delta","text":"partial thought, stream cut before the envelope"}}}

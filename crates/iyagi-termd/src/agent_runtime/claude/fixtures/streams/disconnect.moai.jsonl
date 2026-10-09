@@ -1,3 +1,0 @@
-{"iyagi_recording":1,"exit_code":null,"line_delay_ms":0}
-{"type":"system","subtype":"init","session_id":"claude-sess-disc","model":"claude-test-model","tools":[],"mcp_servers":[]}
-{"type":"stream_event","event":{"type":"message_delta","delta":{"type":"text_delta","text":"working when the pipe died"}}}

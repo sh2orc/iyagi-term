@@ -55,7 +55,7 @@ Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 15 MB | `8c9d5c37a732dd8d58ed1bb751a27fa7f9e81a4357d2f7bfbd4ad39e44e94f45` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 15 MB | `eab0d351d6a401577c3d1266d036b51c87487c78cafa66233e2eb55048e3a89b` |
 
 <details>
 <summary>macOS 첫 실행 안내 (ad-hoc 서명, 미공증)</summary>

@@ -1,7 +1,0 @@
-{"iyagi_recording":1,"exit_code":1,"line_delay_ms":150}
-{"type":"system","subtype":"init","session_id":"claude-sess-int","model":"claude-test-model","tools":[],"mcp_servers":[]}
-{"type":"stream_event","event":{"type":"message_delta","delta":{"type":"text_delta","text":"line 1"}}}
-{"type":"stream_event","event":{"type":"message_delta","delta":{"type":"text_delta","text":"line 2"}}}
-{"type":"stream_event","event":{"type":"message_delta","delta":{"type":"text_delta","text":"line 3"}}}
-{"type":"stream_event","event":{"type":"message_delta","delta":{"type":"text_delta","text":"line 4"}}}
-{"type":"result","subtype":"success","is_error":false,"session_id":"claude-sess-int","result":"would-be final after the cancel point","usage":{"input_tokens":1,"output_tokens":1},"total_cost_usd":0.001}

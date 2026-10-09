@@ -79,9 +79,9 @@ jobs:
         with:
           # Per-ref key — no cross-branch target/ or registry sharing (note 4).
           key: linux-check-${{ github.ref }}-${{ hashFiles('Cargo.lock') }}
-          path:
-            - .cargo/registry/
-            - target/
+          path: |
+            .cargo/registry/
+            target/
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -161,9 +161,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           key: bundle-linux-${{ github.ref }}-${{ hashFiles('Cargo.lock') }}
-          path:
-            - .cargo/registry/
-            - target/
+          path: |
+            .cargo/registry/
+            target/
       - run: npm ci
       # A real .deb (pure-Rust bundler, no FUSE/linuxdeploy needed) so the
       # sidecar staging and deb depends are exercised, not just the binary.

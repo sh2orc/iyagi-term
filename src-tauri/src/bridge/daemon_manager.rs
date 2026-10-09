@@ -168,6 +168,7 @@ pub fn stable_daemon_copy(source: &Path, data_dir: &Path) -> io::Result<PathBuf>
             .map(|recorded| recorded == stamp)
             .unwrap_or(false)
     {
+        clear_quarantine(&target);
         return Ok(target);
     }
     let dir = target
@@ -190,10 +191,29 @@ pub fn stable_daemon_copy(source: &Path, data_dir: &Path) -> io::Result<PathBuf>
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
     }
+    clear_quarantine(&tmp);
     std::fs::rename(&tmp, &target)?;
     std::fs::write(&stamp_path, stamp)?;
     Ok(target)
 }
+
+/// macOS: drop `com.apple.quarantine` from the stable copy. An app launched
+/// from a downloaded DMG (ad-hoc signed, translocated) writes its copy with
+/// the quarantine flag, and Gatekeeper then SIGKILLs it the first time a
+/// terminal runs it (`ccd`/`ccg`, hooks) — and may offer to trash it. The
+/// copy is byte-identical to the binary the user already chose to run.
+#[cfg(target_os = "macos")]
+fn clear_quarantine(path: &Path) {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return;
+    };
+    // ENOATTR (never quarantined) is the common case; nothing to report.
+    unsafe { libc::removexattr(path.as_ptr(), c"com.apple.quarantine".as_ptr(), 0) };
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clear_quarantine(_path: &Path) {}
 
 /// The binary the daemon is actually spawned from: on Linux under an
 /// AppImage (or any `.mount_*` path) the stable copy, else the located one.
@@ -577,6 +597,40 @@ mod tests {
             .any(|e| { e.unwrap().file_name().to_string_lossy().ends_with(".tmp") }));
         // A missing source is an error, not a silent fallback.
         assert!(stable_daemon_copy(&dir.path().join("nope"), &data).is_err());
+    }
+
+    /// A quarantined source (app run from a downloaded DMG) must not hand
+    /// Gatekeeper a quarantined copy — terminals would get it SIGKILLed.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stable_copy_drops_the_quarantine_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("iyagi-termd");
+        std::fs::write(&source, b"v1").unwrap();
+        let quarantine = |path: &Path| {
+            std::process::Command::new("/usr/bin/xattr")
+                .args(["-w", "com.apple.quarantine", "0281;00000000;;"])
+                .arg(path)
+                .status()
+                .unwrap()
+        };
+        let quarantined = |path: &Path| {
+            std::process::Command::new("/usr/bin/xattr")
+                .args(["-p", "com.apple.quarantine"])
+                .arg(path)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        assert!(quarantine(&source).success());
+        let data = dir.path().join("data");
+        let stable = stable_daemon_copy(&source, &data).unwrap();
+        assert!(!quarantined(&stable));
+        // A current copy that picked the flag up later is cleaned too.
+        assert!(quarantine(&stable).success());
+        stable_daemon_copy(&source, &data).unwrap();
+        assert!(!quarantined(&stable));
     }
 
     #[test]

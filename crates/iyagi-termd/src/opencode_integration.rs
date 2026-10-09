@@ -45,7 +45,7 @@ fn configure_inner(root: &Path, env: &mut BTreeMap<String, String>) -> std::io::
         &dir.join("tui.json"),
         &serde_json::json!({"plugin": [tui_plugin.as_str()]}).to_string(),
     )?;
-    let program = std::env::current_exe()?;
+    let program = daemon_program(&root)?;
     env.insert(CONFIG.into(), merged);
     // This optional TUI reporter also tracks selecting an existing conversation
     // without sending a prompt. Respect an explicitly selected TUI config file.
@@ -61,6 +61,22 @@ fn configure_inner(root: &Path, env: &mut BTreeMap<String, String>) -> std::io::
     );
     env.insert("IYAGI_DATA_DIR".into(), root.to_string_lossy().into_owned());
     Ok(())
+}
+
+/// PTY에 `IYAGI_DAEMON_BIN`으로 알려 줄 데몬 경로. 보통은 지금 도는 실행
+/// 파일이지만, 오래 떠 있는 데몬은 repo 이름 변경·`cargo clean` 뒤에도 옛
+/// 경로를 `current_exe`로 돌려준다 — 그 경로를 주입하면 셸의 `ccd`/`ccg`와
+/// reporter가 없는 파일을 부른다. 그때는 앱이 기동 때마다 갱신하는 안정
+/// 사본(`<root>/bin/iyagi-termd`)을 대신 쓴다.
+fn daemon_program(root: &Path) -> std::io::Result<std::path::PathBuf> {
+    let current = std::env::current_exe()?;
+    if current.is_file() {
+        return Ok(current);
+    }
+    let stable = root
+        .join("bin")
+        .join(format!("iyagi-termd{}", std::env::consts::EXE_SUFFIX));
+    Ok(if stable.is_file() { stable } else { current })
 }
 
 fn merge_config(existing: Option<&str>, plugin: &str) -> Option<String> {

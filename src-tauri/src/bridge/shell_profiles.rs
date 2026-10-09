@@ -281,7 +281,11 @@ fn double_quoted_escape(value: &str) -> String {
 /// 스크립트 파일 전체 내용(순수 함수).
 ///
 /// `IYAGI_DAEMON_BIN`을 먼저 보는 이유: 개발 빌드나 이동 설치에서 사용자가
-/// rc를 다시 쓰지 않고도 데몬 경로를 덮어쓸 수 있게 하는 탈출구다.
+/// rc를 다시 쓰지 않고도 데몬 경로를 덮어쓸 수 있게 하는 탈출구다. 다만 이
+/// 값은 데몬이 PTY마다 자기 실행 경로로 주입하므로, repo 이름을 바꾸거나 빌드
+/// 산출물을 지운 뒤에도 오래 떠 있던 데몬의 셸에는 **없는 경로**가 남는다.
+/// 그래서 실행 가능할 때만 쓰고, 아니면 박아 둔 안정 사본으로 넘어간다 —
+/// 어느 셸에서 부르든 `ccd`/`ccg`가 죽지 않게 하는 것이 이 함수의 계약이다.
 ///
 /// 두 함수 모두 `--dangerously-skip-permissions`로 띄운다(bypass permissions
 /// 모드). `ccd`/`ccg`는 손으로 쓰던 같은 이름의 헬퍼를 대체하는 것이라 그
@@ -299,8 +303,10 @@ pub fn render_script(daemon_bin_abs: &str, data_dir: &str, main_model: &str) -> 
          # `|| true`: 두 별칭이 없으면 unalias가 1을 돌려주는데, 사용자의\n\
          # `setopt err_exit`가 스크립트 첫 줄에서 소싱을 끊어버리는 것을 막는다.\n\
          unalias ccd ccg 2>/dev/null || true\n\
-         ccd() {{ \"${{IYAGI_DAEMON_BIN:-{binary}}}\" --data-dir {dir} claude-exec --provider anthropic -- {BYPASS_FLAG} \"$@\"; }}\n\
-         ccg() {{ \"${{IYAGI_DAEMON_BIN:-{binary}}}\" --data-dir {dir} claude-exec --provider zai --main-model {model} -- {BYPASS_FLAG} \"$@\"; }}\n"
+         # IYAGI_DAEMON_BIN은 실행 가능할 때만 쓴다(옛 데몬이 남긴 죽은 경로 무시).\n\
+         __iyagi_daemon() {{ local bin=\"${{IYAGI_DAEMON_BIN-}}\"; [ -n \"$bin\" ] && [ -x \"$bin\" ] || bin=\"{binary}\"; \"$bin\" \"$@\"; }}\n\
+         ccd() {{ __iyagi_daemon --data-dir {dir} claude-exec --provider anthropic -- {BYPASS_FLAG} \"$@\"; }}\n\
+         ccg() {{ __iyagi_daemon --data-dir {dir} claude-exec --provider zai --main-model {model} -- {BYPASS_FLAG} \"$@\"; }}\n"
     )
 }
 
@@ -1021,7 +1027,7 @@ mod tests {
         // 설치본처럼 공백이 든 경로 + 셸이 확장했을 `$`.
         let text = render_script("/opt/Iyagi $T/iyagi-termd", "/My Dir", "glm-5.3-flash[1m]");
         // 겹따옴표 안의 `$`는 이스케이프되고, 경로의 공백은 그대로 살아 있다.
-        assert!(text.contains("\"${IYAGI_DAEMON_BIN:-/opt/Iyagi \\$T/iyagi-termd}\""));
+        assert!(text.contains("bin=\"/opt/Iyagi \\$T/iyagi-termd\";"));
         assert!(text.contains(
             "--data-dir '/My Dir' claude-exec --provider anthropic -- --dangerously-skip-permissions \"$@\"; }"
         ));
@@ -1033,6 +1039,46 @@ mod tests {
         assert!(render_script("/x", "/it's", DEFAULT_MAIN_MODEL).contains("'/it'\\''s'"));
         // 백슬래시와 백틱도 셸 해석에서 빠져나온다.
         assert!(render_script("/a\\b`c", "/d", DEFAULT_MAIN_MODEL).contains("/a\\\\b\\`c"));
+    }
+
+    /// 이름이 바뀐 repo에서 떠 있던 데몬이 죽은 `IYAGI_DAEMON_BIN`을 주입해도
+    /// `ccd`/`ccg`는 박아 둔 경로로 실행돼야 한다. 살아 있는 값은 여전히 이긴다.
+    #[cfg(unix)]
+    #[test]
+    fn rendered_functions_skip_a_stale_daemon_override() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if !Path::new("/bin/zsh").is_file() {
+            return;
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        let fake = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\necho {name} \"$@\"\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path.display().to_string()
+        };
+        let baked = fake("baked");
+        let live = fake("live");
+        let script = dir.path().join("profiles.zsh");
+        std::fs::write(&script, render_script(&baked, "/d", DEFAULT_MAIN_MODEL)).unwrap();
+        let run = |override_bin: &str| {
+            let out = std::process::Command::new("/bin/zsh")
+                .args([
+                    "-fc",
+                    &format!(
+                        "source {} && ccd x",
+                        shell_quote(&script.display().to_string())
+                    ),
+                ])
+                .env("IYAGI_DAEMON_BIN", override_bin)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert!(run("/gone/moai-term/target/debug/iyagi-termd").starts_with("baked --data-dir /d"));
+        assert!(run("").starts_with("baked "));
+        assert!(run(&live).starts_with("live --data-dir /d"));
     }
 
     #[test]
@@ -1329,7 +1375,8 @@ mod tests {
         // 스크립트는 같은 이름의 alias부터 치운다. `|| true`가 없으면 별칭이
         // 없는 셸(setopt err_exit)에서 unalias의 exit 1이 스크립트를 끊는다.
         let script = std::fs::read_to_string(script_path(data.path())).unwrap();
-        assert!(script.contains("unalias ccd ccg 2>/dev/null || true\nccd() {"));
+        let unalias = script.find("unalias ccd ccg 2>/dev/null || true\n").unwrap();
+        assert!(unalias < script.find("\nccd() {").unwrap());
 
         // 이미 끝에 있으면 다시 교체해도 글자 하나 바뀌지 않는다.
         let again = replace_as(home.path(), data.path(), &probe()).unwrap();

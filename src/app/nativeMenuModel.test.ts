@@ -143,9 +143,9 @@ describe("native menu bar model", () => {
   });
 
   it("orders the menus like a macOS app, in the UI language", () => {
-    expect(menu().map((submenu) => submenu.label)).toEqual(["IYAGI", "파일", "편집", "보기", "터미널", "탭", "창", "도움말"]);
+    expect(menu().map((submenu) => submenu.label)).toEqual(["IYAGI Term", "파일", "편집", "보기", "터미널", "탭", "창", "도움말"]);
     const english = menu({}, { language: "en" });
-    expect(english.map((submenu) => submenu.label)).toEqual(["IYAGI", "File", "Edit", "View", "Terminal", "Tab", "Window", "Help"]);
+    expect(english.map((submenu) => submenu.label)).toEqual(["IYAGI Term", "File", "Edit", "View", "Terminal", "Tab", "Window", "Help"]);
     expect(item(english, "split-row").label).toBe("Split Right");
     expect(english[english.length - 2]?.id).toBe(WINDOW_SUBMENU_ID);
     expect(english[english.length - 1]?.id).toBe(HELP_SUBMENU_ID);

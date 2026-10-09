@@ -14,12 +14,15 @@
  *   ad-hoc 빌드와 실행 동작을 바꾸지 않기 위해서다.
  * - dev: `tauri dev`는 번들 없이 target/<profile>의 실행 파일을 곧바로 띄우므로
  *   runner(scripts/macos-sign-runner.sh)가 cargo 빌드 직후 서명한다.
+ * - macOS dev는 인증서가 없어도 runner를 거친다 — runner가 실행 파일을
+ *   `<productName>.app`으로 감싸야 Dock에 `iyagi-app`이 아니라 제품 이름이 뜬다.
  * - macOS에서 인증서가 없으면 build만 ad-hoc("-")으로 번들 전체를 서명한다 — 서명을 건너뛰면
  *   번들 서명이 깨져 Gatekeeper가 "손상됨"으로 막는다. macOS가 아니면 아무것도 바꾸지 않는다.
  *   APPLE_SIGNING_IDENTITY나 --runner를 직접 지정했으면 그 값을 따른다.
  */
 
 import { execFileSync, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,11 +36,16 @@ const env = { ...process.env };
 const injected = [];
 
 const identity = command === "dev" || command === "build" ? localSigningIdentity() : null;
+const devApp = command === "dev" && process.platform === "darwin" ? devAppIdentity() : null;
+if (devApp) {
+  env.IYAGI_DEV_APP_NAME = devApp.name;
+  env.IYAGI_DEV_APP_ID = devApp.id;
+}
+if ((identity || devApp) && !hasOption(args, "--runner", "-r")) {
+  injected.push("--runner", join(repoRoot, "scripts", "macos-sign-runner.sh"));
+}
 if (identity) {
   env.IYAGI_SIGNING_IDENTITY = identity;
-  if (!hasOption(args, "--runner", "-r")) {
-    injected.push("--runner", join(repoRoot, "scripts", "macos-sign-runner.sh"));
-  }
   if (command === "build" && !process.env.APPLE_SIGNING_IDENTITY) {
     env.APPLE_SIGNING_IDENTITY = identity;
     injected.push("--config", JSON.stringify({ bundle: { macOS: { hardenedRuntime: false } } }));
@@ -82,6 +90,19 @@ function localSigningIdentity() {
       .split("\n")
       .some((line) => line.includes(`"${wanted}"`) || line.split(/\s+/).includes(wanted.toUpperCase()));
     return found ? wanted : null;
+  } catch {
+    return null;
+  }
+}
+
+/** dev 실행 파일을 감쌀 .app의 이름·식별자(tauri.conf.json). 읽지 못하면 null — 감싸지 않는다. */
+function devAppIdentity() {
+  try {
+    const conf = JSON.parse(readFileSync(join(repoRoot, "src-tauri", "tauri.conf.json"), "utf8"));
+    const name = typeof conf.productName === "string" ? conf.productName.trim() : "";
+    // 번들 디렉터리 이름이 되므로 경로 구분자는 받지 않는다.
+    if (!name || name.includes("/")) return null;
+    return { name, id: typeof conf.identifier === "string" ? conf.identifier : "ai.iyagi.term" };
   } catch {
     return null;
   }

@@ -212,25 +212,17 @@ fn launch_shell(
     canonical_cwd: std::path::PathBuf,
     claude_provider: Option<ResolvedClaudeProvider>,
 ) -> Result<LaunchOutcome, RpcError> {
-    // Admission: session limit + CRITICAL pressure only (spec: shells spawn
-    // directly; no queue, no resource group).
+    // Admission: session limit only (spec: shells spawn directly; no queue,
+    // no resource group). Host memory pressure never blocks a shell launch:
+    // a shell itself costs a few MB, and a host under pressure is exactly
+    // when the user needs a terminal (to find and stop the offender). What
+    // pressure does govern is the managed queue (WAIT_HOST_PRESSURE) and the
+    // relief/guard loops over already-running workloads.
     if state.active_workload_count() as u32 >= state.config.session_limit() {
         return Err(RpcError::new(
             ErrorCode::SessionLimit,
             format!("session limit {} reached", state.config.session_limit()),
         ));
-    }
-    {
-        let pressure = *state
-            .pressure_level
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        if pressure == term_contracts::metrics::PressureLevel::Critical {
-            return Err(RpcError::new(
-                ErrorCode::InvalidState,
-                "host memory pressure is CRITICAL; retry shortly",
-            ));
-        }
     }
 
     let (workload_id, session_id) = (WorkloadId::generate(), SessionId::generate());

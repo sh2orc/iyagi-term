@@ -5,7 +5,7 @@
 import type { SectionMessages } from "../core";
 
 export const ko = {
-  "app.name": "IYAGI",
+  "app.name": "IYAGI Term",
   "menu.native.file": "파일",
   "menu.native.edit": "편집",
   "menu.native.view": "보기",
@@ -325,7 +325,7 @@ export const ko = {
 } satisfies Record<string, string>;
 
 export const en: Record<keyof typeof ko, string> = {
-  "app.name": "IYAGI",
+  "app.name": "IYAGI Term",
   "menu.native.file": "File",
   "menu.native.edit": "Edit",
   "menu.native.view": "View",

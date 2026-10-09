@@ -320,7 +320,7 @@ describe("native menu bar", () => {
     await menu.nativeMenu.flush();
     expect(menu.menuBars).toHaveLength(1);
     expect(menu.menuBars[0]?.map((submenu) => submenu.text)).toEqual([
-      "IYAGI",
+      "IYAGI Term",
       "파일",
       "편집",
       "보기",
@@ -363,7 +363,7 @@ describe("native menu bar", () => {
     await menu.nativeMenu.flush();
     expect(menu.menuBars).toHaveLength(1);
     expect(menu.menuBars[0]?.map((submenu) => submenu.text)).toEqual([
-      "IYAGI",
+      "IYAGI Term",
       "File",
       "Edit",
       "View",

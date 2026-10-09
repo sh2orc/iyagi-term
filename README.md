@@ -64,7 +64,7 @@ CLI; IYAGI owns execution, process groups and resource governance.
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `c4f48a4a6a7b7d8a4b155bf05bd9262178b3f6dc1b1c15bb9c16569945166f87` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `352c1f365887a05128cbe164b091e967fa665491bba5db2cdd4c1ba5c081d72e` |
 
 <details>
 <summary>Signing & trust on macOS</summary>

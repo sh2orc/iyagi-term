@@ -1,6 +1,7 @@
 {
   "name": "iyagi",
   "private": true,
+  "license": "Apache-2.0",
   "version": "0.1.0",
   "type": "module",
   "description": "iyagi — terminal platform managing resources of existing AI coding CLIs",

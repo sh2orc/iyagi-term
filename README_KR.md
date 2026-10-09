@@ -323,4 +323,4 @@ v0.1.0 — **R1(로컬 터미널 + 관리 실행) 출시 완료.** 이후로 탭
 
 ## 라이선스
 
-Apache-2.0. 전문은 [LICENSE](LICENSE)를 참고하세요.
+Apache-2.0. 전문은 [LICENSE.md](LICENSE.md)를 참고하세요.

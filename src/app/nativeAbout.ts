@@ -13,12 +13,12 @@ export function nativeAboutMetadata(language: Language, version: string): AboutM
     name: t("app.name"),
     version,
     authors: [t("app.name")],
-    license: "Proprietary",
+    license: "Apache-2.0",
     comments: introduction,
     credits: [
       introduction,
       `${t("about.builtWith")}\nTauri · React · xterm.js · Rust`,
-      `${t("about.developedBy")} ${t("app.name")}\n${t("about.license")}: Proprietary`,
+      `${t("about.developedBy")} ${t("app.name")}\n${t("about.license")}: Apache-2.0`,
     ].join("\n\n"),
   };
 }

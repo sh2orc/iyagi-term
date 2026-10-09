@@ -56,7 +56,7 @@ CLI; IYAGI owns execution, process groups and resource governance.
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 15 MB | `eab0d351d6a401577c3d1266d036b51c87487c78cafa66233e2eb55048e3a89b` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `2a762f141a1c8f8a1d6a412f6ac4f9642f0d0db1d081c4362739b0e8380205a7` |
 
 <details>
 <summary>First launch on macOS (ad-hoc signed, not notarized)</summary>
@@ -287,8 +287,8 @@ your keychain has one named `iyagi-dev` (`scripts/tauri.mjs`; set `IYAGI_SIGNING
 another, `-` to keep ad-hoc). Ad-hoc signatures change on every build, so macOS privacy grants
 such as "would like to access data from other apps" are asked again after each rebuild; a stable
 identity keeps them. Create one in Keychain Access → Certificate Assistant → Create a
-Certificate… (Identity Type: Self Signed Root, Certificate Type: Code Signing). CI and hosts
-without that identity build exactly as before.
+Certificate… (Identity Type: Self Signed Root, Certificate Type: Code Signing). macOS hosts without
+that identity (such as CI) ad-hoc sign the whole bundle instead.
 
 On hosts with an incomplete MSVC setup (Git Bash), run `source scripts/dev-env.sh` before
 cargo (GNU toolchain + w64devkit).

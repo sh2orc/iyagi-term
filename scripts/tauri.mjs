@@ -14,7 +14,8 @@
  *   ad-hoc 빌드와 실행 동작을 바꾸지 않기 위해서다.
  * - dev: `tauri dev`는 번들 없이 target/<profile>의 실행 파일을 곧바로 띄우므로
  *   runner(scripts/macos-sign-runner.sh)가 cargo 빌드 직후 서명한다.
- * - macOS가 아니거나 인증서가 없으면(CI 등) 아무것도 바꾸지 않는다.
+ * - macOS에서 인증서가 없으면 build만 ad-hoc("-")으로 번들 전체를 서명한다 — 서명을 건너뛰면
+ *   번들 서명이 깨져 Gatekeeper가 "손상됨"으로 막는다. macOS가 아니면 아무것도 바꾸지 않는다.
  *   APPLE_SIGNING_IDENTITY나 --runner를 직접 지정했으면 그 값을 따른다.
  */
 
@@ -42,6 +43,13 @@ if (identity) {
     injected.push("--config", JSON.stringify({ bundle: { macOS: { hardenedRuntime: false } } }));
   }
   console.error(`tauri.mjs: signing this ${command} with the local identity "${identity}" (stable macOS permissions)`);
+} else if (command === "build" && process.platform === "darwin" && !process.env.APPLE_SIGNING_IDENTITY) {
+  // 인증서가 없어도 번들 전체를 ad-hoc("-")으로 봉인한다. 서명을 건너뛰면 실행 파일에는
+  // 링커의 ad-hoc 서명만 남는데, 그 서명은 리소스 봉인(CodeResources)을 요구하므로
+  // 번들 안에서 깨진 서명이 되고 Gatekeeper가 "손상되었기 때문에 열 수 없습니다"로 막는다.
+  env.APPLE_SIGNING_IDENTITY = "-";
+  injected.push("--config", JSON.stringify({ bundle: { macOS: { hardenedRuntime: false } } }));
+  console.error(`tauri.mjs: no local signing identity — ad-hoc signing this build`);
 }
 
 const child = spawn(

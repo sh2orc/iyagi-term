@@ -55,7 +55,7 @@ Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 15 MB | `eab0d351d6a401577c3d1266d036b51c87487c78cafa66233e2eb55048e3a89b` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `2a762f141a1c8f8a1d6a412f6ac4f9642f0d0db1d081c4362739b0e8380205a7` |
 
 <details>
 <summary>macOS 첫 실행 안내 (ad-hoc 서명, 미공증)</summary>
@@ -267,7 +267,7 @@ macOS에서는 키체인에 `iyagi-dev`라는 코드 서명 인증서가 있으�
 지정하고 `-`면 ad-hoc을 유지). ad-hoc 서명은 빌드마다 바뀌어 "다른 앱의 데이터에 접근" 같은
 macOS 개인정보 보호 허용을 다시 빌드할 때마다 또 묻지만, 고정 인증서로 서명하면 허용이
 유지됩니다. 인증서는 키체인 접근 → 인증서 지원 → 인증서 생성…에서 만듭니다(신원 유형: 자체
-서명 루트, 인증서 유형: 코드 서명). CI처럼 인증서가 없는 환경은 예전과 똑같이 빌드합니다.
+서명 루트, 인증서 유형: 코드 서명). CI처럼 인증서가 없는 macOS 환경은 ad-hoc으로 번들 전체를 서명합니다.
 
 MSVC가 불완전한 호스트(Git Bash)에서는 cargo 실행 전에 `source scripts/dev-env.sh`을
 사용합니다(GNU 툴체인 + w64devkit).

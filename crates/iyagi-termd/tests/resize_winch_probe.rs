@@ -188,7 +188,9 @@ fn probe_with_boot_input(program: &str, argv: &[&str], tag: &str, boot_input: Op
         } else {
             Duration::from_millis(500)
         };
-        let Some(frame) = data.recv_any(wait) else { break };
+        let Some(frame) = data.recv_any(wait) else {
+            break;
+        };
         if frame.get("event").and_then(Value::as_str) == Some("session.exited") {
             exited = true;
         }

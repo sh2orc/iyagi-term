@@ -142,7 +142,7 @@ pub(crate) fn configure(
             })?;
             let token =
                 crate::claude_provider::StartToken::read(secrets_root).map_err(|error| {
-                    permission_denied(&format!(
+                    permission_denied(format!(
                         "Z.ai Coding Plan key: {}",
                         crate::claude_provider::reason_code(&error).unwrap_or("unavailable")
                     ))

@@ -6,10 +6,10 @@
 
 pub mod budget;
 pub mod capability;
-pub mod rate_limits;
-pub mod retry;
 pub mod plan;
+pub mod rate_limits;
 pub mod reducer;
+pub mod retry;
 pub mod scheduler;
 
 pub use plan::{validate_proposal, PlanApplication, PlanCandidate};

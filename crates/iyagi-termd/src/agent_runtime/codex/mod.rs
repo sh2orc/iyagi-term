@@ -753,7 +753,7 @@ impl CodexAdapter {
     /// Daemon dispatch uses [`Self::supervised`] and the shared native gate.
     pub fn live() -> Arc<Self> {
         Self::with_peer_factory(Arc::new(|run| {
-            let cfg = CodexBindingConfig::from_run(&run)?;
+            let cfg = CodexBindingConfig::from_run(run)?;
             let cwd = run.workspace.clone().unwrap_or_else(std::env::temp_dir);
             let mut argv = self::daemon_isolation::argv_prefix(Path::new(&cfg.program));
             argv.extend(APP_SERVER_ARGV.iter().map(|s| s.to_string()));
@@ -2543,7 +2543,7 @@ mod tests {
         let mut text = String::new();
         let mut failed = false;
         let mut events: usize = 0;
-        while let Some(event) = rx.try_recv().ok() {
+        while let Ok(event) = rx.try_recv() {
             events += 1;
             match event {
                 AdapterEvent::Activity { chunk, .. } => text.push_str(&chunk),
@@ -2590,7 +2590,7 @@ mod tests {
             fencing_token: 3,
         });
         let mut received = Vec::new();
-        while let Some(event) = rx.try_recv().ok() {
+        while let Ok(event) = rx.try_recv() {
             received.push(event);
         }
         let marker_index = received
@@ -2643,7 +2643,7 @@ mod tests {
         let mut usage: Option<(Option<u64>, Option<u64>, Option<u64>)> = None;
         let mut usage_events = 0;
         let mut disconnected = false;
-        while let Some(event) = rx.try_recv().ok() {
+        while let Ok(event) = rx.try_recv() {
             match event {
                 AdapterEvent::Usage {
                     input_tokens,

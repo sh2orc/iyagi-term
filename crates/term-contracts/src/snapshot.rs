@@ -93,11 +93,12 @@ pub enum QueueReason {
 /// P2는 양보(`YIELDED`)까지만 정의한다 — `GATED`/`HIBERNATED`/`SUSPENDED`는
 /// P3–P5에서 같은 태그 유니온에 덧붙는다. 구 데몬은 이 필드를 보내지 않으며
 /// 그때는 `NONE`이다(`serde(default)`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(tag = "kind")]
 pub enum ReliefState {
     /// 완화 수단이 적용되지 않은 정상 상태.
+    #[default]
     #[serde(rename = "NONE")]
     None,
     /// 스케줄링 양보 중(08 §2). `manual`은 사용자가 직접 요청했다는 뜻이고
@@ -109,12 +110,6 @@ pub enum ReliefState {
         manual: bool,
         partial: bool,
     },
-}
-
-impl Default for ReliefState {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl ReliefState {
@@ -138,11 +133,12 @@ pub struct ReliefPolicy {
 /// 되돌릴 수 있다: 검증된 트리에 SIGSTOP/SIGCONT(cgroup 위임 Linux는
 /// freeze)를 걸고, 사용자가 언제든 재개할 수 있다. 구 데몬은 이 필드를
 /// 보내지 않으며 그때는 `NONE`이다(`serde(default)`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(tag = "kind")]
 pub enum GuardState {
     /// 가드가 개입하지 않은 상태.
+    #[default]
     #[serde(rename = "NONE")]
     None,
     /// 일시정지 중. `manual`은 사용자가 직접 정지시켰다는 뜻이고(자동
@@ -155,12 +151,6 @@ pub enum GuardState {
         manual: bool,
         partial: bool,
     },
-}
-
-impl Default for GuardState {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl GuardState {

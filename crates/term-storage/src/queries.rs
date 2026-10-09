@@ -174,12 +174,15 @@ pub(crate) fn queue_snapshot(conn: &Connection) -> StorageResult<Vec<QueuedWorkl
 }
 
 pub(crate) fn session(conn: &Connection, id: &SessionId) -> StorageResult<Option<SessionRecord>> {
-    Ok(conn.query_row(
-        "SELECT id, workload_id, initial_cols, initial_rows, journal_relative_path,
+    Ok(conn
+        .query_row(
+            "SELECT id, workload_id, initial_cols, initial_rows, journal_relative_path,
                 journal_limit_bytes, journal_bytes, last_seq, replay_status, pinned, created_at
          FROM sessions WHERE id = ?1",
-        [id.as_str()], session_row,
-    ).optional()?)
+            [id.as_str()],
+            session_row,
+        )
+        .optional()?)
 }
 
 pub(crate) fn sessions(conn: &Connection) -> StorageResult<Vec<SessionRecord>> {

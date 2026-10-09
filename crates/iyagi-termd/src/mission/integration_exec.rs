@@ -164,7 +164,7 @@ pub(super) fn load(
             .artifacts
             .execution_body_path(&run.mission_id, &launch.input_ref, LIMIT)
             .map_err(|(c, m)| MissionRpcError::new(c, m))?
-            != PathBuf::from(&launch.input_path)
+            != launch.input_path
     {
         return Err(integrity("integration helper input changed"));
     }

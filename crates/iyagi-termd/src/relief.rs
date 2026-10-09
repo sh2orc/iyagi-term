@@ -494,7 +494,7 @@ mod tests {
         let ops = c.plan(
             1_000,
             PressureLevel::Warning,
-            &[focused.session_id.clone()],
+            std::slice::from_ref(&focused.session_id),
             &live,
             true,
         );
@@ -510,7 +510,7 @@ mod tests {
             .plan(
                 2_000,
                 PressureLevel::Warning,
-                &[focused.session_id.clone()],
+                std::slice::from_ref(&focused.session_id),
                 &live,
                 true
             )
@@ -643,7 +643,13 @@ mod tests {
         let recent = running();
         let live = vec![old.clone(), recent.clone()];
 
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &[old.clone()], true);
+        let ops = c.plan(
+            1_000,
+            PressureLevel::Warning,
+            &[],
+            std::slice::from_ref(&old),
+            true,
+        );
         settle(&mut c, &ops, 1_000);
         let ops = c.plan(4_000, PressureLevel::Warning, &[], &live, true);
         settle(&mut c, &ops, 4_000);
@@ -665,7 +671,7 @@ mod tests {
         let ops = c.plan(
             1_500,
             PressureLevel::Critical,
-            &[w.session_id.clone()],
+            std::slice::from_ref(&w.session_id),
             &live,
             true,
         );
@@ -677,7 +683,7 @@ mod tests {
             .plan(
                 2_500,
                 PressureLevel::Critical,
-                &[w.session_id.clone()],
+                std::slice::from_ref(&w.session_id),
                 &live,
                 true
             )
@@ -706,7 +712,7 @@ mod tests {
             .plan(
                 12_000,
                 PressureLevel::Normal,
-                &[w.session_id.clone()],
+                std::slice::from_ref(&w.session_id),
                 &live,
                 true
             )
@@ -723,7 +729,13 @@ mod tests {
     fn manual_yield_takes_over_an_existing_auto_yield_without_a_new_os_call() {
         let mut c = controller(true);
         let w = running();
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &[w.clone()], true);
+        let ops = c.plan(
+            1_000,
+            PressureLevel::Warning,
+            &[],
+            std::slice::from_ref(&w),
+            true,
+        );
         settle(&mut c, &ops, 1_000);
 
         let ops = c.manual(&w.workload_id, ReliefAction::Yield, PressureLevel::Warning);
@@ -794,7 +806,13 @@ mod tests {
         let mut c = controller(true);
         let w = running();
         assert!(c
-            .plan(1_000, PressureLevel::Critical, &[], &[w.clone()], false)
+            .plan(
+                1_000,
+                PressureLevel::Critical,
+                &[],
+                std::slice::from_ref(&w),
+                false
+            )
             .is_empty());
 
         // capability는 지원한다고 했지만 실제 호출이 Unsupported를 돌려주면
@@ -893,7 +911,13 @@ mod tests {
         assert!(c.view(&gone.workload_id).0.is_yielded());
 
         // `gone`이 목록에서 빠진다: 복원 op 없이 기록만 사라진다.
-        let ops = c.plan(9_000, PressureLevel::Normal, &[], &[alive.clone()], true);
+        let ops = c.plan(
+            9_000,
+            PressureLevel::Normal,
+            &[],
+            std::slice::from_ref(&alive),
+            true,
+        );
         assert_eq!(restored_ids(&ops), vec![alive.workload_id.as_str()]);
         assert_eq!(c.view(&gone.workload_id).0, ReliefState::None);
         assert!(!c.view(&gone.workload_id).1);

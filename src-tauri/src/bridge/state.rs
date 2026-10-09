@@ -322,16 +322,14 @@ impl BridgeInner {
                                     &hello.daemon_version,
                                 );
                                 let binary_outdated = match (self.locate)() {
-                                    Some(binary) => {
-                                        daemon_manager::binary_build_version(&binary)
-                                            .await
-                                            .is_some_and(|on_disk| {
-                                                super::connection::daemon_is_outdated(
-                                                    &on_disk,
-                                                    &hello.daemon_version,
-                                                )
-                                            })
-                                    }
+                                    Some(binary) => daemon_manager::binary_build_version(&binary)
+                                        .await
+                                        .is_some_and(|on_disk| {
+                                            super::connection::daemon_is_outdated(
+                                                &on_disk,
+                                                &hello.daemon_version,
+                                            )
+                                        }),
                                     None => false,
                                 };
                                 self.daemon_outdated = app_outdated || binary_outdated;

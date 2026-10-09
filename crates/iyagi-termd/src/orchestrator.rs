@@ -1181,10 +1181,6 @@ fn enqueue_workload(
     state.broadcast_queue_changed();
 }
 
-/// Names of requested hard limits the platform cannot enforce *right now* —
-/// unsupported by the OS or permission-gated (Linux without a delegated
-/// cgroup subtree). `require` fails preflight on any of them; observe/prefer
-/// launch anyway and carry the list in the outcome (03 §5).
 /// 이 호스트가 절대 받을 수 없는 관리 실행 요청(예약 > 관리 예산 B,
 /// cpu_slots > 슬롯 수 C)을 받을 수 있는 최대로 줄인 정책. 예약은 승인
 /// 회계일 뿐 강제 상한(`memory_max_bytes`)이 아니어서 줄여도 실행 자체는
@@ -1207,6 +1203,10 @@ fn fit_policy_to_host(state: &DaemonState, policy: &LaunchPolicy) -> LaunchPolic
     fitted
 }
 
+/// Names of requested hard limits the platform cannot enforce *right now* —
+/// unsupported by the OS or permission-gated (Linux without a delegated
+/// cgroup subtree). `require` fails preflight on any of them; observe/prefer
+/// launch anyway and carry the list in the outcome (03 §5).
 pub fn missing_capabilities(state: &Arc<DaemonState>, request: &LaunchRequest) -> Vec<String> {
     let caps = state.caps.lock().unwrap_or_else(|p| p.into_inner()).clone();
     let unsupported = |c: &term_contracts::snapshot::LimitCapability| {
@@ -1346,6 +1346,7 @@ pub fn journal_error_code(error: &str) -> Option<&'static str> {
 /// failure fails the workload here (group teardown + reservation release)
 /// and returns `Err` so the caller kills the already-spawned PTY child
 /// instead of leaving it unsupervised.
+#[allow(clippy::too_many_arguments)]
 fn start_session_actor(
     state: &Arc<DaemonState>,
     workload_id: &WorkloadId,

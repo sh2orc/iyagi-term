@@ -675,7 +675,10 @@ mod tests {
         assert_eq!(methods::MISSION_PLAN_APPLY, "mission.plan.apply");
         assert_eq!(methods::ARTIFACT_BEGIN, "artifact.begin");
         assert_eq!(methods::RUNTIME_DETECT, "runtime.detect");
-        assert_eq!(methods::MISSION_RUN_ATTEST_EXITED, "mission.run.attest_exited");
+        assert_eq!(
+            methods::MISSION_RUN_ATTEST_EXITED,
+            "mission.run.attest_exited"
+        );
         assert_eq!(methods::WORKSPACE_USAGE, "workspace.usage");
         assert_eq!(methods::WORKSPACE_CLEANUP, "workspace.cleanup");
         assert_eq!(EVENT_MISSION_CHANGED, "mission.changed");

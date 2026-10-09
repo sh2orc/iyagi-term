@@ -519,16 +519,15 @@ impl MissionActor {
                     && live
                         .interrupted
                         .is_some_and(|at| at.elapsed() >= Duration::from_secs(10))
+                    && matches!(live.adapter.close(&id), CancelReceipt::Confirmed { .. })
                 {
-                    if matches!(live.adapter.close(&id), CancelReceipt::Confirmed { .. }) {
-                        live.closed = true;
-                        live.pending = Some(AdapterEvent::Failed {
-                            run_id: id.clone(),
-                            fencing_token: live.token,
-                            code: MissionErrorCode::BudgetExceeded,
-                            message: "run exceeded its time limit or was cancelled".into(),
-                        });
-                    }
+                    live.closed = true;
+                    live.pending = Some(AdapterEvent::Failed {
+                        run_id: id.clone(),
+                        fencing_token: live.token,
+                        code: MissionErrorCode::BudgetExceeded,
+                        message: "run exceeded its time limit or was cancelled".into(),
+                    });
                 }
                 // A run that went quiet flushes its last partial window on a
                 // later tick; an active stream flushes at most once per

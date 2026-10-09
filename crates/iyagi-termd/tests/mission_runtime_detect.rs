@@ -680,5 +680,5 @@ fn claude_row_carries_its_zai_route_candidates_from_its_transcripts() {
         .unwrap()
         .alt_models
         .as_deref()
-        .map_or(true, |models| models.is_empty()));
+        .is_none_or(|models| models.is_empty()));
 }

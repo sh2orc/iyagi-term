@@ -153,7 +153,7 @@ pub fn observed_claude_models(claude_dir: &Path) -> Vec<ProbeModel> {
             let Some(id) = transcript_model_id(line) else {
                 continue;
             };
-            if seen.iter().any(|known| *known == id) {
+            if seen.contains(&id) {
                 continue;
             }
             seen.push(id);

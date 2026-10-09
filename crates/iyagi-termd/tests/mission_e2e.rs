@@ -11,6 +11,9 @@ mod binding_evidence_daemon;
 mod codex_mission_live;
 mod common;
 #[cfg(unix)]
+#[path = "support/git_barrier.rs"]
+mod git_barrier;
+#[cfg(unix)]
 #[path = "support/integration_restart_e2e.rs"]
 mod integration_restart_e2e;
 
@@ -614,6 +617,11 @@ fn run_protocol_pipeline(scenario: PipelineScenario) {
     );
     let required_exhausted = matches!(scenario, PipelineScenario::RequiredExhausted);
     use term_contracts::mission::types::{Entity, Phase, RuntimeKind, VerificationStatus};
+    // The daemon inherits PATH: the Git stand-in must be in place before spawn.
+    #[cfg(unix)]
+    if integration_restart || continuation_restart {
+        git_barrier::install();
+    }
     let mut daemon = DaemonProc::spawn_fixture("actor-protocol-pipeline");
     let (mut client, _) = Client::control(&daemon.endpoint, &daemon.token);
     let repo = tempfile::tempdir().unwrap();
@@ -722,13 +730,14 @@ fn run_protocol_pipeline(scenario: PipelineScenario) {
         .unwrap();
     let mut marker = daemon.data_dir.join("verification-invocations");
     if integration_restart {
+        // Hold the integration worktree's `git worktree add` after checkout
+        // (formerly a post-checkout hook; daemon Git disables hooks).
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let hook = repo.path().join(".git/hooks/post-checkout");
-            let marker_arg = format!("'{}'", marker.to_str().unwrap().replace('\'', "'\\''"));
-            std::fs::write(&hook, format!("#!/bin/sh\ncase \"$PWD\" in */workspaces/integration-*) printf x >> {marker_arg}; exec /bin/sleep 120 ;; esac\n")).unwrap();
-            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            use git_barrier::quote;
+            let canonical = repo.path().canonicalize().unwrap();
+            git_barrier::register(&format!("matches() {{\n  [ \"$(pwd -P)\" = {} ] || return 1\n  [ \"$(git_subcommand \"$@\")\" = worktree ] || return 1\n  for arg do\n    case \"$arg\" in */workspaces/integration-*) return 0 ;; esac\n  done\n  return 1\n}}\nhold() {{\n  printf x >> {}\n  exec /bin/sleep 120\n}}\n",
+                quote(&canonical), quote(&marker)));
         }
     }
     let (verify_program, verify_argv) = if verification_restart {
@@ -1148,7 +1157,6 @@ fn run_protocol_pipeline(scenario: PipelineScenario) {
                 })
                 .unwrap();
             integration_restart_e2e::install_capture_barrier(
-                repo.path(),
                 &workspace.path,
                 &recovery_marker,
                 &recovery_release,

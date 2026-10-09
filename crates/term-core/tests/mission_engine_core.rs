@@ -252,23 +252,76 @@ fn cancelled_work_can_be_replaced_without_waiving_coverage_or_dependencies() {
     let binding = Id::generate();
     let m = mission(&binding);
     let limits = MissionLimits::load();
-    let mut first = candidate("first", TaskKind::Implement, Some(Role::Builder), &binding, &[]);
+    let mut first = candidate(
+        "first",
+        TaskKind::Implement,
+        Some(Role::Builder),
+        &binding,
+        &[],
+    );
     first.spec.requirement_ids = vec![m.requirements[0].id.clone()];
     let initial = vec![first];
-    let mut old = validate_proposal(&m, &[], &initial, &[], &refs(&initial), &limits).unwrap().tasks.remove(0);
+    let mut old = validate_proposal(&m, &[], &initial, &[], &refs(&initial), &limits)
+        .unwrap()
+        .tasks
+        .remove(0);
     old.state = TaskState::Cancelled;
-    let mut new = candidate("replacement", TaskKind::Implement, Some(Role::Builder), &binding, &[]);
+    let mut new = candidate(
+        "replacement",
+        TaskKind::Implement,
+        Some(Role::Builder),
+        &binding,
+        &[],
+    );
     new.spec.requirement_ids = old.contract.requirement_ids.clone();
     new.spec.replacement_of = Some(old.id.clone());
     let proposed = vec![new];
-    assert!(validate_proposal(&m, &[old.clone()], &[], &[old.id.clone()], &HashMap::new(), &limits).is_err());
-    let accepted = validate_proposal(&m, &[old.clone()], &proposed, &[old.id.clone()], &refs(&proposed), &limits).unwrap();
+    assert!(validate_proposal(
+        &m,
+        &[old.clone()],
+        &[],
+        &[old.id.clone()],
+        &HashMap::new(),
+        &limits
+    )
+    .is_err());
+    let accepted = validate_proposal(
+        &m,
+        &[old.clone()],
+        &proposed,
+        &[old.id.clone()],
+        &refs(&proposed),
+        &limits,
+    )
+    .unwrap();
     assert_eq!(accepted.tasks[0].replacement_of, Some(old.id.clone()));
-    let mut dependent = old.clone(); dependent.id = Id::generate(); dependent.state = TaskState::Planned;
+    let mut dependent = old.clone();
+    dependent.id = Id::generate();
+    dependent.state = TaskState::Planned;
     dependent.depends_on = vec![old.id.clone()];
-    assert!(matches!(validate_proposal(&m, &[old.clone(), dependent], &proposed, &[old.id.clone()], &refs(&proposed), &limits), Err(PlanError::RetireHasDependents(_))));
+    assert!(matches!(
+        validate_proposal(
+            &m,
+            &[old.clone(), dependent],
+            &proposed,
+            &[old.id.clone()],
+            &refs(&proposed),
+            &limits
+        ),
+        Err(PlanError::RetireHasDependents(_))
+    ));
     old.active_run_id = Some(Id::generate());
-    assert!(matches!(validate_proposal(&m, &[old.clone()], &proposed, &[old.id.clone()], &refs(&proposed), &limits), Err(PlanError::RetireIneligible(_))));
+    assert!(matches!(
+        validate_proposal(
+            &m,
+            &[old.clone()],
+            &proposed,
+            &[old.id.clone()],
+            &refs(&proposed),
+            &limits
+        ),
+        Err(PlanError::RetireIneligible(_))
+    ));
 }
 
 #[test]
@@ -277,23 +330,65 @@ fn excluded_history_cannot_cover_work_but_still_consumes_task_limits() {
     let binding = Id::generate();
     let mut m = mission(&binding);
     let mut limits = MissionLimits::load();
-    let mut first = candidate("first", TaskKind::Implement, Some(Role::Builder), &binding, &[]);
+    let mut first = candidate(
+        "first",
+        TaskKind::Implement,
+        Some(Role::Builder),
+        &binding,
+        &[],
+    );
     first.spec.requirement_ids = vec![m.requirements[0].id.clone()];
     let initial = vec![first];
-    let mut old = validate_proposal(&m, &[], &initial, &[], &refs(&initial), &limits).unwrap().tasks.remove(0);
+    let mut old = validate_proposal(&m, &[], &initial, &[], &refs(&initial), &limits)
+        .unwrap()
+        .tasks
+        .remove(0);
     old.state = TaskState::Succeeded;
     old.ordinal = 19;
     let excluded = std::collections::HashSet::from([old.id.clone()]);
     let history = vec![old];
-    assert!(matches!(validate_proposal_with_exclusions(&m, &history, &[], &[], &HashMap::new(), &limits, &excluded), Err(PlanError::UncoveredRequirement(_))));
+    assert!(matches!(
+        validate_proposal_with_exclusions(
+            &m,
+            &history,
+            &[],
+            &[],
+            &HashMap::new(),
+            &limits,
+            &excluded
+        ),
+        Err(PlanError::UncoveredRequirement(_))
+    ));
     m.requirements[0].human_check = true;
-    assert!(validate_proposal_with_exclusions(&m, &history, &[], &[], &HashMap::new(), &limits, &excluded).unwrap().tasks.is_empty());
+    assert!(validate_proposal_with_exclusions(
+        &m,
+        &history,
+        &[],
+        &[],
+        &HashMap::new(),
+        &limits,
+        &excluded
+    )
+    .unwrap()
+    .tasks
+    .is_empty());
     assert!(validate_proposal(&m, &history, &[], &[], &HashMap::new(), &limits).is_err());
-    let new = vec![candidate("next", TaskKind::Implement, Some(Role::Builder), &binding, &[])];
-    let applied = validate_proposal_with_exclusions(&m, &history, &new, &[], &refs(&new), &limits, &excluded).unwrap();
+    let new = vec![candidate(
+        "next",
+        TaskKind::Implement,
+        Some(Role::Builder),
+        &binding,
+        &[],
+    )];
+    let applied =
+        validate_proposal_with_exclusions(&m, &history, &new, &[], &refs(&new), &limits, &excluded)
+            .unwrap();
     assert_eq!(applied.tasks[0].ordinal, 20);
     limits.max_tasks_per_mission = 1;
-    assert!(matches!(validate_proposal_with_exclusions(&m, &history, &new, &[], &refs(&new), &limits, &excluded), Err(PlanError::TooManyTasks { cap: 1 })));
+    assert!(matches!(
+        validate_proposal_with_exclusions(&m, &history, &new, &[], &refs(&new), &limits, &excluded),
+        Err(PlanError::TooManyTasks { cap: 1 })
+    ));
 }
 
 #[test]

@@ -110,7 +110,10 @@ mod tests {
         assert_eq!(back, target);
         assert_eq!(
             back.env_remove,
-            vec!["ANTHROPIC_API_KEY".to_string(), "CLAUDE_CODE_OAUTH_TOKEN".to_string()]
+            vec![
+                "ANTHROPIC_API_KEY".to_string(),
+                "CLAUDE_CODE_OAUTH_TOKEN".to_string()
+            ]
         );
 
         let legacy = serde_json::json!({

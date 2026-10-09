@@ -371,15 +371,24 @@ mod tests {
         let mut routed_flash = base_request();
         routed_flash.claude_provider = zai("glm-5.3-flash[1m]");
         assert_ne!(launch_fingerprint(&plain), launch_fingerprint(&routed));
-        assert_ne!(launch_fingerprint(&routed), launch_fingerprint(&routed_flash));
+        assert_ne!(
+            launch_fingerprint(&routed),
+            launch_fingerprint(&routed_flash)
+        );
         let mut routed_again = base_request();
         routed_again.claude_provider = zai("glm-5.3[1m]");
-        assert_eq!(launch_fingerprint(&routed), launch_fingerprint(&routed_again));
+        assert_eq!(
+            launch_fingerprint(&routed),
+            launch_fingerprint(&routed_again)
+        );
         // Unrouted canonical bytes carry no trace of the field at all.
         let source = String::from_utf8(plain.fingerprint_source()).unwrap();
         assert!(!source.contains("claude_provider"), "{source}");
         let source = String::from_utf8(routed.fingerprint_source()).unwrap();
-        assert!(source.contains(r#""claude_provider":{"kind":"zai_coding_plan""#), "{source}");
+        assert!(
+            source.contains(r#""claude_provider":{"kind":"zai_coding_plan""#),
+            "{source}"
+        );
     }
 
     #[test]

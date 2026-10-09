@@ -564,18 +564,17 @@ impl ExecHandle {
     pub async fn wait(&self) -> Result<process::ExitInfo, ExecError> {
         loop {
             if let Some(info) = self.inner.slot.poll_exit() {
-                if self.streams_done() {
-                    if self
+                if self.streams_done()
+                    && (self
                         .inner
                         .finalized
                         .load(std::sync::atomic::Ordering::Acquire)
-                        || (self.inner.owned_group.is_none() && self.finalize(info).is_ok())
-                    {
-                        return Ok(info);
-                    }
-                    // The process has exited, but ownership remains reserved
-                    // while its durable completion cannot be recorded.
+                        || (self.inner.owned_group.is_none() && self.finalize(info).is_ok()))
+                {
+                    return Ok(info);
                 }
+                // The process has exited, but ownership remains reserved
+                // while its durable completion cannot be recorded.
             }
             tokio::time::sleep(Duration::from_millis(15)).await;
         }

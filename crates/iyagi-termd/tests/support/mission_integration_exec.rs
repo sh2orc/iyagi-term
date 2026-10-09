@@ -444,24 +444,20 @@ fn control(rig: &Rig, action: &str) {
         "mission_id": rig.id, "expected_revision": rig.snapshot().mission.revision, "action": action}),
     );
 }
-fn quote(path: &Path) -> String {
-    format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"))
-}
+/// Holds the `git worktree add` that creates `worktree` after its checkout —
+/// where a post-checkout hook used to run before daemon Git disabled hooks.
 fn install_barrier(rig: &Rig, worktree: &Path) -> (PathBuf, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
+    use super::git_barrier::{quote, register};
     let marker = rig.dir.path().join("integration-hook-started");
     let release = rig.dir.path().join("release-integration-hook");
-    let hook = rig.repo.path().join(".git/hooks/post-checkout");
     let canonical = worktree
         .parent()
         .unwrap()
         .canonicalize()
         .unwrap()
         .join(worktree.file_name().unwrap());
-    let text = format!("#!/bin/sh\n[ \"$(pwd -P)\" = {} ] || exit 0\nprintf x >> {}\ncount=0\nwhile [ ! -f {} ]; do count=$((count + 1)); [ \"$count\" -lt 300 ] || exit 1; sleep 0.05; done\n",
-        quote(&canonical), quote(&marker), quote(&release));
-    std::fs::write(&hook, text).unwrap();
-    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    register(&format!("matches() {{\n  case \" $* \" in *\" worktree add \"*) ;; *) return 1 ;; esac\n  for arg do\n    case \"$arg\" in {} | {}) return 0 ;; esac\n  done\n  return 1\n}}\nhold() {{\n  printf x >> {}\n  count=0\n  while [ ! -f {} ]; do count=$((count + 1)); [ \"$count\" -lt 300 ] || return 1; sleep 0.05; done\n  return \"$1\"\n}}\n",
+        quote(worktree), quote(&canonical), quote(&marker), quote(&release)));
     (marker, release)
 }
 fn prepared(rig: &Rig, actor: &mut MissionActor) -> (Run, Workspace) {

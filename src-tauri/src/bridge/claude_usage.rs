@@ -195,8 +195,7 @@ mod tests {
         remove(&settings, dir.path(), command).unwrap();
         apply(&settings, dir.path(), command).unwrap();
 
-        let backup =
-            std::fs::read_to_string(settings.with_extension("json.iyagi.bak")).unwrap();
+        let backup = std::fs::read_to_string(settings.with_extension("json.iyagi.bak")).unwrap();
         assert!(
             backup.contains("my-line"),
             "the pre-first-apply original must survive: {backup}"

@@ -47,7 +47,7 @@ fn migration_0002_applies_on_a_fresh_db_and_on_an_existing_version_1_db() {
     {
         let _storage = open(&fresh).unwrap();
     }
-    assert_eq!(versions(&fresh), vec![1, 2, 3, 4, 5]);
+    assert_eq!(versions(&fresh), vec![1, 2, 3, 4, 5, 6]);
 
     // 이미 버전 1만 기록된 DB(0001 파일만 적용된 상태)를 만들어 두 번째
     // 열기에서 0002가 얹히는지 확인한다.
@@ -68,7 +68,7 @@ fn migration_0002_applies_on_a_fresh_db_and_on_an_existing_version_1_db() {
     {
         let _storage = open(&upgraded).unwrap();
     }
-    assert_eq!(versions(&upgraded), vec![1, 2, 3, 4, 5]);
+    assert_eq!(versions(&upgraded), vec![1, 2, 3, 4, 5, 6]);
     let conn = raw_conn(&upgraded);
     let indexes: i64 = conn
         .query_row(
@@ -84,7 +84,7 @@ fn migration_0002_applies_on_a_fresh_db_and_on_an_existing_version_1_db() {
     {
         let _storage = open(&upgraded).unwrap();
     }
-    assert_eq!(versions(&upgraded), vec![1, 2, 3, 4, 5]);
+    assert_eq!(versions(&upgraded), vec![1, 2, 3, 4, 5, 6]);
 }
 
 #[test]

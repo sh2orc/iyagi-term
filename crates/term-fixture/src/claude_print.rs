@@ -126,7 +126,8 @@ pub fn run(argv: &[String]) -> i32 {
     };
     let mut result = json!({"type":"result","subtype":"success","is_error":false,"session_id":"fixture-print-owned","result":report,"usage":{"input_tokens":1,"output_tokens":2},"total_cost_usd":0});
     if argv.iter().any(|a| a == "--json-schema") && scenario["mode"] != "no_structured" {
-        result["structured_output"] = json!({"result":{"kind":"report","report_text":report,"knowledge":[]}});
+        result["structured_output"] =
+            json!({"result":{"kind":"report","report_text":report,"knowledge":[]}});
     }
     println!("{}", result);
     0

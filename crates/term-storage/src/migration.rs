@@ -246,7 +246,7 @@ mod tests {
         ] {
             assert!(object_exists(&conn, table), "table {table} missing");
         }
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
@@ -254,7 +254,7 @@ mod tests {
         let mut conn = memory();
         migrate(&mut conn).unwrap();
         migrate(&mut conn).unwrap();
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
         let sql = "CREATE INDEX fixture_rate_index ON orch_runs(state); INSERT INTO missing_table VALUES (1);";
         assert!(apply(&mut conn, 6, sql).is_err());
         assert!(!object_exists(&conn, "fixture_rate_index"));
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
         assert!(object_exists(&conn, "orch_run_rate_limit_reset"));
         assert!(object_exists(&conn, "orch_execs_pending"));
     }
@@ -310,7 +310,7 @@ mod tests {
             "table created before the fault must roll back"
         );
         // The connection stays usable and previously applied versions survive.
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
     }
 
     #[test]

@@ -265,7 +265,7 @@ fn shipped_route_matches(binding: &Binding) -> bool {
 /// model suitability is the runtime's `RESULT_INVALID` + plan repair, not a
 /// capability gate), so a different model needs a probe, never consent.
 fn shipped_model_matches(binding: &Binding, os: &str) -> bool {
-    !evidence_model_id(binding.runtime, os).is_some_and(|model| binding.model_id != model)
+    evidence_model_id(binding.runtime, os).is_none_or(|model| binding.model_id == model)
 }
 
 /// Shipped-evidence-only projection (no line, local or consent layer). The

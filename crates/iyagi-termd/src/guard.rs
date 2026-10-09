@@ -678,7 +678,14 @@ mod tests {
         let hog = usage(Some(0.1), Some(6 * 1024 * 1024 * 1024));
         let live = vec![hog.clone()];
         // 호스트 메모리 CRITICAL 경로로 얼린다(rss 하한 이상의 비포커스 독점).
-        let ops = guard.plan(1_000, PressureLevel::Normal, PressureLevel::Critical, &[], &live, None);
+        let ops = guard.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Critical,
+            &[],
+            &live,
+            None,
+        );
         assert!(matches!(ops.as_slice(), [GuardOp::Suspend { .. }]));
         apply_ok(&mut guard, &ops, 1_000);
 
@@ -692,7 +699,10 @@ mod tests {
             &live,
             None,
         );
-        assert!(ops.is_empty(), "pressure freeze must hold while CRITICAL: {ops:?}");
+        assert!(
+            ops.is_empty(),
+            "pressure freeze must hold while CRITICAL: {ops:?}"
+        );
 
         // 메모리가 회복되면 포커스 재개가 다음 틱에 돌아온다(불변 5).
         let ops = guard.plan(

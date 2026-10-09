@@ -77,7 +77,7 @@ fn fresh_apply_registers_both_versions_and_creates_orchestration_objects() {
     for index in ORCH_INDEXES {
         assert_eq!(object_count(&conn, index), 1, "index {index} missing");
     }
-    assert_eq!(applied_versions(&conn), vec![1, 2, 3, 4, 5]);
+    assert_eq!(applied_versions(&conn), vec![1, 2, 3, 4, 5, 6]);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn second_open_is_a_no_op_and_reopen_keeps_versions_stable() {
     for table in ORCH_TABLES {
         assert_eq!(object_count(&conn, table), 1, "table {table} duplicated");
     }
-    assert_eq!(applied_versions(&conn), vec![1, 2, 3, 4, 5]);
+    assert_eq!(applied_versions(&conn), vec![1, 2, 3, 4, 5, 6]);
 }
 
 #[test]
@@ -126,5 +126,5 @@ fn upgrade_from_0001_preserves_existing_r1_rows() {
         })
         .unwrap();
     assert_eq!(title, "keep me");
-    assert_eq!(applied_versions(&conn), vec![1, 2, 3, 4, 5]);
+    assert_eq!(applied_versions(&conn), vec![1, 2, 3, 4, 5, 6]);
 }

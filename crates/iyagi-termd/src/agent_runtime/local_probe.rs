@@ -196,7 +196,7 @@ pub fn capabilities(runtime: RuntimeKind, report: &LocalProbeReport) -> RuntimeC
             if !report.protocol_ok && missing.is_empty() {
                 return capabilities;
             }
-            let advertised = |flag: &str| !missing.iter().any(|absent| *absent == flag);
+            let advertised = |flag: &str| !missing.contains(&flag);
             let from = |ok: bool| if ok { proven() } else { disproven() };
             capabilities.structured_result = from(advertised("--json-schema"));
             capabilities.events = from(advertised("--output-format"));
@@ -1035,9 +1035,7 @@ impl OwnedServer {
             _private: private,
             child,
         };
-        let Some(stdout) = server.child.stdout.take() else {
-            return None;
-        };
+        let stdout = server.child.stdout.take()?;
         let (found, addresses) = mpsc::channel();
         let reader = std::thread::Builder::new()
             .name("opencode-local-probe".into())

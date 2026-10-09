@@ -849,7 +849,10 @@ fn actor_stalled_input_is_reported_refused_and_does_not_wedge_finalize() {
 
     let ready_deadline = Instant::now() + Duration::from_secs(5);
     while !journal_text(&journal).contains("READY") {
-        assert!(Instant::now() < ready_deadline, "script never announced READY");
+        assert!(
+            Instant::now() < ready_deadline,
+            "script never announced READY"
+        );
         std::thread::sleep(Duration::from_millis(25));
     }
     let bg_pid: i32 = journal_text(&journal)

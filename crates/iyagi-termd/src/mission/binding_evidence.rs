@@ -148,14 +148,13 @@ fn target(binding: &Binding) -> String {
 
 fn observation(document: &Value, binding: &Binding, allow_unpinned: bool) -> Option<Observation> {
     let observed: Observation = serde_json::from_value(document.get(OBSERVATION)?.clone()).ok()?;
-    ((observed.format == 2 || (allow_unpinned && observed.format == 1))
-        && (observed
+    let pinned = observed.format == 2
+        && observed
             .verified_at_revision
             .as_ref()
-            .is_some_and(|revision| {
-                revision.get() > 0 && revision.get() <= binding.revision.get()
-            })
-            || (allow_unpinned && observed.format == 1))
+            .is_some_and(|revision| revision.get() > 0 && revision.get() <= binding.revision.get());
+    let unpinned = allow_unpinned && observed.format == 1;
+    ((pinned || unpinned)
         && observed.target_sha256 == target(binding)
         && observed.os == std::env::consts::OS
         && observed
@@ -244,10 +243,10 @@ fn consent_withdrawn(snapshot: &Binding, current: Option<&Value>) -> bool {
     // 11 §3.4: consent is a per-connection statement. Only a withdrawal (null,
     // omitted) or a deleted binding revokes it; a consent restated for a newer
     // observed version is still consent for this connection.
-    !current
+    current
         .and_then(|document| document.get("experimental_version"))
         .and_then(Value::as_str)
-        .is_some_and(|value| !value.trim().is_empty())
+        .is_none_or(|value| value.trim().is_empty())
 }
 
 /// A consent names one CLI version for one launch target. A `binding.save`

@@ -20,19 +20,19 @@ fn advance(clock: &Mutex<Instant>, duration: Duration) {
 fn control(rig: &Rig, action: &str) -> Value {
     json!({"request_id":Id::generate(),"mission_id":rig.id,"expected_revision":rig.snapshot().mission.revision,"action":action})
 }
+/// Keeps every Run executing (`Running`) until the actor stops it. Short
+/// delays let a stop land at the next step boundary. An approval would park
+/// the Run in `AwaitingInput`, which deliberately is not active time
+/// (mission/timing.rs `run_active`).
 fn hold() -> AdapterFactory {
     Arc::new(|_| {
+        let mut steps = vec![FakeStep::Started {
+            session_id: None,
+            turn_id: None,
+        }];
+        steps.extend((0..1200).map(|_| FakeStep::Delay { ms: 50 }));
         Ok(scripted(FakeScript {
-            steps: vec![
-                FakeStep::Started {
-                    session_id: None,
-                    turn_id: None,
-                },
-                FakeStep::Approval {
-                    request_id: "timing-hold".into(),
-                    question: "Hold for timing test".into(),
-                },
-            ],
+            steps,
             ..Default::default()
         }))
     })
@@ -126,7 +126,7 @@ fn parallel_runs_and_pausing_do_not_multiply_mission_time() {
     .unwrap();
     let mut actor = rig.actor(hold());
     rig.tick_until(&mut actor, |s| {
-        s.runs.len() == 2 && s.runs.iter().all(|r| r.state == RunState::AwaitingInput)
+        s.runs.len() == 2 && s.runs.iter().all(|r| r.state == RunState::Running)
     });
     advance(&clock, Duration::from_millis(2500));
     actor.tick().unwrap();
@@ -194,7 +194,7 @@ fn restart_keeps_persisted_time_without_charging_downtime_or_unknown_runs() {
     let (rig, clock) = rig();
     let mut actor = rig.actor(hold());
     rig.tick_until(&mut actor, |s| {
-        s.runs.iter().any(|r| r.state == RunState::AwaitingInput)
+        s.runs.iter().any(|r| r.state == RunState::Running)
     });
     advance(&clock, Duration::from_millis(2250));
     actor.tick().unwrap();

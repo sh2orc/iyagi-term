@@ -499,7 +499,13 @@ pub fn find_conflicts(home: &Path) -> Vec<Conflict> {
             None
         };
         let replaceable = !LATE_FILES.contains(&name);
-        scan_text(&text, &path.display().to_string(), replaceable, skip, &mut out);
+        scan_text(
+            &text,
+            &path.display().to_string(),
+            replaceable,
+            skip,
+            &mut out,
+        );
     }
     out
 }
@@ -671,7 +677,14 @@ pub fn status(
     main_model: &str,
 ) -> ShellProfilesStatus {
     // 일반 조회는 캐시를 쓴다 — 아래 `status_with`의 `fresh_probe` 설명 참고.
-    status_with(home, data_dir, daemon_bin, main_model, &Probe::from_env(), false)
+    status_with(
+        home,
+        data_dir,
+        daemon_bin,
+        main_model,
+        &Probe::from_env(),
+        false,
+    )
 }
 
 /// `fresh_probe`가 참이면 동적 탐지 캐시를 건너뛰고 항상 새로 탐지한다
@@ -749,7 +762,8 @@ fn status_with(
                 // 다른 파일의 정의는 그 파일이 우리 블록 **앞에서** source될
                 // 때만 가려진다 — 블록 뒤의 source 줄이면 사용자 정의가 나중에
                 // 로드돼 이긴다(놓치면 UI가 충돌을 숨기므로 넓게 잡는다).
-                conflict.replaceable && !rc_sources_file_after_block(&rc_text, &conflict.file, begin)
+                conflict.replaceable
+                    && !rc_sources_file_after_block(&rc_text, &conflict.file, begin)
             }
         }),
         _ => false,
@@ -791,7 +805,14 @@ pub fn apply(
     replace_existing: bool,
 ) -> Result<ShellProfilesStatus, ShellProfilesError> {
     let probe = Probe::from_env();
-    apply_with(home, data_dir, daemon_bin, main_model, replace_existing, &probe)
+    apply_with(
+        home,
+        data_dir,
+        daemon_bin,
+        main_model,
+        replace_existing,
+        &probe,
+    )
 }
 
 fn apply_with(
@@ -809,7 +830,9 @@ fn apply_with(
     // 않도록 항상 새로 탐지한다(`fresh_probe = true`).
     let current = status_with(Some(home), data_dir, daemon_bin, main_model, probe, true);
     if !current.supported {
-        return Err(ShellProfilesError::Unsupported(current.reason.unwrap_or("unsupported")));
+        return Err(ShellProfilesError::Unsupported(
+            current.reason.unwrap_or("unsupported"),
+        ));
     }
     // 사용자가 이미 쓰고 있는 `ccd`/`ccg`는 우리 것이 아니다 — 교체를 고르지
     // 않았다면 무엇이 걸렸는지 그대로 돌려주고 멈춘다(파일은 하나도 건드리지
@@ -818,8 +841,17 @@ fn apply_with(
     if replacing && !replace_existing {
         return Err(ShellProfilesError::Conflict(current.conflicts));
     }
-    if replacing && current.conflicts.iter().any(|conflict| !conflict.replaceable) {
-        let late = current.conflicts.into_iter().filter(|c| !c.replaceable).collect();
+    if replacing
+        && current
+            .conflicts
+            .iter()
+            .any(|conflict| !conflict.replaceable)
+    {
+        let late = current
+            .conflicts
+            .into_iter()
+            .filter(|c| !c.replaceable)
+            .collect();
         return Err(ShellProfilesError::Unreplaceable(late));
     }
     let binary = daemon_bin.ok_or(ShellProfilesError::Unsupported("daemon_binary_missing"))?;
@@ -850,7 +882,14 @@ fn apply_with(
     }
     // 설치 직후라 `installed = true` — 아래 `status_with`는 동적 탐지를 아예
     // 건너뛰므로 `fresh_probe` 값은 결과에 영향을 주지 않는다.
-    Ok(status_with(Some(home), data_dir, daemon_bin, main_model, probe, false))
+    Ok(status_with(
+        Some(home),
+        data_dir,
+        daemon_bin,
+        main_model,
+        probe,
+        false,
+    ))
 }
 
 /// 제거: rc에서 우리 블록만 도려내고 스크립트 파일을 지운다. 사용자가 셸을
@@ -884,7 +923,14 @@ fn remove_with(
         Err(error) => return Err(ShellProfilesError::Write(error.to_string())),
     }
     // 제거는 반환 상태의 충돌 목록이 즉시 최신일 필요가 없다 — 캐시를 쓴다.
-    Ok(status_with(Some(home), data_dir, daemon_bin, main_model, probe, false))
+    Ok(status_with(
+        Some(home),
+        data_dir,
+        daemon_bin,
+        main_model,
+        probe,
+        false,
+    ))
 }
 
 #[cfg(test)]
@@ -900,10 +946,19 @@ mod tests {
         assert!(!rc_sources_file_after_block(rc, "/home/u/.zsh_aliases", 4));
         // 주석은 실행되지 않는다.
         let commented = "# source ~/.zsh_aliases\n# iyagi BEGIN\n# iyagi END\n";
-        assert!(!rc_sources_file_after_block(commented, "/home/u/.zsh_aliases", 2));
+        assert!(!rc_sources_file_after_block(
+            commented,
+            "/home/u/.zsh_aliases",
+            2
+        ));
         // 조건부 source(`[ -f ] && source`)도 잡는다.
-        let conditional = "# iyagi BEGIN\n# iyagi END\n[[ -f ~/.zsh_aliases ]] && source ~/.zsh_aliases\n";
-        assert!(rc_sources_file_after_block(conditional, "/home/u/.zsh_aliases", 1));
+        let conditional =
+            "# iyagi BEGIN\n# iyagi END\n[[ -f ~/.zsh_aliases ]] && source ~/.zsh_aliases\n";
+        assert!(rc_sources_file_after_block(
+            conditional,
+            "/home/u/.zsh_aliases",
+            1
+        ));
         // 언급이 없으면 거짓.
         assert!(!rc_sources_file_after_block("", "/home/u/.zsh_aliases", 1));
     }
@@ -920,7 +975,10 @@ mod tests {
         )
         .unwrap();
         let applied = replace_as(home.path(), data.path(), &probe()).expect("replace installs");
-        assert!(applied.overriding, "rc 안 충돌이 없으니 이 시점엔 가려짐: {applied:?}");
+        assert!(
+            applied.overriding,
+            "rc 안 충돌이 없으니 이 시점엔 가려짐: {applied:?}"
+        );
 
         // 사용자가 블록 뒤에서 alias 파일을 source하기 시작한다.
         let rc = home.path().join(".zshrc");
@@ -937,8 +995,12 @@ mod tests {
             false,
         );
         assert!(
-            status.conflicts.iter().any(|c| c.file.ends_with(".zsh_aliases")),
-            "conflict must be visible: {:?}", status.conflicts
+            status
+                .conflicts
+                .iter()
+                .any(|c| c.file.ends_with(".zsh_aliases")),
+            "conflict must be visible: {:?}",
+            status.conflicts
         );
         assert!(
             !status.overriding,
@@ -962,7 +1024,14 @@ mod tests {
     }
 
     fn replace_as(home: &Path, data: &Path, probe: &Probe) -> Applied {
-        apply_with(home, data, Some(&bin_of(data)), DEFAULT_MAIN_MODEL, true, probe)
+        apply_with(
+            home,
+            data,
+            Some(&bin_of(data)),
+            DEFAULT_MAIN_MODEL,
+            true,
+            probe,
+        )
     }
 
     fn remove_as(home: &Path, data: &Path, probe: &Probe) -> Applied {
@@ -1089,11 +1158,16 @@ mod tests {
         let write = |name: &str, body: &str| std::fs::write(home.path().join(name), body).unwrap();
         write(".zshrc", &format!("alias ccg='cc --glm'\n{ours}"));
         write(".zsh_aliases", "function ccd {\n  echo aliased\n}\n");
-        write(".zprofile", "# ccd() disabled\nalias ccdx='nope'\nfunction ccdx { :; }\n");
+        write(
+            ".zprofile",
+            "# ccd() disabled\nalias ccdx='nope'\nfunction ccdx { :; }\n",
+        );
 
         let found = find_conflicts(home.path());
         assert!(
-            found.iter().any(|c| c.name == "ccg" && c.file.ends_with(".zshrc") && c.line == 1),
+            found
+                .iter()
+                .any(|c| c.name == "ccg" && c.file.ends_with(".zshrc") && c.line == 1),
             "{found:?}"
         );
         assert_eq!(
@@ -1108,7 +1182,10 @@ mod tests {
             "{found:?}"
         );
         // 주석과 비슷한 이름(`ccdx`)은 건드리지 않는다.
-        assert!(!found.iter().any(|c| c.file.ends_with(".zprofile")), "{found:?}");
+        assert!(
+            !found.iter().any(|c| c.file.ends_with(".zprofile")),
+            "{found:?}"
+        );
     }
 
     #[test]
@@ -1163,7 +1240,10 @@ mod tests {
         assert!(!is_known_main_model(""));
         assert_eq!(sanitize_main_model(None), DEFAULT_MAIN_MODEL);
         assert_eq!(sanitize_main_model(Some("nope".into())), DEFAULT_MAIN_MODEL);
-        assert_eq!(sanitize_main_model(Some("glm-5.3-flash[1m]".into())), "glm-5.3-flash[1m]");
+        assert_eq!(
+            sanitize_main_model(Some("glm-5.3-flash[1m]".into())),
+            "glm-5.3-flash[1m]"
+        );
     }
 
     #[cfg(unix)]
@@ -1188,7 +1268,10 @@ mod tests {
         assert!(!st.rc_exists);
         assert!(!st.script_exists);
         assert!(st.rc_path.ends_with(".zshrc"));
-        assert_eq!(st.proposed_block.as_deref(), Some(render_block(&st.script_path).as_str()));
+        assert_eq!(
+            st.proposed_block.as_deref(),
+            Some(render_block(&st.script_path).as_str())
+        );
         assert!(st.script_preview.contains("claude-exec --provider zai"));
         assert!(st.conflicts.is_empty());
         assert_eq!(st.main_model, DEFAULT_MAIN_MODEL);
@@ -1222,15 +1305,27 @@ mod tests {
         assert_eq!(st.reason, Some("shell_not_zsh"));
         assert_eq!(st.shell.as_deref(), Some("/bin/bash"));
 
-        let st =
-            status_with(Some(home.path()), data.path(), None, DEFAULT_MAIN_MODEL, &probe(), false);
+        let st = status_with(
+            Some(home.path()),
+            data.path(),
+            None,
+            DEFAULT_MAIN_MODEL,
+            &probe(),
+            false,
+        );
         assert_eq!(st.reason, Some("daemon_binary_missing"));
         assert!(st.daemon_binary.is_none());
         // 미리보기는 그래도 보여 준다(PATH 폴백 이름).
         assert!(st.script_preview.contains("iyagi-termd"));
 
-        let st =
-            status_with(None, data.path(), Some(&binary), DEFAULT_MAIN_MODEL, &probe(), false);
+        let st = status_with(
+            None,
+            data.path(),
+            Some(&binary),
+            DEFAULT_MAIN_MODEL,
+            &probe(),
+            false,
+        );
         assert_eq!(st.reason, Some("no_home"));
         assert!(st.rc_path.is_empty());
         assert!(!st.rc_exists);
@@ -1284,7 +1379,10 @@ mod tests {
         assert!(!removed.script_exists);
         assert!(!script.exists());
         let restored = std::fs::read_to_string(&rc).unwrap();
-        assert_eq!(restored, "export EDITOR=vim\n", "removal must restore the rc");
+        assert_eq!(
+            restored, "export EDITOR=vim\n",
+            "removal must restore the rc"
+        );
         // 두 번째 제거는 아무 일도 하지 않는다.
         assert!(remove_as(home.path(), data.path(), &probe()).is_ok());
     }
@@ -1375,7 +1473,9 @@ mod tests {
         // 스크립트는 같은 이름의 alias부터 치운다. `|| true`가 없으면 별칭이
         // 없는 셸(setopt err_exit)에서 unalias의 exit 1이 스크립트를 끊는다.
         let script = std::fs::read_to_string(script_path(data.path())).unwrap();
-        let unalias = script.find("unalias ccd ccg 2>/dev/null || true\n").unwrap();
+        let unalias = script
+            .find("unalias ccd ccg 2>/dev/null || true\n")
+            .unwrap();
         assert!(unalias < script.find("\nccd() {").unwrap());
 
         // 이미 끝에 있으면 다시 교체해도 글자 하나 바뀌지 않는다.

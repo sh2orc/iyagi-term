@@ -21,16 +21,14 @@ pub(super) fn native_supported() -> bool {
     true
 }
 
-pub(super) fn install_capture_barrier(repo: &Path, workspace: &str, marker: &Path, release: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    fn quoted(s: &str) -> String {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    }
-    let hook = repo.join(".git/hooks/post-index-change");
+/// Holds the first index write in `workspace` and leaves an unknown file
+/// behind — where a post-index-change hook used to run before daemon Git
+/// disabled hooks.
+pub(super) fn install_capture_barrier(workspace: &str, marker: &Path, release: &Path) {
+    use super::git_barrier::{quote, register};
     let canonical = Path::new(workspace).canonicalize().unwrap();
-    std::fs::write(&hook, format!("#!/bin/sh\n[ \"$(pwd -P)\" = {} ] || exit 0\n[ -e {} ] && exit 0\nprintf x > {}\nprintf 'quarantined fixture output\\n' > unknown-only.txt\nwhile [ ! -e {} ]; do sleep 0.05; done\n",
-        quoted(canonical.to_str().unwrap()), quoted(marker.to_str().unwrap()), quoted(marker.to_str().unwrap()), quoted(release.to_str().unwrap()))).unwrap();
-    std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    register(&format!("matches() {{\n  [ \"$(pwd -P)\" = {} ] && [ ! -e {} ] || return 1\n  case \"$(git_subcommand \"$@\")\" in add|update-index|read-tree|commit|reset|checkout) return 0 ;; esac\n  return 1\n}}\nhold() {{\n  printf x > {}\n  printf 'quarantined fixture output\\n' > unknown-only.txt\n  while [ ! -e {} ]; do sleep 0.05; done\n  return \"$1\"\n}}\n",
+        quote(&canonical), quote(marker), quote(marker), quote(release)));
 }
 
 fn snapshot(client: &mut Client, mission: &str) -> Vec<Entity> {

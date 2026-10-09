@@ -513,7 +513,10 @@ mod tests {
         // 따옴표 밖 백슬래시 이스케이프도 한 토큰으로 모은다.
         assert_eq!(
             command_argv("/opt/iyagi\\ term/iyagi-termd hook"),
-            vec!["/opt/iyagi term/iyagi-termd".to_string(), "hook".to_string()]
+            vec![
+                "/opt/iyagi term/iyagi-termd".to_string(),
+                "hook".to_string()
+            ]
         );
         // shell_quote가 내놓는 홑따옴표 안의 홑따옴표(`'\''`)도 원문으로.
         assert_eq!(

@@ -105,7 +105,10 @@ const TASK_EDGES: &[(TaskState, &[TaskState])] = &[
         ],
     ),
     (TaskState::Succeeded, &[]),
-    (TaskState::Cancelled, &[TaskState::Ready, TaskState::Superseded]),
+    (
+        TaskState::Cancelled,
+        &[TaskState::Ready, TaskState::Superseded],
+    ),
     (TaskState::Superseded, &[]),
 ];
 

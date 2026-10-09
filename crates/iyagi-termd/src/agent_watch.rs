@@ -79,31 +79,38 @@ const SIGNATURES: &[AgentSignature] = &[
 /// 무관)만 벗긴다 — 그 밖의 확장자는 남겨 `claude.md`는 `claude`와 다른
 /// 이름으로 취급해 오탐(vim claude.md 등)을 막는다.
 fn file_name(path: &str) -> &str {
+    exe_name(path).0
+}
+
+/// [`file_name`]과 `.exe`를 벗겼는지 여부.
+fn exe_name(path: &str) -> (&str, bool) {
     let normalized = path.trim_end_matches(['/', '\\']);
     let name = match normalized.rsplit_once(['/', '\\']) {
         Some((_, name)) => name,
         None => normalized,
     };
     match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() && ext.eq_ignore_ascii_case("exe") => stem,
-        _ => name,
+        Some((stem, ext)) if !stem.is_empty() && ext.eq_ignore_ascii_case("exe") => (stem, true),
+        _ => (name, false),
     }
+}
+
+/// `path`가 실행 파일 `binary`를 가리키는가. Windows 실행 파일(`.exe`)의
+/// 이름은 대소문자를 가리지 않는다(`CLAUDE.EXE`) — 그 밖에는 정확히 같아야 한다.
+fn names_binary(path: &str, binary: &str) -> bool {
+    let (name, exe) = exe_name(path);
+    name == binary || (exe && name.eq_ignore_ascii_case(binary))
 }
 
 /// 서명 하나가 이 프로세스와 일치하는가.
 fn signature_matches(sig: &AgentSignature, process: &ProcessBrief) -> bool {
     if let Some(exe) = &process.exe {
-        if sig.binaries.contains(&file_name(exe)) {
+        if sig.binaries.iter().any(|b| names_binary(exe, b)) {
             return true;
         }
     }
     for (index, arg) in process.cmd.iter().enumerate() {
-        if index == 0
-            && sig
-                .binaries
-                .iter()
-                .any(|b| arg == *b || file_name(arg) == *b)
-        {
+        if index == 0 && sig.binaries.iter().any(|b| names_binary(arg, b)) {
             return true;
         }
         // 경로 구분자를 정규화해 Windows npm 경로도 잡는다.

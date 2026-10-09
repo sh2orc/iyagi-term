@@ -474,12 +474,12 @@ impl ProtocolPeer for LivePeer {
         {
             // Retain the actor's ownership if any descendant still holds
             // the group. This probe never signals a recycled process.
-            return Command::new("kill")
+            Command::new("kill")
                 .args(["-0", &format!("-{}", self.group_id)])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
-                .is_ok_and(|s| !s.success());
+                .is_ok_and(|s| !s.success())
         }
         #[cfg(not(unix))]
         {

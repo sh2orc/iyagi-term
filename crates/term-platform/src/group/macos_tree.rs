@@ -545,6 +545,30 @@ impl super::ResourcePlatform for MacosTreePlatform {
     }
 }
 
+impl MacosTreePlatform {
+    /// 지금 검증된 멤버 전체(가디언 그룹 포함). 정지된 트리는 새 자손을
+    /// 만들 수 없지만, 재개 뒤 새로 생긴 자손은 다음 정지 패스에서 붙잡힌다.
+    fn verified_members(
+        &self,
+        group: &GroupHandle,
+        what: &str,
+    ) -> io::Result<Vec<ProcessIdentity>> {
+        if matches!(&group.inner, GroupInner::Guardian(_)) {
+            return super::macos_guardian::members(group);
+        }
+        let inner = tree_inner(group)?;
+        let root = root_of(inner)?;
+        let system = self.refresh()?;
+        let observed = anchored_tree(&system, inner, &root)?;
+        let (verified, reused, _gone, _unverifiable) = verify_members(inner, root.pid, &observed)?;
+        drop(system);
+        if !reused.is_empty() {
+            tracing::debug!(?reused, "skipped reused pids during {what}");
+        }
+        Ok(verified)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -890,29 +914,5 @@ mod tests {
             }));
         }
         let _ = child.wait();
-    }
-}
-
-impl MacosTreePlatform {
-    /// 지금 검증된 멤버 전체(가디언 그룹 포함). 정지된 트리는 새 자손을
-    /// 만들 수 없지만, 재개 뒤 새로 생긴 자손은 다음 정지 패스에서 붙잡힌다.
-    fn verified_members(
-        &self,
-        group: &GroupHandle,
-        what: &str,
-    ) -> io::Result<Vec<ProcessIdentity>> {
-        if matches!(&group.inner, GroupInner::Guardian(_)) {
-            return super::macos_guardian::members(group);
-        }
-        let inner = tree_inner(group)?;
-        let root = root_of(inner)?;
-        let system = self.refresh()?;
-        let observed = anchored_tree(&system, inner, &root)?;
-        let (verified, reused, _gone, _unverifiable) = verify_members(inner, root.pid, &observed)?;
-        drop(system);
-        if !reused.is_empty() {
-            tracing::debug!(?reused, "skipped reused pids during {what}");
-        }
-        Ok(verified)
     }
 }

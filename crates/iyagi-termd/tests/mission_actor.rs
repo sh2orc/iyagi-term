@@ -49,6 +49,10 @@ mod mission_verification_exec;
 #[path = "support/mission_integration_exec.rs"]
 mod mission_integration_exec;
 
+#[cfg(unix)]
+#[path = "support/git_barrier.rs"]
+mod git_barrier;
+
 #[path = "support/mission_timing.rs"]
 mod mission_timing;
 

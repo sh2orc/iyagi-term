@@ -229,7 +229,7 @@ fn label_and_estimate_edits_do_not_erase_a_known_account_reset() {
     binding.label = "renamed".into();
     binding.estimated_run_cost_usd_micros = Some(U64String::new(20).unwrap());
     assert_eq!(
-        term_core::mission::rate_limits::reset_deadline(&binding, &[run.clone()], 1000),
+        term_core::mission::rate_limits::reset_deadline(&binding, std::slice::from_ref(&run), 1000),
         Some(10_000)
     );
     binding.credential_ref = Some("different-account".into());

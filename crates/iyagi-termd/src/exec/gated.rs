@@ -100,7 +100,7 @@ pub(super) fn launch(
         // and the starting worker until that fact is durably recorded.
         let mut attempts = 0u64;
         while let Err(error) = persistence.update(cleanup_record.clone()) {
-            if attempts % 50 == 0 {
+            if attempts.is_multiple_of(50) {
                 tracing::warn!(exec_id=%cleanup_record.id, error=%error,
                     "launch cleanup is confirmed; durable completion pending, reservation retained");
             }

@@ -160,8 +160,10 @@ fn evaluate(
     if task.attempt_count >= slice.policy.max_attempts_per_task {
         return Some(SkipReason::AttemptLimit);
     }
-    if task.binding_id.is_none() && task.kind != term_contracts::mission::types::TaskKind::Verify
-        && !task.is_deterministic_integration() {
+    if task.binding_id.is_none()
+        && task.kind != term_contracts::mission::types::TaskKind::Verify
+        && !task.is_deterministic_integration()
+    {
         return Some(SkipReason::MissingBinding);
     }
     if global_live >= caps.global_runs {

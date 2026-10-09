@@ -455,6 +455,7 @@ impl OpencodeAdapter {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn finish_saved(
         &self,
         run_id: &Id,

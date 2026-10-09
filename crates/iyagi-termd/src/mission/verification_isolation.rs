@@ -131,7 +131,13 @@ assert os.environ['HOME']==str(out) and os.environ['TMPDIR']==str(out)
 assert all(k not in os.environ for k in ['ANTHROPIC_API_KEY','OPENAI_API_KEY','SSH_AUTH_SOCK','NODE_OPTIONS','PYTHONPATH','BASH_ENV'])
 print('verified boundaries')
 "#;
-        let socket = root.parent().unwrap().join("owned.sock");
+        // $TMPDIR 아래 깊은 경로는 SUN_LEN(macOS 104바이트)을 넘는다 — 소켓은
+        // /tmp 아래 짧은 경로에 둔다. 위치와 무관하게 네트워크는 기본 거부다.
+        let socket_dir = tempfile::Builder::new()
+            .prefix("iyagi-vi-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = socket_dir.path().join("owned.sock");
         let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let args = vec![
             "-c".into(),

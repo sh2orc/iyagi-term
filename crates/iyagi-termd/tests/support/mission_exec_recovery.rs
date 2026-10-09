@@ -402,7 +402,7 @@ fn persistent_reservations_restore_before_admission_and_release_only_after_store
     assert_eq!(
         fresh
             .exec_persistence()
-            .recovery_records(&[exec.id.clone()])
+            .recovery_records(std::slice::from_ref(&exec.id))
             .unwrap(),
         vec![ended]
     );
@@ -637,7 +637,7 @@ async fn replacement_supervisor_accounts_for_a_real_surviving_native_process_unt
         .unwrap();
     let identity = handle.identity().unwrap();
     assert!(term_platform::identity::process_identity(identity.pid)
-        .is_some_and(|p| p.same_process(&identity)));
+        .is_some_and(|p| p.same_process(identity)));
     let fresh = restarted(&rig);
     fresh.recover_on_startup().unwrap();
     let replacement = supervisor(&rig, &fresh);

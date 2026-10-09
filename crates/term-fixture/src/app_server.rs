@@ -121,7 +121,9 @@ pub fn run(overrides: &[String]) -> i32 {
                 send(
                     json!({"id":id,"result":{"turn":{"id":"fixture-turn","status":"inProgress","items":[]}}}),
                 );
-                send(json!({"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"fixture-turn","status":"inProgress","items":[]}}}));
+                send(
+                    json!({"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"fixture-turn","status":"inProgress","items":[]}}}),
+                );
                 let prompt = request["params"]["input"][0]["text"].as_str().unwrap_or("");
                 match prompt {
                     "fixture-auth-echo" => {
@@ -159,7 +161,9 @@ pub fn run(overrides: &[String]) -> i32 {
                     return 3;
                 };
                 let context: Value = serde_json::from_str(document).unwrap();
-                if context["goal"] == "fixture-mission-message" || context["goal"] == "fixture-mission-message-replacement" {
+                if context["goal"] == "fixture-mission-message"
+                    || context["goal"] == "fixture-mission-message-replacement"
+                {
                     waiting_for_mission_message = true;
                     drop_message_ack = context["goal"] == "fixture-mission-message-replacement";
                     continue;
@@ -200,29 +204,59 @@ pub fn run(overrides: &[String]) -> i32 {
                 {
                     return 9;
                 }
-                let required_repair = matches!(context["goal"].as_str(), Some("fixture-mission-required-repair" | "fixture-mission-required-exhausted"));
-                if required_repair && context["task_kind"] == "implement" && context["task_contract"]["allowed_paths"][0] == "api.txt" {
-                    let replacement = context["tasks"].as_array().unwrap().iter().find(|t| t["id"] == context["task_id"]).unwrap()["replacement_of"].is_string();
+                let required_repair = matches!(
+                    context["goal"].as_str(),
+                    Some("fixture-mission-required-repair" | "fixture-mission-required-exhausted")
+                );
+                if required_repair
+                    && context["task_kind"] == "implement"
+                    && context["task_contract"]["allowed_paths"][0] == "api.txt"
+                {
+                    let replacement = context["tasks"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|t| t["id"] == context["task_id"])
+                        .unwrap()["replacement_of"]
+                        .is_string();
                     if !replacement || context["goal"] == "fixture-mission-required-exhausted" {
-                        send(json!({"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"fixture-turn","status":"failed","items":[],"error":{"codexErrorInfo":"internalServerError","message":"fixture required worker failure"}}}}));
+                        send(
+                            json!({"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"fixture-turn","status":"failed","items":[],"error":{"codexErrorInfo":"internalServerError","message":"fixture required worker failure"}}}}),
+                        );
                         continue;
                     }
                 }
                 let mut result = match context["task_kind"].as_str().unwrap() {
                     "plan" if required_repair && !context["failure_repair"].is_null() => {
-                        let failures = context["failure_repair"]["failed_tasks"].as_array().unwrap();
-                        if failures.is_empty() || failures.iter().any(|f| !f["diagnostic"].as_str().is_some_and(|s| s.contains("Codex turn failed"))) { return 10; }
+                        let failures = context["failure_repair"]["failed_tasks"]
+                            .as_array()
+                            .unwrap();
+                        if failures.is_empty()
+                            || failures.iter().any(|f| {
+                                !f["diagnostic"]
+                                    .as_str()
+                                    .is_some_and(|s| s.contains("Codex turn failed"))
+                            })
+                        {
+                            return 10;
+                        }
                         let tasks: Vec<_> = failures.iter().enumerate().map(|(i,f)| {
                             let old=&f["task"]; let contract=&old["contract"];
                             json!({"local_key":format!("replacement{i}"),"title":"Repair failed implementation","kind":old["kind"],"role":old["role"],"required":true,"parent_key":null,"depends_on_keys":[],"objective_text":"Correct the failed local implementation using its diagnostic.","requirement_ids":contract["requirement_ids"],"input_artifact_ids":[],"allowed_paths":contract["allowed_paths"],"expected_outputs":contract["expected_outputs"],"verification_ids":contract["verification_ids"],"specialty":null,"binding_id":old["binding_id"],"replacement_of":old["id"]})
                         }).collect();
-                        let retired: Vec<_> = failures.iter().map(|f| f["task"]["id"].clone()).collect();
+                        let retired: Vec<_> =
+                            failures.iter().map(|f| f["task"]["id"].clone()).collect();
                         json!({"kind":"plan","based_on_plan_revision":context["plan_revision"],"tasks":tasks,"retire_task_ids":retired,"rationale_text":"The retained local failure requires a replacement; preserve the independent completed task."})
                     }
                     "plan" => {
                         let mut tasks:Vec<_>=["api","ui"].into_iter().map(|key|json!({"local_key":key,"title":format!("Write {key}"),"kind":"implement","role":"builder","required":true,"parent_key":null,"depends_on_keys":[],"objective_text":format!("Create {key}.txt"),"requirement_ids":[context["requirements"][0]["id"]],"input_artifact_ids":[],"allowed_paths":[format!("{key}.txt")],"expected_outputs":["patch"],"verification_ids":[],"specialty":null,"binding_id":null,"replacement_of":null})).collect();
                         if context["goal"] == "fixture-mission-integration-conflict" {
-                            for task in &mut tasks { task["allowed_paths"].as_array_mut().unwrap().push(json!("shared.txt")); }
+                            for task in &mut tasks {
+                                task["allowed_paths"]
+                                    .as_array_mut()
+                                    .unwrap()
+                                    .push(json!("shared.txt"));
+                            }
                         }
                         json!({"kind":"plan","based_on_plan_revision":context["plan_revision"],"tasks":tasks,"retire_task_ids":[],"rationale_text":"Two independent writer workspaces."})
                     }
@@ -241,16 +275,33 @@ pub fn run(overrides: &[String]) -> i32 {
                         json!({"kind":"patch","report_text":"File written in the isolated workspace.","verification_claims":[]})
                     }
                     "integrate" if context["goal"] == "fixture-mission-integration-conflict" => {
-                        let objective: Value = serde_json::from_str(context["objective"].as_str().unwrap()).unwrap();
-                        if context["role"] != "integrator" || objective["conflict_run_id"].is_null()
-                            || !std::fs::read_to_string("shared.txt").unwrap().contains("<<<<<<<") { return 11; }
-                        if let Ok(bytes) = std::fs::read(".iyagi-integration-recovery-fixture.json") {
+                        let objective: Value =
+                            serde_json::from_str(context["objective"].as_str().unwrap()).unwrap();
+                        if context["role"] != "integrator"
+                            || objective["conflict_run_id"].is_null()
+                            || !std::fs::read_to_string("shared.txt")
+                                .unwrap()
+                                .contains("<<<<<<<")
+                        {
+                            return 11;
+                        }
+                        if let Ok(bytes) = std::fs::read(".iyagi-integration-recovery-fixture.json")
+                        {
                             let config: Value = serde_json::from_slice(&bytes).unwrap();
                             let marker = config["marker"].as_str().unwrap();
-                            if std::fs::OpenOptions::new().write(true).create_new(true).open(marker).is_ok() {
-                                std::fs::write("shared.txt", "unconfirmed integrator changes\n").unwrap();
-                                std::fs::write("unknown-only.txt", "quarantined fixture output\n").unwrap();
-                                while !std::path::Path::new(config["release"].as_str().unwrap()).exists() {
+                            if std::fs::OpenOptions::new()
+                                .write(true)
+                                .create_new(true)
+                                .open(marker)
+                                .is_ok()
+                            {
+                                std::fs::write("shared.txt", "unconfirmed integrator changes\n")
+                                    .unwrap();
+                                std::fs::write("unknown-only.txt", "quarantined fixture output\n")
+                                    .unwrap();
+                                while !std::path::Path::new(config["release"].as_str().unwrap())
+                                    .exists()
+                                {
                                     std::thread::sleep(std::time::Duration::from_millis(25));
                                 }
                                 return 0; // End without a provider result after daemon restart.

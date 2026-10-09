@@ -202,7 +202,7 @@ fn repair_commit_outage_never_launches_an_uncommitted_attempt() {
         assert!(actor.tick().is_err());
     }
     assert_eq!(contexts.lock().unwrap().len(), 1);
-    assert_eq!(rig.snapshot().runs, [first.clone()]);
+    assert_eq!(rig.snapshot().runs, std::slice::from_ref(&first));
     db.execute_batch("DROP TRIGGER deny_repair").unwrap();
     rig.tick_until(&mut actor, |s| s.mission.phase == Phase::AwaitingAcceptance);
     assert_eq!(contexts.lock().unwrap().len(), 2);

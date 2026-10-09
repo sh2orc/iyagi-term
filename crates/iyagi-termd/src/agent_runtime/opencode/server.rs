@@ -233,6 +233,7 @@ fn spawn_inner(
     connected
 }
 
+#[allow(clippy::too_many_arguments)]
 fn connect(
     exec: &ExecHandle,
     ports: &mpsc::Receiver<SocketAddr>,

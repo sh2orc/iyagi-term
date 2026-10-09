@@ -150,7 +150,10 @@ async fn codex_transaction(program: &str) -> Result<ProviderUsage, &'static str>
     // A Dock-launched app can discover an nvm-installed Codex while its
     // inherited PATH cannot resolve the launcher's /usr/bin/env node.
     // Keep the selected installation's bin directory available to the child.
-    if let Some(bin) = Path::new(program).parent().filter(|path| path.is_absolute()) {
+    if let Some(bin) = Path::new(program)
+        .parent()
+        .filter(|path| path.is_absolute())
+    {
         let inherited = std::env::var_os("PATH").unwrap_or_default();
         let paths = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&inherited));
         if let Ok(path) = std::env::join_paths(paths) {

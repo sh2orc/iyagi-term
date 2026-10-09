@@ -48,17 +48,36 @@ CLI; IYAGI owns execution, process groups and resource governance.
 
 ## Download
 
-- **macOS (Apple Silicon)**: [IYAGI.Term_0.1.0_aarch64.dmg](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) (11 MB)
-  — SHA-256 `a3e179c71018396b95101fce99bc3f076aa443a8789e74f62c7ac8368d406afe`
-- The build is ad-hoc signed (not notarized). On first launch, approve it with right-click →
-  **Open** (on newer macOS, via System Settings › Privacy & Security → Open Anyway) so the
-  consent is recorded for this app. Avoid `xattr -d com.apple.quarantine` — it strips the
-  Gatekeeper check instead of recording consent. Note the posture: the SHA-256 above is
-  published in the same repository as the DMG, so it detects transport corruption, not a
-  compromise of the repo itself (see [releases/README.md](releases/README.md)).
-- CI (`.github/workflows/ci.yml`) builds a Linux `.deb` and Windows/macOS release binaries (no installers;
-  Windows/macOS on protected refs only);
-  from source run `npm ci && npm run tauri build`.
+<p align="center">
+  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg">
+    <img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download IYAGI Terminal for macOS (Apple Silicon)">
+  </a>
+</p>
+
+| Platform | File | Size | SHA-256 |
+|---|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 15 MB | `8c9d5c37a732dd8d58ed1bb751a27fa7f9e81a4357d2f7bfbd4ad39e44e94f45` |
+
+<details>
+<summary>First launch on macOS (ad-hoc signed, not notarized)</summary>
+
+Approve the app with right-click → **Open** (on newer macOS: System Settings › Privacy & Security →
+Open Anyway) so the consent is recorded for this app. Avoid `xattr -d com.apple.quarantine` — it
+strips the Gatekeeper check instead of recording consent.
+
+The SHA-256 travels in the same repository as the DMG, so it detects transport corruption, not a
+compromise of the repository itself — see [releases/README.md](releases/README.md) for the release
+integrity roadmap.
+</details>
+
+<details>
+<summary>Other platforms & building from source</summary>
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds a Linux `.deb` and
+Windows/macOS release binaries (no installers; Windows/macOS on protected refs only).
+
+From source: `npm ci && npm run tauri build`.
+</details>
 
 ## Why IYAGI
 

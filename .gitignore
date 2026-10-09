@@ -54,3 +54,4 @@ Thumbs.db
 
 # Playwright failure-run output (baselines under __screenshots__ stay tracked)
 **/__results__/
+.vite/

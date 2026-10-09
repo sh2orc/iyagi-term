@@ -47,17 +47,36 @@ Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택
 
 ## 다운로드
 
-- **macOS (Apple Silicon)**: [IYAGI.Term_0.1.0_aarch64.dmg](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) (11 MB)
-  — SHA-256 `a3e179c71018396b95101fce99bc3f076aa443a8789e74f62c7ac8368d406afe`
-- 미공증(ad-hoc 서명) 빌드입니다. 처음 실행할 때는 우클릭 → **열기**(최신 macOS는 시스템 설정 ›
-  개인정보 보호 및 보안 → 그래도 열기)로 이 앱에 대한 승인을 남기세요. `xattr -d
-  com.apple.quarantine`은 승인을 기록하는 대신 Gatekeeper 검사 자체를 지워버리므로 쓰지 않는
-  것이 안전합니다. 위 SHA-256은 DMG와 같은 저장소에 게시되어 있어 전송 중 손상은 감지하지만
-  저장소 자체가 침해된 경우는 검증하지 못합니다(릴리스 무결성 로드맵:
-  [releases/README.md](releases/README.md)).
-- CI(`.github/workflows/ci.yml`)는 Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음, 보호
-  브랜치에서만)를 만듭니다.
-  소스에서 직접 빌드는 `npm ci && npm run tauri build`.
+<p align="center">
+  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg">
+    <img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="IYAGI Terminal macOS(Apple Silicon) 다운로드">
+  </a>
+</p>
+
+| 플랫폼 | 파일 | 크기 | SHA-256 |
+|---|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 15 MB | `8c9d5c37a732dd8d58ed1bb751a27fa7f9e81a4357d2f7bfbd4ad39e44e94f45` |
+
+<details>
+<summary>macOS 첫 실행 안내 (ad-hoc 서명, 미공증)</summary>
+
+처음 실행할 때는 우클릭 → **열기**(최신 macOS는 시스템 설정 › 개인정보 보호 및 보안 → 그래도 열기)로
+이 앱에 대한 승인을 남기세요. `xattr -d com.apple.quarantine`은 승인을 기록하는 대신 Gatekeeper
+검사 자체를 지워버리므로 쓰지 않는 것이 안전합니다.
+
+위 SHA-256은 DMG와 같은 저장소에 게시되어 있어 전송 중 손상은 감지하지만 저장소 자체가 침해된
+경우는 검증하지 못합니다 — 릴리스 무결성 로드맵은 [releases/README.md](releases/README.md)를
+참고하세요.
+</details>
+
+<details>
+<summary>다른 플랫폼과 소스 빌드</summary>
+
+CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Windows/macOS 릴리스
+바이너리(설치 파일 없음, 보호 브랜치에서만)를 만듭니다.
+
+소스에서 직접 빌드: `npm ci && npm run tauri build`.
+</details>
 
 ## 왜 IYAGI인가
 

@@ -8,7 +8,7 @@
 
 English | **[한국어](README_KR.md)**
 
-![IYAGI](iyagi.png)
+<img src="iyagi.png" alt="IYAGI" width="400">
 
 ## The name
 

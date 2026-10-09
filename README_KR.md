@@ -8,7 +8,7 @@
 
 한국어 | **[English](README.md)**
 
-![IYAGI](iyagi.png)
+<img src="iyagi.png" alt="IYAGI" width="400">
 
 ## 이름의 의미
 

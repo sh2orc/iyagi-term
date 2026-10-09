@@ -442,7 +442,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       const tab = s.tabs.find((t) => t.id === tabId);
       if (!tab) return s;
       const tabs = s.tabs.filter((t) => t.id !== tabId);
-      const activeTabId = s.activeTabId === tabId ? (tabs[0]?.id ?? null) : s.activeTabId;
+      // 보고 있던 탭을 닫으면 이웃 탭으로 간다(오른쪽, 마지막이었으면 왼쪽) — 첫 탭으로
+      // 튀면 탭이 많을 때 어디서 무엇이 닫혔는지 놓친다(정상 종료로 저절로 닫힐 때도 같다).
+      const closedIndex = s.tabs.findIndex((t) => t.id === tabId);
+      const activeTabId = s.activeTabId === tabId
+        ? (tabs[Math.min(closedIndex, tabs.length - 1)]?.id ?? null)
+        : s.activeTabId;
       if (tab.kind !== "terminal") {
         // mission 탭 닫기 = 로컬 숨김(05 §8). 실행은 daemon에 그대로 있고
         // agent-view는 관찰 뷰일 뿐이므로 어느 쪽도 취소 요청을 만들지 않는다.

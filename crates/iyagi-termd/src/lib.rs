@@ -333,14 +333,16 @@ impl Daemon {
         // 사용자가 손댈 수 없는 background 프로세스가 그대로 남는다.
         restore_yielded_on_shutdown(&state);
 
+        // Give in-flight terminal writes + events a moment to land.
         if state
             .stop_workloads_on_shutdown
             .load(std::sync::atomic::Ordering::Acquire)
         {
             orchestrator::stop_all_workloads(&state);
+            lifecycle::wait_for_terminal(&state, std::time::Duration::from_secs(3));
+        } else {
+            lifecycle::wait_for_winding_down(&state, std::time::Duration::from_secs(3));
         }
-        // Give in-flight terminal writes + events a moment to land.
-        lifecycle::wait_for_terminal(&state, std::time::Duration::from_secs(3));
         stop_session_pumps(&state);
         eprintln!("iyagi-termd: exiting");
         if ipc_failed.load(std::sync::atomic::Ordering::Acquire) {

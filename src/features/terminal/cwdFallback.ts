@@ -19,6 +19,15 @@ interface SplitPath {
 function split(path: string, platform: Platform): SplitPath | null {
   if (platform === "windows") {
     const p = path.replace(/\//g, "\\");
+    // 확장 길이·장치 경로(`\\?\C:\…`, `\\?\UNC\server\share\…` — Rust canonicalize가 내는
+    // 형태)는 접두를 그대로 둔 채 같은 규칙으로 나눈다. 아래 UNC 규칙에 맡기면 "?"를 서버로
+    // 읽어 뿌리가 `\\?\C:`(끝 구분자 없음 — 쓸 수 없는 경로)가 된다.
+    const extended = /^\\\\([?.])\\(?:UNC\\([^\\]+)\\([^\\]+)|([A-Za-z]:)(?=\\|$))/i.exec(p);
+    if (extended) {
+      const [matched, kind, server, share, letter] = extended;
+      const root = letter ? `\\\\${kind}\\${letter}\\` : `\\\\${kind}\\UNC\\${server}\\${share}`;
+      return { root, parts: p.slice(matched.length).split("\\").filter(Boolean) };
+    }
     const drive = /^([A-Za-z]:)\\/.exec(p);
     if (drive) return { root: `${drive[1]}\\`, parts: p.slice(3).split("\\").filter(Boolean) };
     const unc = /^\\\\([^\\]+)\\([^\\]+)/.exec(p);

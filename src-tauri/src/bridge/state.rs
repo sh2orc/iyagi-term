@@ -44,6 +44,16 @@ type SessionChannels = std::sync::Mutex<HashMap<String, HashMap<String, EventCha
 /// this is the backstop for panes left open on an exited session.
 const EXITED_SESSION_GRACE: Duration = Duration::from_secs(10);
 
+/// Failed connect attempts (runtime files present, nobody answering) before
+/// the first stale-endpoint respawn, and between later ones. A retiring
+/// daemon (`daemon.shutdown` on restart) closes its listener first but keeps
+/// the singleton lock while it drains — seconds, not polls — so a respawn
+/// inside that window exits at once as a redundant instance. Retrying at
+/// this pace until the deadline lets the spawn that comes after the old
+/// daemon is gone take over (singleton-safe, 02 §1-2).
+const RESPAWN_FIRST_AFTER_FAILURES: usize = 5;
+const RESPAWN_EVERY_FAILURES: usize = 10;
+
 /// Daemon data root as resolved at `connect`, shared between `BridgeInner`
 /// (writer) and [`BridgeState::effective_data_dir`] (reader). Lives outside
 /// the async mutex like `revision`: a Settings read of the Z.ai key must not
@@ -261,7 +271,7 @@ impl BridgeInner {
         let deadline = Instant::now() + self.ready_timeout;
         let mut spawn_attempted = false;
         let mut connect_failures = 0usize;
-        let mut respawn_budget = 1usize;
+        let mut next_respawn_at = RESPAWN_FIRST_AFTER_FAILURES;
 
         loop {
             let files_present = daemon_manager::endpoint_file(&data_dir).is_file()
@@ -311,28 +321,24 @@ impl BridgeInner {
                                     self.last_daemon_id = Some(hello.daemon_id.clone());
                                 }
                                 // Build/version handshake (never fatal): record
-                                // whether this daemon predates the app build so
-                                // the UI can offer a restart.
-                                // 두 기준과 비교한다: 이 앱의 빌드 id, 그리고 디스크의
-                                // (다음에 띄울) 데몬 바이너리가 보고하는 빌드 id. 후자는
-                                // 데몬만 다시 빌드하고 옛 프로세스가 계속 도는 개발 함정을
-                                // 잡는다 — 앱 id와 같아도 바이너리가 더 새로우면 오래됐다.
-                                let app_outdated = super::connection::daemon_is_outdated(
+                                // whether a restart would bring up a newer daemon
+                                // so the UI can offer one.
+                                // 기준은 디스크의(다음에 띄울) 데몬 바이너리가 보고하는 빌드
+                                // id다 — 데몬만 다시 빌드하고 옛 프로세스가 계속 도는 개발
+                                // 함정을 잡고, 이미 그 바이너리가 돌고 있으면(앱 id만 다름)
+                                // 재시작해도 같은 데몬이라 권하지 않는다. 바이너리의 id를
+                                // 모르면 이 앱의 빌드 id와 비교한다.
+                                let on_disk = match (self.locate)() {
+                                    Some(binary) => {
+                                        daemon_manager::binary_build_version(&binary).await
+                                    }
+                                    None => None,
+                                };
+                                self.daemon_outdated = super::connection::restart_would_update(
                                     &super::connection::app_build_version(),
+                                    on_disk.as_deref(),
                                     &hello.daemon_version,
                                 );
-                                let binary_outdated = match (self.locate)() {
-                                    Some(binary) => daemon_manager::binary_build_version(&binary)
-                                        .await
-                                        .is_some_and(|on_disk| {
-                                            super::connection::daemon_is_outdated(
-                                                &on_disk,
-                                                &hello.daemon_version,
-                                            )
-                                        }),
-                                    None => false,
-                                };
-                                self.daemon_outdated = app_outdated || binary_outdated;
                                 spawn_control_forwarder(
                                     event_rx,
                                     Arc::clone(&self.event_channels),
@@ -357,9 +363,10 @@ impl BridgeInner {
                     }
                 }
                 // Stale-endpoint recovery: after repeated failures with files
-                // present, respawn once (singleton-safe, 02 §1-2).
-                if connect_failures >= 5 && respawn_budget > 0 {
-                    respawn_budget -= 1;
+                // present, respawn — and keep respawning at a slower pace while
+                // the deadline allows (see RESPAWN_EVERY_FAILURES).
+                if connect_failures >= next_respawn_at {
+                    next_respawn_at = connect_failures + RESPAWN_EVERY_FAILURES;
                     let _ = daemon_manager::spawn_daemon_with(
                         &*self.locate,
                         self.spawner.as_ref(),
@@ -1417,5 +1424,53 @@ mod tests {
             inner.resolved_data_dir().lock().unwrap().as_deref(),
             Some(dir.path())
         );
+    }
+
+    #[tokio::test]
+    async fn connect_keeps_respawning_while_a_retiring_daemon_holds_the_lock() {
+        // Restart: the retired daemon left its runtime files behind and still
+        // holds the singleton lock for a while, so the first respawn exits
+        // as a redundant instance. A later respawn must still come up.
+        struct HeldThenReadySpawner {
+            calls: std::sync::atomic::AtomicUsize,
+            ready: FakeDaemonSpawner,
+        }
+        impl DaemonSpawner for HeldThenReadySpawner {
+            fn spawn_detached(
+                &self,
+                binary: &std::path::Path,
+                data_dir: &std::path::Path,
+            ) -> std::io::Result<()> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Ok(()); // lock held by the retiring daemon
+                }
+                self.ready.spawn_detached(binary, data_dir)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
+        std::fs::write(endpoint_file(dir.path()), "fake://retired").unwrap();
+        std::fs::write(token_file(dir.path()), "retired-token").unwrap();
+        let transport = Arc::new(FakeTransport::default());
+        let spawner = Arc::new(HeldThenReadySpawner {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            ready: FakeDaemonSpawner {
+                transport: Arc::clone(&transport),
+                acks: Arc::new(AsyncMutex::new(Vec::new())),
+            },
+        });
+        let mut inner = BridgeInner::new(
+            transport,
+            Arc::clone(&spawner) as Arc<dyn DaemonSpawner>,
+            Arc::new(|| Some(PathBuf::from("fake-iyagi-termd"))),
+            Arc::new(std::sync::Mutex::new(Vec::new())),
+            Arc::new(std::sync::Mutex::new(HashMap::new())),
+            Arc::new(AtomicU64::new(0)),
+        )
+        .with_ready_timeout(Duration::from_secs(5));
+        let data_dir = dir.path().to_string_lossy().to_string();
+        let hello = inner.connect(Some(&data_dir)).await.unwrap();
+        assert_eq!(hello.data_token, DATA_TOKEN);
+        assert_eq!(spawner.calls.load(Ordering::SeqCst), 2);
     }
 }

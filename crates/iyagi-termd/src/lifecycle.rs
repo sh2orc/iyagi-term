@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use term_contracts::ids::WorkloadId;
+use term_contracts::state::WorkloadState;
 use term_platform::identity;
 
 use crate::state::DaemonState;
@@ -68,6 +69,7 @@ pub fn assess_reconciliation(
             title: format!("{} (interrupted)", reconciled.workload_id),
             cwd: String::new(),
             program: String::new(),
+            requested_policy: policy.clone(),
             policy,
             priority: record
                 .as_ref()
@@ -172,6 +174,25 @@ pub fn run_idle_watcher(state: Arc<DaemonState>) {
 
 /// Wait until every registered workload reaches a terminal state (bounded).
 pub fn wait_for_terminal(state: &Arc<DaemonState>, timeout: Duration) {
+    wait_while_any(state, timeout, |s| !s.is_terminal());
+}
+
+/// Shutdown that keeps workloads (restart, OS signal): only workloads already
+/// on their way out (STOPPING/DRAINING) get a moment to finish. A running
+/// shell never ends by itself here, so waiting for it would just hold the
+/// singleton lock for the whole timeout whenever a terminal is open — and the
+/// app's restart, waiting for that lock, would be late by as much.
+pub fn wait_for_winding_down(state: &Arc<DaemonState>, timeout: Duration) {
+    wait_while_any(state, timeout, |s| {
+        matches!(s, WorkloadState::Stopping | WorkloadState::Draining)
+    });
+}
+
+fn wait_while_any(
+    state: &Arc<DaemonState>,
+    timeout: Duration,
+    pending: impl Fn(WorkloadState) -> bool,
+) {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         let active_ids: Vec<WorkloadId> = state
@@ -181,7 +202,7 @@ pub fn wait_for_terminal(state: &Arc<DaemonState>, timeout: Duration) {
             .values()
             .filter_map(|e| {
                 let guard = e.lock().unwrap_or_else(|p| p.into_inner());
-                (!guard.state.is_terminal()).then_some(guard.workload_id.clone())
+                pending(guard.state).then_some(guard.workload_id.clone())
             })
             .collect();
         if active_ids.is_empty() {

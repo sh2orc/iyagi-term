@@ -3,6 +3,7 @@ import type { AgentSessionRecord } from "../../generated/AgentSessionRecord";
 import type { AttachParams } from "../../generated/AttachParams";
 import type { DaemonClient, DaemonEvent, DaemonEventListener } from "../daemon/client";
 import { MockDaemonClient } from "../daemon/mockClient";
+import { t } from "../../i18n";
 import { useWorkbenchStore } from "../../store/workbenchStore";
 import { SessionController } from "./sessionController";
 import { TerminalRegistry, type RegistryDom, type TerminalLike } from "./registry";
@@ -294,5 +295,120 @@ describe("SessionController transport recovery", () => {
       expect(reset).not.toHaveBeenCalled();
     }
     controller.dispose();
+  });
+
+  /**
+   * 일반 셸 창들(에이전트 기록 없음)이 붙은 채 연결이 끊기는 harness. `restarted`이면 재접속한
+   * 데몬이 그 작업들을 DAEMON_RESTART로 끝났다고 알리고, attach는 끝난 세션의 저널을 재생한다.
+   */
+  async function shellRestartHarness(options: { sessions: string[]; restarted: boolean; reconnectFails?: Error }) {
+    vi.useFakeTimers();
+    const baseSnapshot = await new MockDaemonClient({ resourceIntervalMs: 0 }).systemSnapshot();
+    const listeners = new Set<DaemonEventListener>();
+    let generation = 0;
+    let healthy = true;
+    const reconnectTransport = vi.fn(async () => {
+      if (options.reconnectFails) throw options.reconnectFails;
+      healthy = true;
+      generation += 1;
+    });
+    const ended = () => options.restarted && generation > 0;
+    let attachCount = 0;
+    const client = {
+      events: {
+        subscribe(listener: DaemonEventListener) {
+          listeners.add(listener);
+          return { dispose: () => listeners.delete(listener) };
+        },
+      },
+      systemSnapshot: async () => ({
+        ...baseSnapshot,
+        revision: generation ? 1 : 100,
+        workloads: options.sessions.map((sessionId) => ({
+          workload_id: `w-${sessionId}`, session_id: sessionId,
+          state: ended() ? "INTERRUPTED" : "RUNNING", last_error_code: ended() ? "DAEMON_RESTART" : null,
+          title: "shell", cwd: "/tmp",
+        })),
+      }),
+      interventionList: async () => [],
+      agentSessionList: async () => [],
+      sessionAttach: async (params: AttachParams) => {
+        attachCount += 1;
+        const epoch = `epoch-${attachCount}`;
+        queueMicrotask(() => {
+          for (const listener of listeners) listener({ kind: "session.output", payload: {
+            session_id: params.session_id, epoch, seq: "1", kind: "output", data_b64: "", raw_len: 0,
+          } } as DaemonEvent);
+        });
+        return { epoch, replay_from_seq: "1", last_seq: "1", cols: 80, rows: 24, exited: ended() };
+      },
+      sessionResize: async () => ({ cols: 80, rows: 24 }),
+      sessionAck: () => undefined,
+      transportStatus: async () => ({ controlAlive: healthy, dataAlive: healthy, generation }),
+      reconnectTransport,
+    } as unknown as DaemonClient;
+    const registry = new TerminalRegistry({
+      createTerminal: () => terminalLike(),
+      createDom: () => ({ className: "", parentElement: null, remove: () => undefined } satisfies RegistryDom),
+    });
+    const leaves = options.sessions.map((sessionId) => `leaf-${sessionId}`);
+    useWorkbenchStore.setState({
+      tabs: options.sessions.map((sessionId) => ({
+        kind: "terminal" as const, id: `tab-${sessionId}`, title: "tab",
+        root: { kind: "leaf" as const, id: `leaf-${sessionId}`, view_id: `view-${sessionId}`, session_id: sessionId },
+      })),
+      activeTabId: `tab-${options.sessions[0]}`,
+      focusedLeafId: leaves[0],
+      panes: Object.fromEntries(options.sessions.map((sessionId) => [`leaf-${sessionId}`, {
+        leafId: `leaf-${sessionId}`, viewId: `view-${sessionId}`, sessionId, workloadId: `w-${sessionId}`,
+        title: "shell", cwd: "/tmp", phase: "replaying" as const, error: null, usage: null, flowBlocked: false,
+      }])),
+      revision: 0,
+    });
+    const controller = new SessionController({ client, registry, platform: "darwin" });
+    controller.start();
+    await flush(4);
+    /** 와치독이 건전한 기준을 세운 뒤 연결이 끊긴 것을 보게 한다. */
+    const dropTransport = async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      healthy = false;
+      await vi.advanceTimersByTimeAsync(2000);
+      await flush(32);
+    };
+    return { controller, dropTransport, reconnectTransport };
+  }
+
+  it("데몬 재시작으로 끝난 일반 셸 창은 저널을 다시 재생한 뒤에도 재시작 사유를 남긴다", async () => {
+    const { controller, dropTransport } = await shellRestartHarness({ sessions: ["s-1"], restarted: true });
+    try {
+      expect(useWorkbenchStore.getState().panes["leaf-s-1"].phase).toBe("live");
+      await dropTransport();
+      const pane = useWorkbenchStore.getState().panes["leaf-s-1"];
+      expect(pane.phase).toBe("exited");
+      expect(pane.error).toBe(t("terminal.session.daemonRestarted"));
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it("재접속이 실패해도 이미 끝난 창의 종료 오버레이는 실패로 덮지 않는다", async () => {
+    const { controller, dropTransport, reconnectTransport } = await shellRestartHarness({
+      sessions: ["s-1", "s-2"],
+      restarted: false,
+      reconnectFails: new Error("daemon endpoint was not reachable within the timeout"),
+    });
+    try {
+      controller.handleEvent({ kind: "session.exited", payload: {
+        session_id: "s-2", exit_code: 137, reason: "process_exit", descendants_remaining: false,
+      } } as DaemonEvent);
+      await flush();
+      expect(useWorkbenchStore.getState().panes["leaf-s-2"].phase).toBe("exited");
+      await dropTransport();
+      expect(reconnectTransport).toHaveBeenCalled();
+      expect(useWorkbenchStore.getState().panes["leaf-s-1"].phase).toBe("failed");
+      expect(useWorkbenchStore.getState().panes["leaf-s-2"].phase).toBe("exited");
+    } finally {
+      controller.dispose();
+    }
   });
 });

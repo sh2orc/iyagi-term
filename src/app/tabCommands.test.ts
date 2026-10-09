@@ -67,3 +67,32 @@ describe("requestCloseTab", () => {
     expect(useWorkbenchStore.getState().toast).toBeNull();
   });
 });
+
+describe("closeTab: 보고 있던 탭을 닫은 뒤의 활성 탭", () => {
+  const terminalTabs = (...ids: string[]) =>
+    ids.map((id) => ({ kind: "terminal" as const, id, title: id, root: null }));
+
+  it("오른쪽 이웃으로 간다 — 첫 탭으로 튀지 않는다", () => {
+    useWorkbenchStore.setState({ tabs: terminalTabs("a", "b", "c", "d", "e"), activeTabId: "d" });
+    useWorkbenchStore.getState().closeTab("d");
+    expect(useWorkbenchStore.getState().activeTabId).toBe("e");
+  });
+
+  it("마지막 탭이었으면 왼쪽 이웃으로 간다", () => {
+    useWorkbenchStore.setState({ tabs: terminalTabs("a", "b", "c"), activeTabId: "c" });
+    useWorkbenchStore.getState().closeTab("c");
+    expect(useWorkbenchStore.getState().activeTabId).toBe("b");
+  });
+
+  it("보고 있지 않던 탭을 닫으면 활성 탭은 그대로다", () => {
+    useWorkbenchStore.setState({ tabs: terminalTabs("a", "b", "c"), activeTabId: "c" });
+    useWorkbenchStore.getState().closeTab("a");
+    expect(useWorkbenchStore.getState().activeTabId).toBe("c");
+  });
+
+  it("하나뿐인 탭을 닫으면 활성 탭이 없다", () => {
+    useWorkbenchStore.setState({ tabs: terminalTabs("a"), activeTabId: "a" });
+    useWorkbenchStore.getState().closeTab("a");
+    expect(useWorkbenchStore.getState().activeTabId).toBeNull();
+  });
+});

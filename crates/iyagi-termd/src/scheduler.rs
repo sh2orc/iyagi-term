@@ -38,13 +38,17 @@ fn tick(state: &Arc<DaemonState>) {
             // Unknown entry: drop it from the queue as unadmissible forever.
             return QueueReason::ResourceUnschedulable;
         };
-        let (policy, mode) = {
+        let (requested, mode) = {
             let guard = entry.lock().unwrap_or_else(|p| p.into_inner());
-            (guard.policy.clone(), guard.mode)
+            (guard.requested_policy.clone(), guard.mode)
         };
         if mode != LaunchMode::Managed {
             return QueueReason::ResourceUnschedulable;
         }
+        // 원래 요청을 지금 호스트에 맞춰 다시 줄인다: 받을 수 없을 만큼 큰 요청은 여유가
+        // 생기는 대로 그만큼으로 시작하고, 실행 때 호스트 크기를 몰라 줄이지 못한 요청도
+        // 여기서 맞춘다(그대로 두면 매 틱 RESOURCE_UNSCHEDULABLE로 대기열에 남는다).
+        let policy = orchestrator::fit_policy_to_host(state, &host, &requested);
         let request = AdmissionRequest {
             reservation_bytes: policy.reservation_bytes.get(),
             cpu_slots: policy.cpu_slots,
@@ -53,7 +57,17 @@ fn tick(state: &Arc<DaemonState>) {
             .ledger
             .try_admit_and_reserve(&host, candidate.workload_id.clone(), request)
         {
-            Ok(_) => QueueReason::Admit,
+            Ok(_) => {
+                // 예약한 값이 이 실행의 유효 정책이다(스냅샷과 시작 경로가 읽는다).
+                let mut guard = entry.lock().unwrap_or_else(|p| p.into_inner());
+                if guard.policy != policy {
+                    if let Some(descriptor) = guard.descriptor.as_mut() {
+                        descriptor.policy = policy.clone();
+                    }
+                    guard.policy = policy;
+                }
+                QueueReason::Admit
+            }
             Err(term_core::CoreError::AdmissionDenied { reason }) => reason,
             Err(_) => QueueReason::WaitTelemetry,
         }

@@ -247,6 +247,13 @@ pub struct WorkloadEntry {
     /// `workload.update_policy` (storage has no policy-update API — see
     /// done/I04 deviations: the runtime copy is authoritative).
     pub policy: LaunchPolicy,
+    /// The policy as requested (launch or `workload.update_policy`). A
+    /// managed request larger than this host can admit is fitted into
+    /// `policy` (`orchestrator::fit_policy_to_host`); the scheduler re-fits
+    /// from this on every pass, so a queued run starts with what the host can
+    /// give once memory frees up instead of waiting for headroom a fixed
+    /// launch-time value may never see.
+    pub requested_policy: LaunchPolicy,
     /// Priority at launch; updated by `workload.reprioritize`.
     pub priority: Priority,
     /// Full launch descriptor for QUEUED managed workloads (queue input;

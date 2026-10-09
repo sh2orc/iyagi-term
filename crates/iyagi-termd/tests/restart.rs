@@ -255,3 +255,37 @@ fn check_restart(agent: &str) {
         "no additional sessions after restart"
     );
 }
+
+/// 작업을 남기는 종료(앱의 데몬 재시작)는 실행 중인 셸이 끝나기를 기다리지 않는다 —
+/// 기다리면 터미널이 열려 있을 때마다 몇 초씩 singleton 잠금을 쥐어, 새 데몬을 띄우는
+/// 앱의 재시작이 그만큼 늦는다.
+#[test]
+fn shutdown_keeping_workloads_does_not_wait_for_running_shells() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut daemon =
+        DaemonProc::spawn_on(dir.path().to_path_buf(), "keep-workloads-shutdown", None);
+    let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    let launch = control
+        .request(
+            "workload.launch",
+            common::launch_request("shell", &["echo"], "1048576"),
+        )
+        .unwrap();
+    common::wait_workload_state(
+        &mut control,
+        &launch["workload_id"],
+        &["RUNNING"],
+        Duration::from_secs(10),
+    );
+
+    let started = Instant::now();
+    let _ = control.request("daemon.shutdown", json!({ "stop_workloads": false }));
+    let status =
+        common::wait_exit(&mut daemon.child, Duration::from_secs(10)).expect("daemon exits");
+    assert!(status.success(), "clean exit: {status:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "shutdown waited {:?} for a shell that never ends by itself",
+        started.elapsed()
+    );
+}

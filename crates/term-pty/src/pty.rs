@@ -47,6 +47,47 @@ pub enum PtyError {
     Reader(String),
     #[error("pty I/O failed: {0}")]
     Io(String),
+    /// The first child could not be created because the host ran out of
+    /// process slots, file descriptors or memory (EAGAIN/EMFILE/ENFILE/ENOMEM)
+    /// — not something another program would avoid.
+    #[error("spawning the first pty child failed — host resources exhausted: {0}")]
+    SpawnExhausted(String),
+}
+
+impl PtyError {
+    /// Whether this spawn failure is the host's, not the program's: no pty
+    /// device could be opened, or the OS refused the new process for lack of
+    /// resources. Any other program would fail the same way, so a caller
+    /// should not retry with a different shell.
+    pub fn is_host_exhausted(&self) -> bool {
+        matches!(self, PtyError::Open(_) | PtyError::SpawnExhausted(_))
+    }
+}
+
+/// Classify a failed `spawn_command`: an OS resource errno means the host is
+/// exhausted (see [`PtyError::is_host_exhausted`]); anything else — missing or
+/// non-executable program, bad cwd — belongs to this launch.
+fn spawn_error(error: anyhow::Error) -> PtyError {
+    let errno = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(std::io::Error::raw_os_error);
+    #[cfg(unix)]
+    let exhausted = errno.is_some_and(|code| {
+        matches!(
+            code,
+            libc::EAGAIN | libc::EMFILE | libc::ENFILE | libc::ENOMEM
+        )
+    });
+    #[cfg(not(unix))]
+    let exhausted = {
+        let _ = errno;
+        false
+    };
+    if exhausted {
+        PtyError::SpawnExhausted(error.to_string())
+    } else {
+        PtyError::Spawn(error.to_string())
+    }
 }
 
 /// Locale variables that decide the child's charset, in POSIX precedence
@@ -389,10 +430,7 @@ impl PtyHandle {
         if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
             cmd.cwd(dir);
         }
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
+        let child = pair.slave.spawn_command(cmd).map_err(spawn_error)?;
         // The first child now owns the slave side; keeping our slave open
         // would prevent EOF semantics, so drop it immediately after spawn.
         drop(pair.slave);
@@ -712,6 +750,26 @@ impl Read for ConPtyQueryResponder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_failures_from_exhausted_os_resources_are_the_hosts() {
+        for errno in [libc::EAGAIN, libc::EMFILE, libc::ENFILE, libc::ENOMEM] {
+            let error = spawn_error(std::io::Error::from_raw_os_error(errno).into());
+            assert!(error.is_host_exhausted(), "errno {errno}: {error}");
+        }
+        // The program's own problems keep the shell fallback possible.
+        for error in [
+            spawn_error(std::io::Error::from_raw_os_error(libc::ENOENT).into()),
+            spawn_error(std::io::Error::from_raw_os_error(libc::EACCES).into()),
+            spawn_error(anyhow::anyhow!(
+                "Unable to spawn fish because it doesn't exist"
+            )),
+        ] {
+            assert!(!error.is_host_exhausted(), "{error}");
+        }
+        assert!(PtyError::Open("out of ptys".into()).is_host_exhausted());
+    }
 
     const DEFAULT: Option<&str> = Some("ko_KR.UTF-8");
 

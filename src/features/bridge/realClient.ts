@@ -256,9 +256,16 @@ export class RealDaemonClient implements DaemonClient {
    * and a DAEMON_UNAVAILABLE retry there would reconnect and re-send shutdown
    * to the freshly spawned daemon. A dropped request is fine — reconnect
    * brings the new daemon up either way.
+   *
+   * A daemon that is already current is left alone: when an earlier restart
+   * timed out but the fresh daemon came up afterwards, a second click would
+   * otherwise retire that fresh daemon and every terminal with it. An unknown
+   * status keeps the explicit request.
    */
   async restartDaemon(): Promise<void> {
     await this.ensureConnected();
+    const outdated = await this.transportStatus().then((status) => status.daemonOutdated, () => true);
+    if (!outdated) return;
     try {
       await this.ipc.invoke("bridge_rpc", {
         id: this.uuid(),

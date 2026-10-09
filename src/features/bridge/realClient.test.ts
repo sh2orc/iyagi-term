@@ -88,6 +88,15 @@ function stubLifecycle(ipc: FakeIpc): void {
   }));
 }
 
+/** The connected daemon predates this app build (what the restart strip offers to fix). */
+function stubOutdated(ipc: FakeIpc): void {
+  ipc.handle("bridge_connection_status", async () => ({
+    control_alive: true,
+    data_alive: true,
+    daemon_outdated: true,
+  }));
+}
+
 async function flush(times = 8): Promise<void> {
   for (let i = 0; i < times; i++) {
     await Promise.resolve();
@@ -176,6 +185,7 @@ describe("RealDaemonClient lifecycle", () => {
   it("restartDaemon retires the daemon without killing workloads, then reconnects", async () => {
     const ipc = new FakeIpc();
     stubLifecycle(ipc);
+    stubOutdated(ipc);
     ipc.handle("bridge_rpc", async () => ({ shutting_down: true }));
     const client = new RealDaemonClient(ipc);
     // Establish the control connection first (restartDaemon ensures it).
@@ -197,6 +207,7 @@ describe("RealDaemonClient lifecycle", () => {
   it("restartDaemon reconnects even when the shutdown request is dropped", async () => {
     const ipc = new FakeIpc();
     stubLifecycle(ipc);
+    stubOutdated(ipc);
     // The daemon drops the control connection as it retires — the request
     // rejects, but the reconnect must still bring a fresh daemon up.
     ipc.handle("bridge_rpc", async () => {
@@ -208,6 +219,23 @@ describe("RealDaemonClient lifecycle", () => {
 
     await expect(client.restartDaemon()).resolves.toBeUndefined();
     expect(ipc.commandNames()).toContain("bridge_disconnect");
+  });
+
+  it("restartDaemon leaves a daemon that is already current running", async () => {
+    // An earlier restart timed out but the fresh daemon came up meanwhile: a
+    // second click must not retire it (and every terminal with it).
+    const ipc = new FakeIpc();
+    stubLifecycle(ipc);
+    ipc.handle("bridge_rpc", async () => ({ shutting_down: true }));
+    const client = new RealDaemonClient(ipc);
+    client.events.subscribe(() => undefined);
+    await flush();
+    const before = ipc.commandNames().length;
+
+    await client.restartDaemon();
+
+    expect(ipc.bridgeRpcArgs().some((call) => call.method === "daemon.shutdown")).toBe(false);
+    expect(ipc.commandNames().slice(before)).not.toContain("bridge_disconnect");
   });
 
   it("a throwing listener does not starve the others or later events", async () => {

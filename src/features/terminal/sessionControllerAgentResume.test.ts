@@ -465,6 +465,88 @@ describe("resumeAgentSession: 프로그램·인자·cwd", () => {
     }
   });
 
+  /** 재시도 시점의 최신 스냅샷: 이 pane의 작업은 데몬 재시작으로 끝났다(추가 작업은 덧붙인다). */
+  async function interruptedSnapshot(probe: LaunchProbe, ...extra: object[]): Promise<void> {
+    const base = await new MockDaemonClient({ resourceIntervalMs: 0 }).systemSnapshot();
+    (probe.client as { systemSnapshot: unknown }).systemSnapshot = async () => ({
+      ...base,
+      workloads: [{
+        workload_id: "w-old", session_id: "s-old", state: "INTERRUPTED", last_error_code: "DAEMON_RESTART",
+        title: "claude", cwd: "/work/iyagi",
+      }, ...extra],
+    });
+  }
+
+  it("재접속 실패로 살아 있다고 남은 세션이어도 실패 pane의 재시도는 대화를 곧바로 이어서 연다", async () => {
+    const probe = launchProbe();
+    await interruptedSnapshot(probe);
+    (probe.client as { agentSessionList: unknown }).agentSessionList = async () => [record()];
+    seedWorkspace(savedPane({ phase: "failed", error: "DAEMON_UNAVAILABLE", resume: info() }));
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
+    // 연결 실패(markAttachedPanesFailed)는 liveSessions를 비우지 않는다 — 이 pane이 자기 대화를
+    // "다른 곳에서 실행 중"으로 잡으면 기록 재생으로 빠져 "이어서 열기"를 또 눌러야 했다.
+    (controller as unknown as { liveSessions: Set<string> }).liveSessions.add("s-old");
+    try {
+      controller.retryPane("leaf-1");
+      await new Promise((done) => setTimeout(done, 0));
+      expect(probe.launches).toHaveLength(1);
+      expect(probe.launches[0].argv).toContain("agent-session-0001");
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it("실패 pane의 재시도는 같은 대화가 다른 탭에서 실행 중이어도 그 탭으로 옮겨 가거나 재생 중에 멈추지 않는다", async () => {
+    const probe = launchProbe();
+    await interruptedSnapshot(probe, {
+      workload_id: "w-live", session_id: "s-live", state: "RUNNING", title: "claude", cwd: "/work/iyagi",
+      agent: { agent: "claude", pid: 7, detected_at_ms: 1, session_id: "agent-session-0001" },
+    });
+    (probe.client as { agentSessionList: unknown }).agentSessionList = async () => [record()];
+    useWorkbenchStore.setState({
+      tabs: [
+        { kind: "terminal", id: "tab-1", title: "탭 1", root: makeLeaf("leaf-live", "view-live", "s-live") },
+        { kind: "terminal", id: "tab-2", title: "탭 2", root: makeLeaf("leaf-1", "view-1", "s-old") },
+      ],
+      panes: {
+        "leaf-live": savedPane({ leafId: "leaf-live", viewId: "view-live", sessionId: "s-live", workloadId: "w-live", phase: "live" }),
+        "leaf-1": savedPane({ phase: "failed", error: "DAEMON_UNAVAILABLE" }),
+      },
+      activeTabId: "tab-2",
+      focusedLeafId: "leaf-1",
+    });
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
+    try {
+      controller.retryPane("leaf-1");
+      await new Promise((done) => setTimeout(done, 0));
+      expect(useWorkbenchStore.getState().activeTabId).toBe("tab-2");
+      expect(probe.launches).toHaveLength(0);
+      // 이 pane의 기록을 다시 붙인다(이 시험의 attach는 실패한다) — "재생 중"에 남지 않는다.
+      expect(useWorkbenchStore.getState().panes["leaf-1"].phase).not.toBe("replaying");
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it("실패 pane의 재시도가 대화를 재개하지 못하면(실행 파일 없음) 실패 오버레이로 돌아간다", async () => {
+    const probe = launchProbe();
+    await interruptedSnapshot(probe);
+    (probe.client as { agentSessionList: unknown }).agentSessionList = async () => [record({ program: null })];
+    seedWorkspace(savedPane({ phase: "failed", error: "DAEMON_UNAVAILABLE" }));
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
+    try {
+      controller.retryPane("leaf-1");
+      await new Promise((done) => setTimeout(done, 0));
+      expect(probe.launches).toHaveLength(0);
+      expect(useWorkbenchStore.getState().toast).toBeTruthy();
+      const pane = useWorkbenchStore.getState().panes["leaf-1"];
+      expect(pane.phase).toBe("failed");
+      expect(pane.error).toBe("DAEMON_UNAVAILABLE");
+    } finally {
+      controller.dispose();
+    }
+  });
+
   it("새 셸(재시도)도 재개 기록을 지운다 — 오버레이가 남지 않게", async () => {
     const probe = launchProbe();
     seedWorkspace(
@@ -970,6 +1052,56 @@ describe("비정상 종료 복구 회귀", () => {
       expect(probe.launches).toHaveLength(1);
       expect(probe.launches[0].argv).not.toContain("agent-session-0001");
       expect(useWorkbenchStore.getState().panes["leaf-1"].sessionId).toBe("s-1");
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it("재개 기록이 있는 종료 pane도 같은 대화가 다른 창에서 실행 중이면 다시 시작이 그 자리에서 새 셸을 연다", async () => {
+    // 메뉴의 "다시 시작": 예전에는 아무 일도 하지 않았다(알림·이동·실행 모두 없음).
+    const probe = launchProbe();
+    probe.client.agentSessionList = vi.fn().mockResolvedValue([record()]);
+    seedWorkspace(
+      savedPane({ phase: "exited", resume: info() }),
+      savedPane({ leafId: "leaf-live", viewId: "view-live", sessionId: "s-live", workloadId: "w-live", phase: "live" }),
+    );
+    useWorkbenchStore.setState({
+      workloads: [{
+        workload_id: "w-live", session_id: "s-live", state: "RUNNING", mode: "shell",
+        agent: { agent: "claude", pid: 7, detected_at_ms: 1, session_id: "agent-session-0001" },
+      } as never],
+    });
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
+    try {
+      controller.retryPane("leaf-1");
+      await new Promise(done => setTimeout(done, 0));
+      expect(probe.launches).toHaveLength(1);
+      expect(probe.launches[0].argv).not.toContain("agent-session-0001");
+      const pane = useWorkbenchStore.getState().panes["leaf-1"];
+      expect(pane.sessionId).toBe("s-1");
+      expect(pane.resume ?? null).toBeNull();
+      expect(useWorkbenchStore.getState().focusedLeafId).toBe("leaf-1");
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it("mission 탭을 보던 중에 살아 있는 세션을 연결하면 새 터미널 탭을 하나만 열고 그리로 간다", () => {
+    // 예전에는 addTab이 활성 탭을 바꾸지 않아 스스로를 끝없이 다시 불렀다(빈 탭 수천 개 + 스택 넘침).
+    const probe = launchProbe();
+    useWorkbenchStore.setState({
+      tabs: [{ kind: "mission", id: "m-1", title: "mission", missionId: "mission-1" }],
+      panes: {},
+      activeTabId: "m-1",
+      focusedLeafId: null,
+    });
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
+    try {
+      controller.attachSessionToNewPane("s-live", "w-live");
+      const state = useWorkbenchStore.getState();
+      expect(state.tabs).toHaveLength(2);
+      expect(state.tabs.find(tab => tab.id === state.activeTabId)?.kind).toBe("terminal");
+      expect(Object.values(state.panes).map(pane => pane.sessionId)).toEqual(["s-live"]);
     } finally {
       controller.dispose();
     }

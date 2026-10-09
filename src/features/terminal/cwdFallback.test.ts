@@ -33,4 +33,14 @@ describe("ancestorDirs: 쓸 수 없는 시작 경로 대신 시도할 상위 경
     expect(filesystemRoot("\\\\nas\\share\\x", "windows")).toBe("\\\\nas\\share");
     expect(filesystemRoot("~/x", "linux")).toBeNull();
   });
+
+  it("Windows 확장 길이 경로(canonicalize 형태)는 접두를 둔 채 같은 규칙을 따른다", () => {
+    expect(filesystemRoot("\\\\?\\C:\\Users\\me", "windows")).toBe("\\\\?\\C:\\");
+    expect(filesystemRoot("\\\\?\\C:", "windows")).toBe("\\\\?\\C:\\");
+    expect(ancestorDirs("\\\\?\\C:\\Users\\me\\src\\app", "windows"))
+      .toEqual(["\\\\?\\C:\\Users\\me\\src", "\\\\?\\C:\\Users\\me"]);
+    expect(filesystemRoot("\\\\?\\UNC\\nas\\share\\team", "windows")).toBe("\\\\?\\UNC\\nas\\share");
+    expect(ancestorDirs("\\\\?\\UNC\\nas\\share\\team\\proj\\x", "windows"))
+      .toEqual(["\\\\?\\UNC\\nas\\share\\team\\proj"]);
+  });
 });

@@ -186,3 +186,46 @@ fn queue_wait_reasons_surface_in_events() {
     }
     assert!(saw_reason, "scheduler must publish WAIT_CONCURRENCY");
 }
+
+/// 대기 중인 실행의 정책 수정도 실행과 같은 규칙이다: 이 호스트가 받을 수 없는 크기는
+/// RESOURCE_UNSCHEDULABLE로 거절하지 않고 맞춰 받으며, 응답은 유효 정책이다.
+#[test]
+fn queued_policy_update_is_fitted_like_a_launch() {
+    let daemon = DaemonProc::spawn(
+        "queue-fit",
+        Some(json!({"limits": {"managed_concurrency": 1}})),
+    );
+    let (mut client, _) = Client::control(&daemon.endpoint, &daemon.token);
+    let first = client
+        .request("workload.launch", managed_request(vec!["echo".into()]))
+        .expect("first launch");
+    assert_eq!(first["state"], "RUNNING", "got {first}");
+    let second = client
+        .request("workload.launch", managed_request(vec!["echo".into()]))
+        .expect("second launch");
+    assert_eq!(second["state"], "QUEUED", "got {second}");
+
+    let updated = client
+        .request(
+            "workload.update_policy",
+            json!({"workload_id": second["workload_id"], "policy": {
+                "reservation_bytes": "1125899906842624", "cpu_slots": 1024, "enforcement": "observe",
+                "memory_max_bytes": null, "cpu_max_cores": null, "pids_max": null}}),
+        )
+        .expect("fitted instead of RESOURCE_UNSCHEDULABLE");
+    let reserved: u64 = updated["policy"]["reservation_bytes"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(reserved > 0 && reserved < 1125899906842624, "{updated}");
+    let slots = updated["policy"]["cpu_slots"].as_u64().unwrap();
+    assert!((1..1024).contains(&slots), "{updated}");
+
+    for workload in [&second, &first] {
+        let _ = client.request(
+            "workload.cancel",
+            json!({"request_id": common::uuid_v4(), "workload_id": workload["workload_id"], "force": true}),
+        );
+    }
+}

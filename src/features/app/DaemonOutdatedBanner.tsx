@@ -81,6 +81,8 @@ export function useDaemonOutdated(client: DaemonClient): DaemonOutdatedState {
       await refresh();
     } catch {
       if (mounted.current) setFailed(true);
+      // 재시작이 시간 안에 끝나지 않았어도 새 데몬이 곧 올라올 수 있다 — 표시를 바로 다시 맞춘다.
+      void refresh();
     } finally {
       if (mounted.current) setRestarting(false);
     }

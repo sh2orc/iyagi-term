@@ -281,7 +281,7 @@ fn launch_shell(
     crate::claude_provider::zeroize_env(&mut env);
     let pty = Arc::new(spawned.map_err(|e| {
         fail_workload(state, &workload_id, ErrorCode::SpawnFailed, &e.to_string());
-        RpcError::new(ErrorCode::SpawnFailed, "pty spawn failed")
+        pty_spawn_error("pty spawn failed", &e)
     })?);
     // 에이전트 감시 루프가 이 셸의 자손을 훑을 수 있게 루트 pid를 남긴다.
     {
@@ -391,7 +391,7 @@ fn launch_managed(
 
     // 이 호스트가 절대 받을 수 없는 크기는 거절하지 않고 받을 수 있는 최대로
     // 줄여 받는다(`fit_policy_to_host`). 지문·중복 판정은 원래 요청 그대로다.
-    let policy = fit_policy_to_host(state, &request.policy);
+    let policy = fit_policy_to_host(state, &state.admission_host(), &request.policy);
     if policy != request.policy {
         tracing::info!(
             requested_reservation = request.policy.reservation_bytes.get(),
@@ -676,7 +676,7 @@ fn start_managed_admitted(
         )
         .map_err(|e| {
             fail_workload(state, workload_id, ErrorCode::SpawnFailed, &e.to_string());
-            RpcError::new(ErrorCode::SpawnFailed, "helper pty spawn failed")
+            pty_spawn_error("helper pty spawn failed", &e)
         })?,
     );
     let Some(child_pid) = pty.pid().filter(|p| *p > 0) else {
@@ -1128,6 +1128,7 @@ fn register_workload(
         cwd: request.cwd.clone(),
         program: request.program.clone(),
         policy,
+        requested_policy: request.policy.clone(),
         priority: request.priority,
         descriptor,
         queue_reason: None,
@@ -1181,20 +1182,53 @@ fn enqueue_workload(
     state.broadcast_queue_changed();
 }
 
+/// SPAWN_FAILED carrying what the UI needs to decide whether another shell
+/// could work: `spawn_host_exhausted` (no pty device, process slots, file
+/// descriptors or memory — any program fails alike, so it must not retry with
+/// fallback shells) or `spawn_program_failed` (this program could not start).
+fn pty_spawn_error(message: &str, error: &term_pty::pty::PtyError) -> RpcError {
+    let reason_code = if error.is_host_exhausted() {
+        "spawn_host_exhausted"
+    } else {
+        "spawn_program_failed"
+    };
+    RpcError::new(ErrorCode::SpawnFailed, message)
+        .with_details(serde_json::json!({ "reason_code": reason_code }))
+}
+
 /// 이 호스트가 절대 받을 수 없는 관리 실행 요청(예약 > 관리 예산 B,
 /// cpu_slots > 슬롯 수 C)을 받을 수 있는 최대로 줄인 정책. 예약은 승인
 /// 회계일 뿐 강제 상한(`memory_max_bytes`)이 아니어서 줄여도 실행 자체는
 /// 같다 — 설정을 고치라고 거절(RESOURCE_UNSCHEDULABLE)하는 대신 받아들이고,
-/// 줄인 값은 `effective_policy`로 돌려준다. 호스트 전체 크기를 아직 모르면
-/// 예산도 모르므로 바이트는 그대로 둔다.
-fn fit_policy_to_host(state: &DaemonState, policy: &LaunchPolicy) -> LaunchPolicy {
+/// 줄인 값은 `effective_policy`로 돌려준다.
+///
+/// 예약은 B가 아니라 지금의 여유(A - S - P, 승인 검사 (8)과 같은 셈)까지
+/// 줄인다: B로 맞추면 (8)이 A ≥ S + B(기본값으로 메모리의 65%)를 요구해
+/// 보통의 호스트에서는 대기열에서 영영 나오지 못한다. 지금 여유가 없거나 모르면
+/// B로 두고 기다린다 — 스케줄러가 매번 원래 요청에서 다시 맞추므로 여유가
+/// 생기는 대로 그만큼으로 시작한다(`WorkloadEntry::requested_policy`). 호스트
+/// 전체 크기를 아직 모르면 예산도 모르므로 바이트는 그대로 둔다.
+pub(crate) fn fit_policy_to_host(
+    state: &DaemonState,
+    host: &term_core::AdmissionHost,
+    policy: &LaunchPolicy,
+) -> LaunchPolicy {
     let admission = state.config.admission_config(state.logical_cpus);
-    let total = state.admission_host().total_bytes;
     let mut fitted = policy.clone();
-    if total > 0 {
-        let budget = admission.managed_budget_bytes(total);
+    if host.total_bytes > 0 {
+        let budget = admission.managed_budget_bytes(host.total_bytes);
         if policy.reservation_bytes.get() > budget {
-            if let Ok(bytes) = term_contracts::U64String::new(budget) {
+            let headroom = host.available_bytes.map(|available| {
+                available
+                    .saturating_sub(admission.host_reserve_bytes(host.total_bytes))
+                    .saturating_sub(term_core::pending_reservation(
+                        &state.ledger.active_workloads(),
+                    ))
+            });
+            let bytes = headroom
+                .filter(|headroom| *headroom > 0)
+                .map_or(budget, |headroom| headroom.min(budget));
+            if let Ok(bytes) = term_contracts::U64String::new(bytes) {
                 fitted.reservation_bytes = bytes;
             }
         }

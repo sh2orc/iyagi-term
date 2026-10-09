@@ -261,6 +261,37 @@ fn oversized_managed_request_is_fitted_to_the_host_not_refused() {
 }
 
 #[test]
+fn oversized_managed_request_starts_with_the_headroom_the_host_has() {
+    // 예산을 메모리 전체로 넓힌 호스트(relaxed)에서 1 PiB 요청: 예산 전체로 맞추면 여유
+    // 검사가 "가용 메모리 ≥ 전체 메모리"를 요구해 대기열에서 영영 나오지 못한다. 지금의
+    // 여유만큼으로 맞춰 곧바로 시작해야 한다.
+    let daemon = DaemonProc::spawn(
+        "launch-managed-fit-headroom",
+        Some(common::relaxed_admission(json!({}))),
+    );
+    let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    let outcome = control
+        .request(
+            "workload.launch",
+            launch_request("managed", &["echo"], "1125899906842624"),
+        )
+        .expect("fitted instead of RESOURCE_UNSCHEDULABLE");
+    common::ensure_running(&mut control, &outcome, Duration::from_secs(15));
+    let summary =
+        common::snapshot_workload(&mut control, &outcome["workload_id"]).expect("summary");
+    let reserved: u64 = summary["reservation_bytes"]
+        .as_str()
+        .expect("reservation_bytes")
+        .parse()
+        .unwrap();
+    assert!(reserved < 1125899906842624, "{summary}");
+    let _ = control.request(
+        "workload.cancel",
+        json!({"request_id": common::uuid_v4(), "workload_id": outcome["workload_id"], "force": true}),
+    );
+}
+
+#[test]
 fn managed_launch_right_after_startup_waits_for_telemetry_instead_of_refusing() {
     let daemon = DaemonProc::spawn(
         "launch-managed-early",

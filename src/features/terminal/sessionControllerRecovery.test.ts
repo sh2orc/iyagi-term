@@ -318,6 +318,58 @@ describe("SessionController retryPane", () => {
     }
   });
 
+  it("재생 중 다시 시도한 뒤 늦게 온 옛 attach의 실패가 새로 붙은 view를 실패로 덮지 않는다", async () => {
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let attachCount = 0;
+    const sessionAttach = vi.fn(() => {
+      attachCount += 1;
+      // 첫 시도는 응답이 없다가(막힌 재생) 나중에 시간 초과로 거절된다.
+      if (attachCount === 1) return new Promise((_resolve, reject) => { rejectFirst = reject; });
+      return Promise.resolve({ epoch: "epoch-2", replay_from_seq: "1", last_seq: "0", cols: 80, rows: 24 });
+    });
+    const client = {
+      events: { subscribe: () => ({ dispose: () => undefined }) },
+      sessionAttach,
+      sessionDetach: async () => ({ detached: true as const }),
+      sessionResize: async () => ({ cols: 80, rows: 24 }),
+      sessionAck: () => undefined,
+      sessionUnsubscribe: () => undefined,
+    } as unknown as DaemonClient;
+    const registry = new TerminalRegistry({ createTerminal: () => fakeTerminal(), createDom: () => fakeDom() });
+    useWorkbenchStore.setState({
+      tabs: [{
+        kind: "terminal", id: "tab-1", title: "tab",
+        root: { kind: "leaf", id: "leaf-1", view_id: "view-1", session_id: "session-1" },
+      }],
+      activeTabId: "tab-1",
+      focusedLeafId: "leaf-1",
+      panes: {
+        "leaf-1": {
+          leafId: "leaf-1", viewId: "view-1", sessionId: "session-1", workloadId: "workload-1",
+          title: "shell", cwd: "/tmp", phase: "replaying", error: null, usage: null, flowBlocked: false,
+        },
+      },
+      workloads: [],
+    });
+    const controller = new SessionController({ client, registry, platform: "darwin" });
+    internals(controller).pipelines.set("view-1", { dispose: () => undefined });
+    try {
+      controller.retryPane("leaf-1");
+      await flush();
+      controller.retryPane("leaf-1"); // 첫 재시도의 재생이 막혀 한 번 더 누른다
+      await flush();
+      expect(useWorkbenchStore.getState().panes["leaf-1"].phase).toBe("live");
+
+      rejectFirst!(new Error("session attach timed out"));
+      await flush();
+      const pane = useWorkbenchStore.getState().panes["leaf-1"];
+      expect(pane.phase).toBe("live");
+      expect(pane.error).toBeNull();
+    } finally {
+      controller.dispose();
+    }
+  });
+
   it("버리는 view는 데몬에서도 뗀다 — 재시도마다 세션 view 상한(2)을 먹지 않는다", async () => {
     // 컨트롤 연결이 살아 있는 동안 데몬은 view를 스스로 치우지 않는다. 떼지 않고
     // 새 view로만 붙으면 세 번째 재시도부터 INVALID_STATE("session already has the

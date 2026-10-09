@@ -310,6 +310,8 @@ export class SessionController {
   private transportRecovery: Promise<void> | null = null;
   private disposed = false;
   private liveSessions = new Set<string>();
+  /** 데몬 재시작으로 끝난 세션 — 저널을 다시 재생해 종료로 돌아가도 그 사유를 남긴다. */
+  private readonly daemonRestartedSessions = new Set<string>();
   private detachedPendingLaunches = new Set<string>();
   /** 세션별 마지막으로 저장(또는 복원)한 스냅샷 seq·시각 — 바뀐 화면만 다시 뜬다. */
   private readonly snapshotMarks = new Map<string, { seq: number; at: number }>();
@@ -673,7 +675,8 @@ export class SessionController {
       });
       if (!this.disposed) entry.refit();
     } catch (error) {
-      if (!this.disposed && useWorkbenchStore.getState().panes[leafId]) {
+      // 다시 붙는 사이 수동 재시도가 새 view를 붙였으면 이 실패로 덮지 않는다(attachPane과 같다).
+      if (!this.disposed && useWorkbenchStore.getState().panes[leafId] && this.pipelines.get(viewId) === pipeline) {
         useWorkbenchStore.getState().panePhase(
           leafId,
           "failed",
@@ -960,7 +963,10 @@ export class SessionController {
     const message = errorMessage(error, t("terminal.session.attachFailed"));
     const store = useWorkbenchStore.getState();
     for (const { leafId } of this.sessionIndex.values()) {
-      if (store.panes[leafId]) store.panePhase(leafId, "failed", message);
+      // 끝난 창은 저널을 다시 읽으려고 sessionIndex에 남아 있을 뿐이다 — 연결이 끊겼다고
+      // 종료 오버레이("이어서 열기"·"새 세션으로 다시 시작")를 실패로 덮지 않는다.
+      const pane = store.panes[leafId];
+      if (pane && pane.phase !== "exited") store.panePhase(leafId, "failed", message);
     }
   }
 
@@ -1099,7 +1105,8 @@ export class SessionController {
       });
       if (!this.disposed) entry.refit();
     } catch (error) {
-      if (!this.disposed && useWorkbenchStore.getState().panes[ref.leafId]) {
+      // 다시 붙는 사이 수동 재시도가 새 view를 붙였으면 이 실패로 덮지 않는다(attachPane과 같다).
+      if (!this.disposed && useWorkbenchStore.getState().panes[ref.leafId] && this.pipelines.get(ref.viewId) === pipeline) {
         useWorkbenchStore
           .getState()
           .panePhase(ref.leafId, "failed", errorMessage(error, t("terminal.session.attachFailed")));
@@ -1123,6 +1130,7 @@ export class SessionController {
         const workload = snapshot.workloads.find(w => w.session_id === sessionId);
         if (workload?.last_error_code === "DAEMON_RESTART") {
           this.liveSessions.delete(sessionId);
+          this.daemonRestartedSessions.add(sessionId);
           useWorkbenchStore.getState().paneAgent(ref.leafId, null);
           useWorkbenchStore.getState().panePhase(ref.leafId, "exited", t("terminal.session.daemonRestarted"));
           await this.updateExitedPaneResume(ref.leafId);
@@ -2063,7 +2071,13 @@ export class SessionController {
         notices.push(t(key, { from: cwd, cwd: launched.cwd }));
       }
       if (launched.shell !== shell) {
-        notices.push(t("terminal.session.shellFallback", { shell: shell.label, fallback: launched.shell.label }));
+        // 이름이 같으면("zsh" → "zsh": Homebrew zsh가 사라져 /bin/zsh로) 경로로 보여 준다 —
+        // 같은 이름 두 개로는 무엇이 바뀌었는지 알 수 없다.
+        const sameLabel = launched.shell.label === shell.label;
+        notices.push(t("terminal.session.shellFallback", {
+          shell: sameLabel ? shell.program : shell.label,
+          fallback: sameLabel ? launched.shell.program : launched.shell.label,
+        }));
       }
       if (notices.length > 0) this.toast(notices.join(" · "));
       this.workloadSession.set(outcome.workload_id, outcome.session_id);
@@ -2096,7 +2110,9 @@ export class SessionController {
   /**
    * 셸 후보마다 경로 후보를 차례로 시도한다. 셸을 바꾸는 것은 그 셸이 없거나 뜨지
    * 못했을 때(PROGRAM_NOT_FOUND·SPAWN_FAILED)뿐이고, 다른 실패와 마지막 후보의
-   * 실패는 그대로 던진다. 다시 보내는 요청은 새 request_id를 쓴다(내용이 다르다).
+   * 실패는 그대로 던진다. 호스트 자원이 바닥난 SPAWN_FAILED(`spawn_host_exhausted` —
+   * PTY·프로세스·파일 한도)는 어느 셸이든 같으므로 바꿔 보지 않는다: 시도마다 실패한
+   * 작업만 쌓인다. 다시 보내는 요청은 새 request_id를 쓴다(내용이 다르다).
    */
   private async launchWithFallbacks(
     request: LaunchRequest,
@@ -2112,7 +2128,8 @@ export class SessionController {
         return { ...(await this.launchInAvailableCwd(attempt, fallbackCwds)), shell };
       } catch (error) {
         const shellFailed = error instanceof RpcClientError &&
-          (error.code === "PROGRAM_NOT_FOUND" || error.code === "SPAWN_FAILED");
+          (error.code === "PROGRAM_NOT_FOUND" ||
+            (error.code === "SPAWN_FAILED" && error.details?.reason_code !== "spawn_host_exhausted"));
         if (!shellFailed || index + 1 >= shells.length) throw error;
       }
     }
@@ -2367,8 +2384,13 @@ export class SessionController {
     }
     const tab = store.tabs.find((t) => t.id === store.activeTabId);
     if (!tab || tab.kind !== "terminal") {
+      // 새 터미널 탭을 열고 그리로 간다. addTab은 활성 탭이 없을 때만 활성으로 삼으므로
+      // mission·agent-view 탭을 보던 중이면 직접 옮겨야 한다 — 안 그러면 다시 불린
+      // 이 함수가 또 탭을 만들며 끝없이 되풀이한다.
       const tabId = this.uuid();
       store.addTab(tabId, t("terminal.reattach"));
+      store.setActiveTab(tabId);
+      if (useWorkbenchStore.getState().activeTabId !== tabId) return;
       this.attachSessionToNewPane(sessionId, workloadId);
       return;
     }
@@ -2511,7 +2533,9 @@ export class SessionController {
             this.armHealthyTimer(leafId);
           }
           if (mode === "exited") {
-            useWorkbenchStore.getState().panePhase(leafId, "exited");
+            // 재생은 replaying을 거치며 사유를 지운다 — 데몬 재시작으로 끝난 세션이면 다시 적는다.
+            const reason = this.daemonRestartedSessions.has(sessionId) ? t("terminal.session.daemonRestarted") : null;
+            useWorkbenchStore.getState().panePhase(leafId, "exited", reason);
             this.liveSessions.delete(sessionId);
             this.resumePendingShellRecovery(leafId, sessionId);
             this.cancelHealthyTimer(leafId);
@@ -2581,6 +2605,9 @@ export class SessionController {
       entry.refit();
     } catch (error) {
       if (this.disposed) return;
+      // 그 사이 이 pane이 새 view로 다시 붙었거나(재생 중 수동 재시도) 닫혔으면 지난 시도의
+      // 실패다 — 늦게 온 거절(attach 시간 초과 등)이 지금 붙어 있는 view를 실패로 덮지 않게 한다.
+      if (this.pipelines.get(pane.viewId) !== pipeline) return;
       useWorkbenchStore
         .getState()
         .panePhase(leafId, "failed", errorMessage(error, t("terminal.session.attachFailed")));
@@ -2796,13 +2823,27 @@ export class SessionController {
     // 데몬이 모르는 작업(재시작으로 사라짐)도 끝난 것으로 본다.
     const finished = workload ? isFinishedWorkload(workload.state) : current.workloadId !== null;
     if (finished) {
-      const resume = newShell
+      // 끝난 작업의 PTY는 더 이상 살아 있지 않다. 연결 실패(markAttachedPanesFailed)는
+      // liveSessions를 비우지 않으므로 여기서 지운다 — 남겨 두면 "재생 중"으로 바꾼 이 창이
+      // 자기 대화를 "다른 곳에서 실행 중"으로 잡아 이어서 열지 못한다.
+      if (current.sessionId) this.liveSessions.delete(current.sessionId);
+      const found = newShell
         ? null
         : await this.findResumableSession(current.workloadId, current.sessionId, current.resume);
       if (this.disposed || !samePane()) return;
+      // 같은 대화가 다른 창에서 실행 중이면 그 창으로 옮겨 가지 않는다(restartExitedPane과
+      // 같다) — 아래에서 이 창의 기록을 다시 붙여 종료 오버레이로 끝낸다.
+      const resume = found && !this.activeAgentSession(found, current.workloadId) ? found : null;
       if (resume) {
         if (current.workloadId) this.linkRecovery(leafId, current.workloadId);
         await this.resumeAgentSession(resume, { leafId });
+        // 재개가 이 창을 잡지 못했으면(실행 파일 없음·쓸 수 없는 세션 id — 사유는 알림으로
+        // 떴다) "재생 중"에 두지 않고 실패 오버레이로 돌려 다시 시도할 수 있게 한다.
+        if (!this.disposed && samePane()?.phase === "replaying") {
+          useWorkbenchStore
+            .getState()
+            .panePhase(leafId, "failed", pane.error ?? t("terminal.session.attachFailed"));
+        }
         return;
       }
       if (newShell) {
@@ -2818,8 +2859,8 @@ export class SessionController {
     const found = newShell ? null : await this.findResumableSession(pane.workloadId, pane.sessionId, pane.resume);
     const current = useWorkbenchStore.getState().panes[pane.leafId];
     if (this.disposed || current?.viewId !== pane.viewId || current.sessionId !== pane.sessionId) return;
-    // 같은 대화가 다른 창에서 이미 실행 중이면 이 창은 일반 터미널과 같다(종료 오버레이도
-    // "새 세션으로 다시 시작"만 보였다) — 그 창으로 옮겨 가지 않고 이 자리에서 새 셸을 연다.
+    // 같은 대화가 다른 창에서 이미 실행 중이면(재개 기록이 있는 창이라도) 이 창은 일반
+    // 터미널과 같다 — 그 창으로 옮겨 가지도, 아무 일 없이 끝나지도 않고 이 자리에서 새 셸을 연다.
     const resume = found && !this.activeAgentSession(found, pane.workloadId) ? found : null;
     // 이 자리에서 새로 시작하는 실행이 끝난 작업을 이어받는다(최근 종료에서 뺀다).
     if (pane.workloadId) this.linkRecovery(pane.leafId, pane.workloadId);
@@ -2827,7 +2868,6 @@ export class SessionController {
       await this.resumeAgentSession(resume, { leafId: pane.leafId });
       return;
     }
-    if (!newShell && pane.resume) return;
     // 일반 셸 또는 명시적인 새 셸은 새 PTY를 사용한다. 마지막 경로가 사라졌으면 대체 경로로 연다.
     // 재개에 실패한 창은 아직 경로가 없을 수 있다 — 그 대화의 경로(→ 상위)를 잇는다.
     const cwds = this.cwdCandidates(current.cwd, current.resume?.cwd);
@@ -3095,11 +3135,12 @@ export class SessionController {
     }
   }
 
-  /** 패턴 감지용 꼬리·쿨다운 기록을 세션과 함께 버린다. */
+  /** 세션에 묶인 기록(패턴 감지용 꼬리·쿨다운, 데몬 재시작 표시)을 세션과 함께 버린다. */
   private forgetSessionText(sessionId: string | null): void {
     if (!sessionId) return;
     this.patternCooldown.clear(sessionId);
     this.patternTails.delete(sessionId);
+    this.daemonRestartedSessions.delete(sessionId);
   }
 
   // ------------------------------------------------------------------ quit

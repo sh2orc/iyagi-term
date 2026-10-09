@@ -1023,30 +1023,20 @@ fn workload_update_policy(
         .with_details(json!({ "missing": missing })));
     }
 
-    // Admission-condition re-check (budget/slots) against the live host.
-    let host = state.admission_host();
-    let admission = state.config.admission_config(state.logical_cpus);
-    // 호스트 전체 크기를 아직 모르면(첫 표본 전) 예산도 모른다 — 0 바이트
-    // 예산으로 보고 모든 변경을 거절하지 않는다(CPU 슬롯은 그대로 본다).
-    let over_budget = host.total_bytes > 0
-        && policy.reservation_bytes.get() > admission.managed_budget_bytes(host.total_bytes);
-    let slots = admission.cpu_slot_capacity();
-    if over_budget || policy.cpu_slots > slots {
-        return Err(RpcError::new(
-            ErrorCode::ResourceUnschedulable,
-            "policy exceeds the managed budget or CPU slot capacity",
-        ));
-    }
-
+    // 실행과 같은 규칙: 이 호스트가 받을 수 없는 크기(예산·CPU 슬롯 초과)는 거절하지
+    // 않고 맞춰 받는다. 원래 요청은 남겨 두어 스케줄러가 호스트 사정에 따라 다시
+    // 맞춘다(`orchestrator::fit_policy_to_host`). 응답은 유효 정책이다.
+    let effective = orchestrator::fit_policy_to_host(state, &state.admission_host(), &policy);
     {
         let mut guard = entry.lock().unwrap_or_else(|p| p.into_inner());
-        guard.policy = policy.clone();
+        guard.requested_policy = policy;
+        guard.policy = effective.clone();
         if let Some(descriptor) = guard.descriptor.as_mut() {
-            descriptor.policy = policy.clone();
+            descriptor.policy = effective.clone();
         }
     }
     state.workload_state_changed(&workload_id);
-    Ok(json!({ "workload_id": workload_id, "policy": policy }))
+    Ok(json!({ "workload_id": workload_id, "policy": effective }))
 }
 
 fn workload_processes(

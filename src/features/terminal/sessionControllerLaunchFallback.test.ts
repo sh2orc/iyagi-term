@@ -42,6 +42,7 @@ function setup(options: {
   missingCwds?: string[];
   missingPrograms?: string[];
   failWith?: RpcClientError;
+  failFor?: (request: LaunchRequest) => RpcClientError | null;
   resolveShell?: () => ShellSpec;
   projectRoot?: string | null;
 }) {
@@ -52,6 +53,8 @@ function setup(options: {
     workloadLaunch: async (request: LaunchRequest) => {
       launches.push(request);
       if (options.failWith) throw options.failWith;
+      const failure = options.failFor?.(request);
+      if (failure) throw failure;
       const program = shellOf(request);
       if (program && options.missingPrograms?.includes(program)) {
         throw new RpcClientError("PROGRAM_NOT_FOUND", "program file not found", false, { reason_code: "wrapped_program_missing" });
@@ -148,6 +151,17 @@ describe("새 터미널: 고른 셸을 쓸 수 없을 때", () => {
     } finally { controller.dispose(); }
   });
 
+  it("바꾼 셸의 이름이 같으면 경로로 알린다 — 'zsh 대신 zsh'로 보이지 않게", async () => {
+    const brewZsh: ShellSpec = { program: "/opt/homebrew/bin/zsh", argv: ["-l", "-i"], label: "zsh" };
+    const { controller, launches } = setup({ missingPrograms: [brewZsh.program], resolveShell: () => brewZsh });
+    try {
+      controller.newTerminal();
+      await vi.waitFor(() => expect(panes()[0]?.sessionId).toBe("s-2"));
+      expect(launches.map(shellOf)).toEqual([brewZsh.program, "/bin/zsh"]);
+      expect(toast()).toBe(t("terminal.session.shellFallback", { shell: brewZsh.program, fallback: "/bin/zsh" }));
+    } finally { controller.dispose(); }
+  });
+
   it("기본 셸까지 없으면 /bin/sh로 연다", async () => {
     const { controller, launches } = setup({ missingPrograms: [fish.program, "/bin/zsh"], resolveShell: () => fish });
     try {
@@ -160,6 +174,33 @@ describe("새 터미널: 고른 셸을 쓸 수 없을 때", () => {
 });
 
 describe("바꿔서도 안 되는 실패는 다시 시도하지 않고 할 일을 알린다", () => {
+  it("호스트 자원 고갈(PTY·프로세스·파일 한도)은 다른 셸로 다시 시도하지 않는다", async () => {
+    const { controller, launches } = setup({
+      failWith: new RpcClientError("SPAWN_FAILED", "pty spawn failed", false, { reason_code: "spawn_host_exhausted" }),
+    });
+    try {
+      controller.newTerminal();
+      await vi.waitFor(() => expect(panes()[0]?.phase).toBe("failed"));
+      expect(launches).toHaveLength(1);
+      expect(panes()[0].error).toContain(t("terminal.session.spawnFailedHint"));
+    } finally { controller.dispose(); }
+  });
+
+  it("셸 자체가 뜨지 못한 SPAWN_FAILED는 기본 셸로 바꿔 열어 본다", async () => {
+    const fish: ShellSpec = { program: "/opt/homebrew/bin/fish", argv: ["-l"], label: "fish" };
+    const { controller, launches } = setup({
+      resolveShell: () => fish,
+      failFor: (request) => shellOf(request) === fish.program
+        ? new RpcClientError("SPAWN_FAILED", "pty spawn failed", false, { reason_code: "spawn_program_failed" })
+        : null,
+    });
+    try {
+      controller.newTerminal();
+      await vi.waitFor(() => expect(panes()[0]?.sessionId).toBe("s-2"));
+      expect(launches.map(shellOf)).toEqual([fish.program, "/bin/zsh"]);
+    } finally { controller.dispose(); }
+  });
+
   it("세션 한도", async () => {
     const { controller, launches } = setup({ failWith: new RpcClientError("SESSION_LIMIT", "session limit 32 reached") });
     try {

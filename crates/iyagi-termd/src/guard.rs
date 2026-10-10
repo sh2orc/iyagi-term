@@ -99,6 +99,9 @@ pub struct GuardController {
     /// 마지막 호스트 압력 정지 시각(속도 제한: 양보의 릴리스 간격과 같은
     /// 3초에 하나).
     last_pressure_suspend_ms: Option<u64>,
+    /// 마지막 메모리 회복 재개 시각(3초에 하나 — 한꺼번에 풀면 RSS가 한 번에
+    /// 돌아와 다시 CRITICAL로 떨어진다).
+    last_pressure_resume_ms: Option<u64>,
 }
 
 impl GuardController {
@@ -107,6 +110,7 @@ impl GuardController {
             records: HashMap::new(),
             policy,
             last_pressure_suspend_ms: None,
+            last_pressure_resume_ms: None,
         }
     }
 
@@ -269,6 +273,49 @@ impl GuardController {
                         workload_id: id,
                         reason: GuardReason::HostMemoryPressure,
                     });
+                }
+            }
+        }
+
+        // 호스트 메모리 NORMAL: 메모리 사유(호스트 압력·개별 한도)로 자동 정지된
+        // 워크로드를 3초에 하나씩, 가장 나중에 얼린 것부터 되살린다. 가장 먼저
+        // 얼린 것이 RSS가 가장 크므로 역순이 재악화 위험이 작다. 수동 정지는 손대지
+        // 않는다. 포커스 재개는 위 루프가 이미 처리했다(planned에 있으면 건너뛴다).
+        // 진동하지 않는다: NORMAL에서는 개별 한도 초과가 정지를 만들지 않으므로
+        // 되살린 대상이 같은 틱에 다시 얼리지 않는다.
+        if mem_level == PressureLevel::Normal && self.policy.auto_suspend {
+            let due = self
+                .last_pressure_resume_ms
+                .is_none_or(|last| now_ms.saturating_sub(last) >= 3_000);
+            if due {
+                let planned: HashSet<&str> =
+                    ops.iter().map(|op| op.workload_id().as_str()).collect();
+                let target = ordered
+                    .iter()
+                    .filter(|w| !planned.contains(w.workload_id.as_str()))
+                    .filter_map(|w| {
+                        let record = self.records.get(&w.workload_id)?;
+                        if record.unsupported || now_ms < record.resume_retry_after_ms.unwrap_or(0)
+                        {
+                            return None;
+                        }
+                        match &record.state {
+                            GuardState::Suspended {
+                                since_ms,
+                                manual: false,
+                                reason: GuardReason::HostMemoryPressure | GuardReason::MemoryLimit,
+                                ..
+                            } => Some((since_ms.get(), w.workload_id.clone())),
+                            _ => None,
+                        }
+                    })
+                    .max_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
+                if let Some((_, id)) = target {
+                    self.last_pressure_resume_ms = Some(now_ms);
+                    if let Some(record) = self.records.get_mut(&id) {
+                        record.resume_retry_after_ms = Some(now_ms + RESUME_RETRY_BACKOFF_MS);
+                    }
+                    ops.push(GuardOp::Resume { workload_id: id });
                 }
             }
         }
@@ -861,5 +908,191 @@ mod tests {
         assert!(guard.record(&resume, &ok, 6_000));
         let (state, _) = guard.view(&w.workload_id);
         assert!(!suspended(&state));
+    }
+
+    /// 메모리 회복(NORMAL)은 자동 정지된 것을 3초에 하나씩, 가장 나중에
+    /// 얼린 것부터 되살린다.
+    #[test]
+    fn memory_recovery_resumes_one_every_3s_newest_first() {
+        let mut guard = GuardController::new(policy());
+        let a = usage(Some(0.1), Some(1024 * 1024 * 1024));
+        let b = usage(Some(0.1), Some(2 * 1024 * 1024 * 1024));
+        let c = usage(Some(0.1), Some(3 * 1024 * 1024 * 1024));
+        // CRITICAL 경로로 t=0, 3_000, 6_000에 하나씩 얼린다.
+        let ops = guard.plan(
+            0,
+            PressureLevel::Normal,
+            PressureLevel::Critical,
+            &[],
+            std::slice::from_ref(&a),
+            None,
+        );
+        apply_ok(&mut guard, &ops, 0);
+        let ops = guard.plan(
+            3_000,
+            PressureLevel::Normal,
+            PressureLevel::Critical,
+            &[],
+            &[a.clone(), b.clone()],
+            None,
+        );
+        apply_ok(&mut guard, &ops, 3_000);
+        let ops = guard.plan(
+            6_000,
+            PressureLevel::Normal,
+            PressureLevel::Critical,
+            &[],
+            &[a.clone(), b.clone(), c.clone()],
+            None,
+        );
+        apply_ok(&mut guard, &ops, 6_000);
+        let live = vec![a.clone(), b.clone(), c.clone()];
+
+        // NORMAL: 가장 나중에 얼린 c부터 하나만.
+        let ops = guard.plan(
+            10_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            None,
+        );
+        assert!(matches!(
+            ops.as_slice(),
+            [GuardOp::Resume { workload_id }] if workload_id == &c.workload_id
+        ));
+        apply_ok(&mut guard, &ops, 10_000);
+
+        // 3초 안에는 두 번째가 없다.
+        let ops = guard.plan(
+            12_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            None,
+        );
+        assert!(ops.is_empty(), "속도 제한 안: {ops:?}");
+
+        // 간격이 지나면 다음(더 먼저 얼린 b).
+        let ops = guard.plan(
+            13_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            None,
+        );
+        assert!(matches!(
+            ops.as_slice(),
+            [GuardOp::Resume { workload_id }] if workload_id == &b.workload_id
+        ));
+    }
+
+    /// 수동 정지는 메모리가 회복돼도 자동으로 되살리지 않는다(불변 2).
+    #[test]
+    fn memory_recovery_skips_manual_suspensions() {
+        let mut guard = GuardController::new(policy());
+        let w = usage(Some(0.1), Some(1024 * 1024 * 1024));
+        let ops = guard.manual(&w.workload_id, true);
+        apply_ok(&mut guard, &ops, 1_000);
+        let ops = guard.plan(
+            120_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        assert!(ops.is_empty(), "수동 정지는 손대지 않는다: {ops:?}");
+    }
+
+    /// WARNING에서는 회복 재개가 돌지 않는다 — NORMAL만이 회복이다.
+    #[test]
+    fn memory_recovery_does_nothing_at_warning() {
+        let mut guard = GuardController::new(policy());
+        let w = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
+        guard.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        let ops = guard.plan(
+            21_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        assert!(matches!(ops.as_slice(), [GuardOp::Suspend { .. }]));
+        apply_ok(&mut guard, &ops, 21_000);
+        let ops = guard.plan(
+            60_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        assert!(ops.is_empty(), "WARNING에서는 재개하지 않는다: {ops:?}");
+    }
+
+    /// 재개가 실패한 워크로드는 백오프(10초) 안에 다시 재개하지 않는다.
+    #[test]
+    fn memory_recovery_respects_resume_backoff() {
+        let mut guard = GuardController::new(policy());
+        let w = usage(Some(0.1), Some(1024 * 1024 * 1024));
+        let ops = guard.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Critical,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        apply_ok(&mut guard, &ops, 1_000);
+
+        // NORMAL에서 재개를 시도했지만 EPERM으로 실패한다.
+        let ops = guard.plan(
+            2_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        assert!(matches!(ops.as_slice(), [GuardOp::Resume { .. }]));
+        let eperm = Err(io::Error::new(io::ErrorKind::PermissionDenied, "EPERM"));
+        assert!(!guard.record(&ops[0], &eperm, 2_000));
+        assert!(suspended(&guard.view(&w.workload_id).0));
+
+        // 백오프 안의 틱들은 같은 OS 호출을 되풀이하지 않는다.
+        let ops = guard.plan(
+            11_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        assert!(ops.is_empty(), "백오프 안: {ops:?}");
+
+        // 간격이 지나면 다시 시도한다.
+        let ops = guard.plan(
+            12_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            std::slice::from_ref(&w),
+            None,
+        );
+        assert!(
+            matches!(ops.as_slice(), [GuardOp::Resume { .. }]),
+            "백오프가 지나면 재시도: {ops:?}"
+        );
     }
 }

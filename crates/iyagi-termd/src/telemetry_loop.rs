@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use term_contracts::ids::{ProcessIdentity, WorkloadId};
-use term_contracts::metrics::{MetricQuality, UsageCoverage};
+use term_contracts::metrics::{MetricQuality, PressureLevel, UsageCoverage};
 use term_contracts::rpc::RpcEventKind;
 
 use crate::state::DaemonState;
@@ -48,7 +48,18 @@ fn tick(state: &Arc<DaemonState>, shell_providers: &mut HashMap<WorkloadId, PidP
     // Pressure classification with hysteresis (term-core).
     let level = {
         let mut pressure = state.pressure.lock().unwrap_or_else(|p| p.into_inner());
-        pressure.update(sample.total_bytes().unwrap_or(0), sample.available_bytes())
+        let mut level =
+            pressure.update(sample.total_bytes().unwrap_or(0), sample.available_bytes());
+        // 커널 메모리 압력 신호(P2-4): 페이지 비율이 잡지 못하는 실제 위기를
+        // 커널 판정으로 즉시 올린다. level-triggered 계약대로 위기인 동안 매
+        // 틱 다시 올리되, 이미 CRITICAL이면 건너뛴다 — 회복 게이트(10초
+        // 지속)가 쌓아 둔 창을 매 틱 리셋하면 커널이 회복돼도 풀리지
+        // 않는다.
+        if level != PressureLevel::Critical && term_platform::telemetry::kernel_memory_critical() {
+            pressure.force_critical();
+            level = PressureLevel::Critical;
+        }
+        level
     };
     // CPU 포화도도 같은 규칙으로(08 §1). 관측 불가(미측정/논리 코어 0)는
     // 0이 아니라 "모름"으로 넘겨 현재 레벨을 유지하게 한다.

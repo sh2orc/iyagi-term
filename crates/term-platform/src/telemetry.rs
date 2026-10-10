@@ -13,12 +13,14 @@
 //! and `limits.graph_samples`.
 
 pub mod cadence;
+pub mod kernel_pressure;
 pub mod pressure;
 pub mod rates;
 pub mod ring;
 pub mod sampler;
 
 pub use cadence::CadenceGate;
+pub use kernel_pressure::kernel_memory_critical;
 pub use pressure::classify_pressure;
 pub use rates::{counter_delta_rate, Delta};
 pub use ring::SampleRing;

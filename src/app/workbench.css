@@ -1064,6 +1064,15 @@ button.primary {
   padding: 2px 8px;
 }
 
+.strip-agents-none {
+  color: var(--fg-muted);
+}
+
+/* 확인을 기다리는 에이전트 — 사용자의 손이 필요한 신호라 경고색. */
+.strip-agents-waiting {
+  color: var(--warn);
+}
+
 /* 가드 일시정지 개수(08 §5) — 상태가 아니라 개입이 필요한 신호라 경고색.
    대기 사유(strip-wait-reason)와 같은 자리에 이어 붙는다. */
 .strip-suspended {
@@ -2618,79 +2627,6 @@ body.layout-dragging.layout-drop-blocked * {
     transform: scaleX(1);
     opacity: 0.6;
   }
-}
-
-/* 데몬 오래됨 배너(리뷰 Finding 1): .workbench 최상단의 얇은 비차단 띠.
-   모달이 아니라 사용자를 막지 않으며, 닫기(×)로 숨길 수 있다. */
-/* 스트립 안의 "데몬 업데이트 · 재시작" 토막 — 배너 대신 쓰는 기본 표시. */
-.strip-daemon {
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--warn);
-  font: inherit;
-  font-size: 11px;
-  padding: 1px 8px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.strip-daemon:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.strip-daemon-failed {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-}
-
-/* 탭 막대 아래 정보 띠(지금은 쓰지 않는 배너 — 계약 유지). */
-.daemon-outdated-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
-  min-height: 30px;
-  padding: 4px 12px;
-  background: var(--bg-elevated);
-  border-top: 1px solid var(--warn);
-  border-bottom: 1px solid var(--border);
-  color: var(--fg);
-  font-size: 13px;
-}
-
-.daemon-outdated-message {
-  flex: 1 1 auto;
-}
-
-.daemon-outdated-error {
-  color: var(--danger);
-}
-
-.daemon-outdated-restart {
-  padding: 3px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-
-.daemon-outdated-restart:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.daemon-outdated-dismiss {
-  padding: 2px 6px;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
 }
 
 .strip-quota-unavailable {

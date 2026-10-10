@@ -314,14 +314,6 @@ export const ko = {
   "layoutEditor.groupDeleted": "그룹을 지웠습니다 — 터미널 {n}개는 계속 실행되며 ‘배치 안 됨’에 있습니다.",
   "palette.layoutEditor": "배치 편집 열기",
   "agentSessions.time.days": "{n}일 전",
-  // 데몬 빌드/버전 핸드셰이크(비차단 배너): 오래된 데몬 감지 + 재시작.
-  "daemon.outdated.message": "데몬이 오래됐습니다 — 재시작하면 최신으로 업데이트됩니다",
-  "daemon.outdated.restart": "재시작",
-  "daemon.outdated.restarting": "재시작 중…",
-  "daemon.outdated.dismiss": "닫기",
-  "daemon.outdated.restartFailed": "재시작에 실패했습니다 — 앱을 다시 시작해 주세요",
-  "daemon.outdated.strip": "데몬 업데이트 · 재시작",
-  "daemon.outdated.stripTitle": "실행 중인 데몬이 이 앱 빌드보다 오래됐습니다. 재시작하면 최신으로 바뀝니다(열린 터미널 세션은 끊깁니다).",
 } satisfies Record<string, string>;
 
 export const en: Record<keyof typeof ko, string> = {
@@ -633,14 +625,6 @@ export const en: Record<keyof typeof ko, string> = {
   "layoutEditor.groupDeleted": "Group deleted — {n} terminals keep running under Unplaced.",
   "palette.layoutEditor": "Open layout editor",
   "agentSessions.time.days": "{n} d ago",
-  // Daemon build/version handshake (non-blocking banner): stale daemon + restart.
-  "daemon.outdated.message": "The daemon is outdated — restart to update",
-  "daemon.outdated.restart": "Restart",
-  "daemon.outdated.restarting": "Restarting…",
-  "daemon.outdated.dismiss": "Dismiss",
-  "daemon.outdated.restartFailed": "Restart failed — please restart the app manually",
-  "daemon.outdated.strip": "Daemon update · restart",
-  "daemon.outdated.stripTitle": "The running daemon is older than this app build. Restart to update it (open terminal sessions will end).",
 };
 
 export const appSection: SectionMessages = { ko, en };

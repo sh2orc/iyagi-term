@@ -214,3 +214,46 @@ describe("resource strip suspended count", () => {
     expect(htmlLegacy).not.toContain("strip-suspended");
   });
 });
+
+describe("ResourceStrip 에이전트 요약", () => {
+  afterEach(() => useWorkbenchStore.setState({ panes: {}, workloads: [], queue: [] }));
+
+  function livePane(leafId: string, agent: string | null, extra: Record<string, unknown> = {}) {
+    return {
+      leafId, viewId: `v-${leafId}`, sessionId: `s-${leafId}`, workloadId: `w-${leafId}`,
+      title: "zsh", cwd: "/work", phase: "live", error: null, usage: null, flowBlocked: false,
+      agent: agent ? { agent, pid: 1, detected_at_ms: 1, ...extra } : null,
+    };
+  }
+
+  it("터미널에서 감지한 에이전트를 종류별로 세고, 관리 실행이 없으면 그 수는 적지 않는다", () => {
+    useWorkbenchStore.setState({
+      host: sample(10),
+      panes: {
+        a: livePane("a", "claude", { session_status: "busy" }),
+        b: livePane("b", "claude", { model: "glm-5.3", session_status: "waiting" }),
+        c: livePane("c", "codex"),
+        d: livePane("d", null),
+      } as never,
+      workloads: [],
+      queue: [],
+    });
+    const html = renderToStaticMarkup(<ResourceStrip />);
+    expect(html).toContain("Claude Code 1 · Z.ai 1 · Codex 1");
+    expect(html).toContain(t("monitor.strip.agentsWorking", { n: 1 }));
+    expect(html).toContain(t("monitor.strip.agentsWaiting", { n: 1 }));
+    expect(html).not.toContain(t("monitor.strip.managed", { running: 0, queued: 0 }));
+  });
+
+  it("에이전트가 없으면 없다고 적고, 관리 실행이 있으면 그 수를 덧붙인다", () => {
+    useWorkbenchStore.setState({
+      host: sample(10),
+      panes: { d: livePane("d", null) } as never,
+      workloads: [{ workload_id: "m1", mode: "managed", state: "RUNNING" }] as never,
+      queue: [],
+    });
+    const html = renderToStaticMarkup(<ResourceStrip />);
+    expect(html).toContain(t("monitor.strip.noAgents"));
+    expect(html).toContain(t("monitor.strip.managed", { running: 1, queued: 0 }));
+  });
+});

@@ -60,7 +60,12 @@ export const ko = {
   // ResourceStrip
   "monitor.strip.openGraph": "자원 그래프 열기(최근 5분)",
   "monitor.strip.openQueue": "작업 대기열 열기",
-  "monitor.strip.managed": "관리 {running} 실행 · {queued} 대기 · 보기",
+  // 터미널에서 자동 감지한 에이전트 요약(종류별 개수 · 작업 중 · 확인 대기).
+  "monitor.strip.agentsTitle": "터미널에서 감지한 AI 에이전트 — 눌러 작업 대기열 열기",
+  "monitor.strip.noAgents": "에이전트 없음",
+  "monitor.strip.agentsWorking": "작업 중 {n}",
+  "monitor.strip.agentsWaiting": "응답 대기 {n}",
+  "monitor.strip.managed": "관리 {running} 실행 · {queued} 대기",
   "monitor.strip.pressure": "· 압력 {level}",
   // 압력 완화(08 §2): 지금 양보 중인 세션 수 — 압력 문구 바로 옆.
   "monitor.strip.yielded": "· 양보 {count}",
@@ -186,7 +191,12 @@ export const en: Record<keyof typeof ko, string> = {
   // ResourceStrip
   "monitor.strip.openGraph": "Open resource graphs (last 5 minutes)",
   "monitor.strip.openQueue": "Open workload queue",
-  "monitor.strip.managed": "Managed {running} running · {queued} queued · View",
+  // Agents auto-detected in terminals (count per kind · working · waiting for you).
+  "monitor.strip.agentsTitle": "AI agents detected in your terminals — click to open the workload queue",
+  "monitor.strip.noAgents": "No agents",
+  "monitor.strip.agentsWorking": "{n} working",
+  "monitor.strip.agentsWaiting": "{n} waiting for you",
+  "monitor.strip.managed": "Managed {running} running · {queued} queued",
   "monitor.strip.pressure": "· pressure {level}",
   "monitor.strip.yielded": "· yielding {count}",
   // Resource guard suspensions (08 §5): the count sits on the queue drawer toggle.

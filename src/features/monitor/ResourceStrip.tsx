@@ -5,7 +5,7 @@
  * 않는다. 클릭하면 5분 그래프 drawer가 열린다.
  */
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { useI18n } from "../../i18n";
 import type { HostSample } from "../../generated/HostSample";
 import type { Metric } from "../../generated/Metric";
@@ -22,17 +22,21 @@ import {
 import { safeAvailableBytes } from "./headroom";
 import { RESOURCE_STRIP_PX } from "../terminal/splitTree";
 import { SubscriptionUsageIndicator } from "../subscriptions/SubscriptionUsageIndicator";
-import { DaemonOutdatedStripItem } from "../app/DaemonOutdatedBanner";
-import type { DaemonClient } from "../daemon/client";
+import { useTerminalActivity } from "../terminal/activity";
+import { summarizeAgents } from "./agentSummary";
 
 /** buildSegments/emptySegments로 넘기는 번역 함수(useI18n().t와 동일 형태). */
 type TFunc = (key: string, params?: Record<string, string | number>) => string;
 
-export const ResourceStrip = memo(function ResourceStrip({ client }: { client?: DaemonClient }): JSX.Element {
+export const ResourceStrip = memo(function ResourceStrip(): JSX.Element {
   const { t } = useI18n();
   const host = useWorkbenchStore((s) => s.host);
   const running = useWorkbenchStore((s) => s.workloads.filter((w) => w.mode === "managed" && (w.state === "RUNNING" || w.state === "STARTING")).length);
   const queued = useWorkbenchStore((s) => s.queue.length);
+  // 터미널마다 감지한 에이전트 — 관리 실행이 아니어도(직접 친 claude·codex) 센다.
+  const panes = useWorkbenchStore((s) => s.panes);
+  const activeSessions = useTerminalActivity((s) => s.sessions);
+  const agents = useMemo(() => summarizeAgents(Object.values(panes), activeSessions), [panes, activeSessions]);
   // 08-pressure-relief §2: 지금 양보 중인 세션 수. CPU 세그먼트에 붙여
   // "압력 때문에 무엇이 일어나고 있는지"를 압력 문구 옆에서 바로 읽게 한다.
   const yielded = useWorkbenchStore(
@@ -85,14 +89,20 @@ export const ResourceStrip = memo(function ResourceStrip({ client }: { client?: 
         ))}
       </button>
       <SubscriptionUsageIndicator />
-      {client ? <DaemonOutdatedStripItem client={client} /> : null}
       <button
         type="button"
         className="strip-managed"
         aria-label={t("monitor.strip.openQueue")}
+        title={t("monitor.strip.agentsTitle")}
         onClick={() => toggleQueueDrawer()}
       >
-        {t("monitor.strip.managed", { running, queued })}
+        {agents.total === 0
+          ? <span className="strip-agents-none">{t("monitor.strip.noAgents")}</span>
+          : agents.kinds.map((kind) => `${kind.name} ${kind.count}`).join(" · ")}
+        {agents.working > 0 ? <span className="strip-agents-working"> · {t("monitor.strip.agentsWorking", { n: agents.working })}</span> : null}
+        {agents.waiting > 0 ? <span className="strip-agents-waiting"> · {t("monitor.strip.agentsWaiting", { n: agents.waiting })}</span> : null}
+        {/* 관리 실행은 쓸 때만 보인다 — 늘 "0 실행 · 0 대기"면 읽을 것이 없다. */}
+        {running + queued > 0 ? <span> · {t("monitor.strip.managed", { running, queued })}</span> : null}
         {suspended > 0 ? (
           <span className="strip-suspended" title={t("monitor.strip.suspendedTitle", { n: suspended })}>
             {" · "}

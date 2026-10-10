@@ -660,7 +660,7 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
         </div>
         <GraphDrawer />
         {/* 데몬이 오래됐을 때의 재시작 안내는 배너 대신 스트립의 작은 항목으로 — 배치를 흔들지 않는다. */}
-        <ResourceStrip client={props.client} />
+        <ResourceStrip />
       </div>
       {settingsOpen ? <SettingsPage client={props.client} platform={platform} /> : null}
       {page === "layout" ? <LayoutEditorPage platform={platform} /> : null}

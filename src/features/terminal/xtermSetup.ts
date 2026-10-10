@@ -26,7 +26,7 @@ import type { IBufferLine, ILink, ILinkProvider, Terminal as ITerminal } from "@
 import type { FitAddonFactory, FitAddonLike, RegistryDeps, TerminalFactory, TerminalLike } from "./registry";
 import { DEFAULT_FONT_SIZE } from "./zoom";
 import { lineHeightForFont, resolveDefaultFontFamily } from "./defaultFont";
-import { WebKitImeCore, detectImeEngine, type ImeAction, type ImeEngine } from "./imeBridge";
+import { WebKitImeCore, detectImeEngine, normalizeImeText, type ImeAction, type ImeEngine } from "./imeBridge";
 import { currentPlatform, type Platform } from "./shortcuts";
 import { defaultHangulToggle, isHangulToggleChord, type HangulToggle } from "./hangulToggle";
 import { findUrls, openExternal } from "../security/linkOpener";
@@ -252,6 +252,7 @@ interface XtermInternals {
   coreService?: { triggerDataEvent?(data: string, wasUserInput?: boolean): void };
   _keyDownSeen?: boolean;
   _compositionHelper?: {
+    _coreService?: NonNullable<XtermInternals["coreService"]>;
     _isComposing: boolean;
     _compositionView: HTMLElement;
     updateCompositionElements(dontRecurse?: boolean): void;
@@ -293,6 +294,22 @@ export function attachWebKitImeBridge(
   const trigger = internals?.coreService?.triggerDataEvent?.bind(internals.coreService);
   const textarea = host.querySelector<HTMLTextAreaElement>("textarea");
   if (!internals || !trigger || !textarea) return () => undefined;
+  // 표준 composition 이벤트는 폴백 코어를 우회한다. xterm 조합기가
+  // 지연 전송하는 문자열에도 같은 NBSP 보정을 적용한다. 조합기 전용
+  // 서비스만 감싸므로 클립보드 paste와 터미널 응답은 원문을 유지한다.
+  const compositionHelper = internals._compositionHelper;
+  const compositionService = compositionHelper?._coreService;
+  const compositionTrigger = compositionService?.triggerDataEvent;
+  const normalizedCompositionService = compositionService && compositionTrigger
+    ? Object.assign(Object.create(compositionService), {
+      triggerDataEvent(data: string, wasUserInput?: boolean): void {
+        compositionTrigger.call(compositionService, normalizeImeText(data), wasUserInput);
+      },
+    }) as NonNullable<XtermInternals["coreService"]>
+    : undefined;
+  if (compositionHelper && normalizedCompositionService) {
+    compositionHelper._coreService = normalizedCompositionService;
+  }
   const core = new WebKitImeCore();
   const hangulToggle = options.hangulToggle ?? defaultHangulToggle();
   let settleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -654,6 +671,9 @@ export function attachWebKitImeBridge(
   host.addEventListener("compositionend", onCompositionEnd, true);
   host.addEventListener("blur", onBlur, true);
   return () => {
+    if (compositionHelper && compositionHelper._coreService === normalizedCompositionService) {
+      compositionHelper._coreService = compositionService;
+    }
     if (settleTimer !== null) clearTimeout(settleTimer);
     if (holdTimer !== null) clearTimeout(holdTimer);
     if (traceTimer !== null) {

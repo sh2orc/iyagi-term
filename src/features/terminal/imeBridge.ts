@@ -119,8 +119,8 @@ function isHoldableText(data: string | undefined): boolean {
  * 어긋나 이후 확정 diff가 한 칸씩 밀린다(자모 유출·글자 뒤섞임의 원인).
  * 숨은 textarea의 NBSP는 셸에서도 똑같이 일반 공백으로 취급한다.
  */
-function normalizeImeText(value: string): string {
-  return value.replace(/ /g, " ");
+export function normalizeImeText(value: string): string {
+  return value.replace(/\u00a0/g, " ");
 }
 
 /**

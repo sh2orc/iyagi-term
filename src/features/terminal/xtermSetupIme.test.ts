@@ -375,6 +375,36 @@ describe("attachWebKitImeBridge — Space 단일 소유권", () => {
     detach();
   });
 
+  it("네이티브 조합기의 NBSP도 일반 공백으로 보내고 paste 경로는 유지한다", () => {
+    const textarea = { value: "" };
+    const host = new FakeHost(textarea);
+    const triggerDataEvent = vi.fn();
+    const coreService = { triggerDataEvent };
+    const helper = {
+      _coreService: coreService,
+      _isComposing: false,
+      _compositionView: {
+        textContent: "",
+        classList: { add: vi.fn(), remove: vi.fn() },
+      },
+      updateCompositionElements: vi.fn(),
+    };
+    const terminal = { _core: { coreService, _compositionHelper: helper } };
+    const detach = attachWebKitImeBridge(host as unknown as HTMLElement, terminal, { engine: "webkit" });
+
+    // xterm 조합기의 지연 확정과 keyCode 229 textarea diff 전송 경로.
+    helper._coreService.triggerDataEvent("cd\u00a0~/project", true);
+    expect(triggerDataEvent).toHaveBeenLastCalledWith("cd ~/project", true);
+    helper._coreService.triggerDataEvent("\u00a0", true);
+    expect(triggerDataEvent).toHaveBeenLastCalledWith(" ", true);
+
+    // 붙여넣기는 조합기 대신 원래 coreService를 직접 사용한다.
+    terminal._core.coreService.triggerDataEvent("keep\u00a0space", true);
+    expect(triggerDataEvent).toHaveBeenLastCalledWith("keep\u00a0space", true);
+    detach();
+    expect(helper._coreService).toBe(coreService);
+  });
+
   it("표준 composition 이벤트가 오면 폴백이 xterm의 네이티브 preedit을 덮어쓰지 않는다", () => {
     const textarea = { value: "이제는 " };
     const host = new FakeHost(textarea);

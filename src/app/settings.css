@@ -182,6 +182,10 @@
 
 .setting-error { margin: 8px 0 0; color: var(--danger); }
 
+/* 백그라운드 실행 관리자 재시작(DaemonRestartRow) — 상태 줄 · 확인 문구 · 버튼. */
+.daemon-restart p { margin: 0 0 8px; line-height: 1.5; }
+.daemon-restart-actions { display: flex; gap: 6px; }
+
 /* ---- 사용자 셸 ------------------------------------------------------- */
 
 .custom-shells { width: 100%; }

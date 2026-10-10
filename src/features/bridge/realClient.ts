@@ -260,12 +260,15 @@ export class RealDaemonClient implements DaemonClient {
    * A daemon that is already current is left alone: when an earlier restart
    * timed out but the fresh daemon came up afterwards, a second click would
    * otherwise retire that fresh daemon and every terminal with it. An unknown
-   * status keeps the explicit request.
+   * status keeps the explicit request. `force` skips that check: the Settings
+   * restart is confirmed by the user and also serves a current but stuck daemon.
    */
-  async restartDaemon(): Promise<void> {
+  async restartDaemon(options: { force?: boolean } = {}): Promise<void> {
     await this.ensureConnected();
-    const outdated = await this.transportStatus().then((status) => status.daemonOutdated, () => true);
-    if (!outdated) return;
+    if (!options.force) {
+      const outdated = await this.transportStatus().then((status) => status.daemonOutdated, () => true);
+      if (!outdated) return;
+    }
     try {
       await this.ipc.invoke("bridge_rpc", {
         id: this.uuid(),

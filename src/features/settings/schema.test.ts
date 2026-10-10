@@ -49,7 +49,7 @@ describe("settings schema", () => {
   });
 
   it("itemsInGroup은 정의 순서를 유지한다(패널 구조 분해가 이 순서를 쓴다)", () => {
-    expect(itemsInGroup("general").map((i) => i.id)).toEqual(["language", "theme"]);
+    expect(itemsInGroup("general").map((i) => i.id)).toEqual(["language", "theme", "daemonRestart"]);
     expect(itemsInGroup("terminal").map((i) => i.id)).toEqual([
       "fontSize",
       "fontFamily",

@@ -312,7 +312,7 @@ export interface DaemonClient {
    * `daemonOutdated` is the build/version handshake result: the connected
    * daemon was built from a different source than this app (or is an OLD
    * daemon that predates the check). It never blocks the connection — it drives
-   * the non-blocking "outdated — restart" banner.
+   * the status line of the Settings → General daemon restart row.
    */
   transportStatus?(): Promise<{
     controlAlive: boolean;
@@ -324,9 +324,12 @@ export interface DaemonClient {
   /**
    * Retire the current (outdated) daemon without killing workloads
    * (`daemon.shutdown { stop_workloads: false }`), then reconnect so a fresh
-   * daemon is spawned. Optional: browser mocks omit it.
+   * daemon is spawned. A daemon that is already current is left alone unless
+   * `force` is set (the explicit, confirmed restart in Settings). Its PTYs
+   * still end with it: panes come back as "backend restarted". Optional:
+   * browser mocks omit it.
    */
-  restartDaemon?(): Promise<void>;
+  restartDaemon?(options?: { force?: boolean }): Promise<void>;
   /** Release frontend-only resources. Never terminates daemon workloads. */
   dispose?(): void;
 

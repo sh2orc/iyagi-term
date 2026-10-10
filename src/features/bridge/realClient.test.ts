@@ -238,6 +238,23 @@ describe("RealDaemonClient lifecycle", () => {
     expect(ipc.commandNames().slice(before)).not.toContain("bridge_disconnect");
   });
 
+  it("restartDaemon with force retires even a current daemon", async () => {
+    // Settings → General: the user confirmed the restart, so a current (but
+    // perhaps stuck) daemon is retired too.
+    const ipc = new FakeIpc();
+    stubLifecycle(ipc);
+    ipc.handle("bridge_rpc", async () => ({ shutting_down: true }));
+    const client = new RealDaemonClient(ipc);
+    client.events.subscribe(() => undefined);
+    await flush();
+
+    await client.restartDaemon({ force: true });
+
+    const shutdown = ipc.bridgeRpcArgs().find((call) => call.method === "daemon.shutdown");
+    expect(shutdown?.params).toEqual({ stop_workloads: false });
+    expect(ipc.commandNames()).toContain("bridge_disconnect");
+  });
+
   it("a throwing listener does not starve the others or later events", async () => {
     // Tauri's Channel only advances its message index after onmessage
     // returns: an exception escaping dispatch froze every later event.

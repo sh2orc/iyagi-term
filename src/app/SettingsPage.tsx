@@ -177,7 +177,7 @@ export function SettingsPage({ client, platform }: { client: DaemonClient; platf
           </div>
         </nav>
         <div className="settings-content" ref={contentRef}>
-          {panel("general", <GeneralPanel />)}
+          {panel("general", <GeneralPanel client={client} />)}
           {panel("terminal", <TerminalPanel platform={platform} />)}
           {panel("trackpad", <TrackpadPanel />)}
           {panel("run", (

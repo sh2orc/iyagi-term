@@ -95,9 +95,7 @@ impl DaemonConfig {
     }
 
     pub fn load() -> DaemonConfig {
-        let defaults = defaults::load_spec_defaults()
-            .or_else(spec_defaults_fallback)
-            .expect("spec defaults must be loadable");
+        let defaults = defaults::load_spec_defaults().expect("spec defaults must be loadable");
         let mut config = DaemonConfig {
             defaults,
             scheduler_interval: Duration::from_millis(250),
@@ -340,91 +338,12 @@ fn missions_gate_default() -> bool {
     }
 }
 
-/// The spec asset lives at `<repo>/docs/implementation/defaults.json`;
-/// `load_spec_defaults` resolves it from the crate manifest. Inside a
-/// deployed binary the file is gone, so fall back to the same values inline
-/// (kept in sync by the term-contracts unit test against the asset).
-fn spec_defaults_fallback() -> Option<Defaults> {
-    let text = r#"{
-  "spec_version": 1,
-  "limits": {
-    "sessions": 32, "panes_per_tab": 6, "views_per_session": 2,
-    "managed_concurrency": 2, "queued_workloads": 64,
-    "rpc_frame_bytes": 65536, "launch_argument_bytes": 65536,
-    "launch_argv_count": 256, "output_chunk_bytes": 16384,
-    "output_high_bytes": 262144, "output_low_bytes": 65536,
-    "output_raw_global_bytes": 8388608, "transport_global_bytes": 25165824,
-    "input_chunk_bytes": 4096, "input_queue_bytes": 65536,
-    "paste_bytes": 1048576, "input_dedup_entries": 256,
-    "journal_session_bytes": 134217728, "journal_global_bytes": 2147483648,
-    "journal_segment_bytes": 16777216,
-    "journal_retention_days": 7, "scrollback_lines": 2000,
-    "graph_samples": 300, "control_queue_entries": 128
-  },
-  "timing_ms": {
-    "rpc_timeout": 5000, "hello_timeout": 2000, "data_token_ttl": 5000,
-    "daemon_start_timeout": 10000, "gate_timeout": 5000, "telemetry": 1000,
-    "process_inventory": 2000, "background_process_detail": 5000,
-    "disk_capacity": 10000, "telemetry_stale": 3000,
-    "resize_coalesce": 16, "ack_coalesce": 16, "journal_flush": 250,
-    "stop_grace": 3000, "exit_drain": 2000, "idle_daemon_exit": 300000,
-    "priority_aging": 30000, "pressure_recovery": 10000,
-    "relief_release_interval": 3000
-  },
-  "admission": {
-    "reservation_bytes": 2147483648, "cpu_slots": 1, "enforcement": "prefer",
-    "memory_max_bytes": null, "cpu_max_cores": null, "pids_max": null,
-    "host_reserve_min_bytes": 2147483648, "host_reserve_percent": 15,
-    "managed_budget_percent": 50, "critical_available_percent": 5,
-    "critical_available_bytes": 536870912, "warning_available_percent": 12,
-    "recovery_available_percent": 18
-  },
-  "cpu_pressure": {
-    "warning_used_percent": 85, "critical_used_percent": 95,
-    "recovery_used_percent": 70
-  },
-  "relief": {"auto_yield": true},
-  "ui": {
-    "leaf_min_width_px": 240, "leaf_min_height_px": 160, "pane_header_px": 28,
-    "divider_px": 6, "resource_strip_px": 28, "font_size_px": 14,
-    "line_height": 1.3
-  }
-}"#;
-    serde_json::from_str(text).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// IYAGI_TEST_CONFIG is process-global; tests touching it must not race.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn defaults_load_and_fallback_agree() {
-        let a = defaults::load_spec_defaults().expect("asset");
-        let b = spec_defaults_fallback().expect("fallback");
-        assert_eq!(a.limits.sessions, b.limits.sessions);
-        assert_eq!(a.limits.managed_concurrency, b.limits.managed_concurrency);
-        assert_eq!(
-            a.limits.journal_session_bytes,
-            b.limits.journal_session_bytes
-        );
-        assert_eq!(a.timing_ms.idle_daemon_exit, b.timing_ms.idle_daemon_exit);
-        assert_eq!(
-            a.admission.managed_budget_percent,
-            b.admission.managed_budget_percent
-        );
-        assert_eq!(a.relief.auto_yield, b.relief.auto_yield);
-        assert_eq!(
-            a.timing_ms.relief_release_interval,
-            b.timing_ms.relief_release_interval
-        );
-        assert_eq!(
-            a.cpu_pressure.warning_used_percent,
-            b.cpu_pressure.warning_used_percent
-        );
-    }
 
     /// 완화 수용 시험은 호스트가 실제로 포화하기를 기다릴 수 없다:
     /// `cpu_pressure`·`relief` 덮어쓰기로 level과 정책을 결정적으로 만든다.

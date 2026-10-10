@@ -157,19 +157,13 @@ pub struct UiDefaults {
     pub line_height: f64,
 }
 
-/// Location of the spec asset relative to the crate manifest. Tests and the
-/// daemon (for diagnostics) resolve it through `CARGO_MANIFEST_DIR` roots.
-pub fn spec_defaults_path() -> Option<std::path::PathBuf> {
-    // <crate>/src/defaults.rs -> <crate> -> crates -> repo root
-    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest.ancestors().nth(2)?;
-    Some(repo_root.join("docs/implementation/defaults.json"))
-}
+/// `docs/implementation/defaults.json` 원문. 빌드에 내장해 설치한 PC에서도
+/// 저장소와 같은 값으로 돈다(예전에는 빌드 시점 경로를 런타임에 읽어
+/// 저장소 밖에서는 fallback 값이 쓰였다).
+pub const SPEC_DEFAULTS_JSON: &str = include_str!("../../../docs/implementation/defaults.json");
 
 pub fn load_spec_defaults() -> Option<Defaults> {
-    let path = spec_defaults_path()?;
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+    serde_json::from_str(SPEC_DEFAULTS_JSON).ok()
 }
 
 #[cfg(test)]

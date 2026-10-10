@@ -106,9 +106,39 @@ fn run_relief(
     let live = state.live_workloads_for_relief();
     let focused = state.focused_session_ids();
     let supported = state.scheduling_yield_supported;
+    // 가드 정책의 CPU 한도를 넘긴 워크로드 — 정지 대신 양보 대상이다(가드는
+    // CPU 초과를 더 이상 정지 사유로 다루지 않는다). guard 락을 잡고 푼 뒤에
+    // relief 락을 잡는다(두 락을 동시에 쥐지 않는다 — 기존 교착 규율).
+    let (cpu_limit, sustain_ms) = {
+        let guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
+        let policy = guard.policy();
+        (
+            f64::from(policy.cpu_cores_limit.max(1)),
+            policy.sustain_ms.get(),
+        )
+    };
+    let usage = state
+        .usage_cache
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let cpu_over: Vec<WorkloadId> = live
+        .iter()
+        .filter(|w| {
+            usage.get(&w.workload_id).is_some_and(|u| {
+                matches!(
+                    u.cpu_cores.quality,
+                    MetricQuality::Measured | MetricQuality::Estimated
+                ) && u.cpu_cores.value.is_some_and(|c| c > cpu_limit)
+            })
+        })
+        .map(|w| w.workload_id.clone())
+        .collect();
     let ops = {
         let mut relief = state.relief.lock().unwrap_or_else(|p| p.into_inner());
-        relief.plan(now, cpu_level, &focused, &live, supported)
+        relief.plan(
+            now, cpu_level, &focused, &live, supported, &cpu_over, sustain_ms,
+        )
     };
     if ops.is_empty() {
         return;

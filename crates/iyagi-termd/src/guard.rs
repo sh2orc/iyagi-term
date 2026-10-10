@@ -1,9 +1,10 @@
 //! 자원 가드(08 §5 — 강한 자동 제어).
 //!
-//! 양보(P2)가 우선순위만 낮춰 독점을 못 막는 macOS 관측 환경에서, 한
-//! 워크로드의 귀속 CPU·메모리가 한도를 지속적으로 초과하면 **일시정지**한다.
-//! 되돌릴 수 있다: 검증된 트리에 SIGSTOP/SIGCONT(위임 cgroup Linux는
-//! freeze)를 걸고 사용자가 언제든 재개한다.
+//! 한 워크로드의 귀속 메모리가 한도를 지속적으로 초과하면(호스트에 메모리
+//! 압력이 있을 때만) **일시정지**한다. CPU 초과는 얼리지 않는다 — 빌드·
+//! 테스트의 정상 동작이고, 경합은 완화(relief)가 background 등급으로
+//! 양보해 나눠 쓴다. 정지는 되돌릴 수 있다: 검증된 트리에 SIGSTOP/
+//! SIGCONT(위임 cgroup Linux는 freeze)를 걸고 사용자가 언제든 재개한다.
 //!
 //! [`GuardController`]는 [`crate::relief::ReliefController`]와 같은 구조다:
 //! 순수 결정 코어(`plan`/`manual`)는 시계도 OS도 모르고, [`apply`]가 그
@@ -151,21 +152,19 @@ impl GuardController {
 
         let mut ops = Vec::new();
         let sustain = self.policy.sustain_ms.get().max(1);
-        let cpu_limit = f64::from(self.policy.cpu_cores_limit.max(1));
         let rss_limit = self.policy.rss_limit_bytes.get().max(1);
 
         for workload in &ordered {
             if workload.state != WorkloadState::Running {
                 continue;
             }
-            let over_cpu = workload.cpu_cores.is_some_and(|c| c > cpu_limit);
-            let over_rss = workload.resident_bytes.is_some_and(|r| r > rss_limit);
-            let over = over_cpu || over_rss;
-            let reason = if over_rss {
-                GuardReason::MemoryLimit
-            } else {
-                GuardReason::CpuLimit
-            };
+            // CPU 초과는 정지 사유가 아니다(완화가 양보로 다룬다). 메모리
+            // 초과도 호스트가 NORMAL이면 얼리지 않는다: 호스트에 여유가 있는데
+            // 큰 워크로드 하나를 얼려 봐야 얻는 게 없고, SIGSTOP은 RSS를
+            // 줄이지도 않는다.
+            let over = mem_level != PressureLevel::Normal
+                && workload.resident_bytes.is_some_and(|r| r > rss_limit);
+            let reason = GuardReason::MemoryLimit;
             let id = &workload.workload_id;
             let record = self.records.entry(id.clone()).or_default();
 
@@ -422,8 +421,8 @@ mod tests {
     #[test]
     fn sustained_over_limit_suspends_only_after_sustain_and_never_focused() {
         let mut guard = GuardController::new(policy());
-        let hog = usage(Some(7.5), None);
-        let focused_hog = usage(Some(7.5), None);
+        let hog = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
+        let focused_hog = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
         let live = vec![hog.clone(), focused_hog.clone()];
         let focused = vec![focused_hog.session_id.clone()];
 
@@ -432,7 +431,7 @@ mod tests {
             .plan(
                 1_000,
                 PressureLevel::Normal,
-                PressureLevel::Normal,
+                PressureLevel::Warning,
                 &focused,
                 &live,
                 None
@@ -442,13 +441,79 @@ mod tests {
         let ops = guard.plan(
             21_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
         );
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].workload_id(), &hog.workload_id);
+    }
+
+    /// CPU만 초과하면(호스트 메모리에 여유가 있으면) 절대 정지하지 않는다 —
+    /// 경합은 완화가 양보로 다룬다.
+    #[test]
+    fn cpu_over_limit_alone_never_suspends() {
+        let mut guard = GuardController::new(policy());
+        let hog = usage(Some(8.0), Some(100 * 1024 * 1024));
+        let live = vec![hog.clone()];
+        for mem_level in [PressureLevel::Normal, PressureLevel::Warning] {
+            guard.plan(1_000, PressureLevel::Normal, mem_level, &[], &live, None);
+            let ops = guard.plan(120_000, PressureLevel::Normal, mem_level, &[], &live, None);
+            assert!(ops.is_empty(), "CPU 초과만으로는 얼리지 않는다: {ops:?}");
+        }
+    }
+
+    /// 같은 RSS 초과도 호스트 메모리가 NORMAL이면 얼리지 않고, WARNING
+    /// 이상이어야 지속 시간 뒤에 정지한다.
+    #[test]
+    fn rss_over_limit_suspends_only_when_host_not_normal() {
+        let w = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
+        let live = vec![w.clone()];
+
+        let mut normal = GuardController::new(policy());
+        normal.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            None,
+        );
+        let ops = normal.plan(
+            120_000,
+            PressureLevel::Normal,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            None,
+        );
+        assert!(ops.is_empty(), "호스트가 NORMAL이면 얼리지 않는다: {ops:?}");
+
+        let mut warning = GuardController::new(policy());
+        warning.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            &live,
+            None,
+        );
+        let ops = warning.plan(
+            21_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            &live,
+            None,
+        );
+        assert!(matches!(
+            ops.as_slice(),
+            [GuardOp::Suspend {
+                reason: GuardReason::MemoryLimit,
+                ..
+            }]
+        ));
     }
 
     #[test]
@@ -517,12 +582,12 @@ mod tests {
     #[test]
     fn focus_resumes_an_auto_suspended_session_and_restarts_the_sustain_window() {
         let mut guard = GuardController::new(policy());
-        let hog = usage(Some(7.5), None);
+        let hog = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
         let live = vec![hog.clone()];
         guard.plan(
             1_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &[],
             &live,
             None,
@@ -530,7 +595,7 @@ mod tests {
         let ops = guard.plan(
             21_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &[],
             &live,
             None,
@@ -544,7 +609,7 @@ mod tests {
         let ops = guard.plan(
             22_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
@@ -560,7 +625,7 @@ mod tests {
         let ops = guard.plan(
             60_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
@@ -571,7 +636,7 @@ mod tests {
         let ops = guard.plan(
             61_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &[],
             &live,
             None,
@@ -583,7 +648,7 @@ mod tests {
         let ops = guard.plan(
             81_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &[],
             &live,
             None,
@@ -594,12 +659,12 @@ mod tests {
     #[test]
     fn failed_focus_resume_backs_off_instead_of_retrying_every_tick() {
         let mut guard = GuardController::new(policy());
-        let hog = usage(Some(7.5), None);
+        let hog = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
         let live = vec![hog.clone()];
         guard.plan(
             1_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &[],
             &live,
             None,
@@ -607,7 +672,7 @@ mod tests {
         let ops = guard.plan(
             21_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &[],
             &live,
             None,
@@ -620,7 +685,7 @@ mod tests {
         let ops = guard.plan(
             22_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
@@ -634,7 +699,7 @@ mod tests {
         let ops = guard.plan(
             23_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
@@ -645,7 +710,7 @@ mod tests {
         let ops = guard.plan(
             33_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
@@ -661,7 +726,7 @@ mod tests {
         let ops = guard.plan(
             60_000,
             PressureLevel::Normal,
-            PressureLevel::Normal,
+            PressureLevel::Warning,
             &focused,
             &live,
             None,
@@ -769,10 +834,10 @@ mod tests {
     #[test]
     fn record_tracks_state_and_partial() {
         let mut guard = GuardController::new(policy());
-        let w = usage(Some(7.5), None);
+        let w = usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
         let op = GuardOp::Suspend {
             workload_id: w.workload_id.clone(),
-            reason: GuardReason::CpuLimit,
+            reason: GuardReason::MemoryLimit,
         };
         let partial_outcome = Ok(SchedulingOutcome {
             applied: 3,

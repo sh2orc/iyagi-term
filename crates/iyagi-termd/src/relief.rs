@@ -67,6 +67,8 @@ pub struct LiveWorkload {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Record {
     relief: ReliefState,
+    /// `cpu_cores_limit` 초과가 시작된 시각. 초과가 끊기면 None.
+    cpu_over_since_ms: Option<u64>,
     /// 사용자가 직접 양보시켰다 — 자동 복원 대상이 아니다(§0-2).
     manual_yield: bool,
     /// 사용자가 보호 표시했다(해제할 때까지 유지).
@@ -147,6 +149,11 @@ impl ReliefController {
 
     /// 한 틱의 계획. 부수효과는 기록 정리(죽은 워크로드 제거, NORMAL에서
     /// 일시 보호 해제, 순차 복원 타이머)뿐이고 OS는 건드리지 않는다.
+    ///
+    /// `cpu_over`는 이 틱에 가드 정책의 `cpu_cores_limit`을 넘긴 워크로드
+    /// (telemetry_loop가 계산), `cpu_sustain_ms`는 그 초과가 이만큼 이어져야
+    /// "독점"으로 보는 지속 시간(가드 정책의 `sustain_ms`)이다.
+    #[allow(clippy::too_many_arguments)]
     pub fn plan(
         &mut self,
         now_ms: u64,
@@ -154,6 +161,8 @@ impl ReliefController {
         focused: &[SessionId],
         live: &[LiveWorkload],
         capability_supported: bool,
+        cpu_over: &[WorkloadId],
+        cpu_sustain_ms: u64,
     ) -> Vec<ReliefOp> {
         // 더 이상 살아 있지 않은 워크로드의 기록은 버린다 — 프로세스가 이미
         // 없으므로 복원 호출도 하지 않는다.
@@ -172,6 +181,29 @@ impl ReliefController {
         // 계획은 결정적이어야 한다(스냅샷·시험 재현성): workload_id 순.
         let mut ordered: Vec<&LiveWorkload> = live.iter().collect();
         ordered.sort_by(|a, b| a.workload_id.as_str().cmp(b.workload_id.as_str()));
+
+        // 0) CPU 독점 추적: 이 틱에 한도를 넘긴 워크로드는 시작 시각을 기억하고,
+        //    넘기지 않은 워크로드는 지운다. 포커스된 세션은 세지 않는다(보고 있는
+        //    pane은 느리게 두지 않는다).
+        let over_now: HashSet<&str> = cpu_over.iter().map(WorkloadId::as_str).collect();
+        for workload in &ordered {
+            let record = self
+                .records
+                .entry(workload.workload_id.clone())
+                .or_default();
+            if over_now.contains(workload.workload_id.as_str())
+                && !focused.contains(workload.session_id.as_str())
+            {
+                record.cpu_over_since_ms.get_or_insert(now_ms);
+            } else {
+                record.cpu_over_since_ms = None;
+            }
+        }
+        let hot = |record: &Record| {
+            record
+                .cpu_over_since_ms
+                .is_some_and(|since| now_ms.saturating_sub(since) >= cpu_sustain_ms.max(1))
+        };
 
         let mut ops = Vec::new();
         // 1) 포커스를 얻은 자동 양보는 압력 level과 무관하게 즉시 복원한다
@@ -192,6 +224,40 @@ impl ReliefController {
         let planned: HashSet<&str> = ops.iter().map(|op| op.workload_id().as_str()).collect();
         let planned: HashSet<String> = planned.into_iter().map(str::to_string).collect();
 
+        // 0-1) CPU 독점 워크로드는 호스트 압력과 무관하게 양보시킨다(가드가
+        //      CPU 초과를 더 이상 정지로 다루지 않으므로 여기가 유일한 자동
+        //      개입이다). 수동·보호·미지원·이미 양보된 것은 건너뛴다(부분
+        //      양보는 다시 시도).
+        if capability_supported && self.policy.auto_yield {
+            for workload in &ordered {
+                if workload.state != WorkloadState::Running
+                    || planned.contains(workload.workload_id.as_str())
+                    || focused.contains(workload.session_id.as_str())
+                {
+                    continue;
+                }
+                let Some(record) = self.records.get(&workload.workload_id) else {
+                    continue;
+                };
+                if !hot(record) || record.protected() || record.unsupported || record.manual_yield {
+                    continue;
+                }
+                let apply = match &record.relief {
+                    ReliefState::None => true,
+                    ReliefState::Yielded { partial, .. } => *partial,
+                };
+                if apply {
+                    ops.push(ReliefOp::Yield {
+                        workload_id: workload.workload_id.clone(),
+                    });
+                }
+            }
+        }
+        // 새로 넣은 Yield가 뒤 단계(복원 후보·전체 양보)에서 중복되지 않게
+        // `planned`를 다시 만든다.
+        let planned: HashSet<&str> = ops.iter().map(|op| op.workload_id().as_str()).collect();
+        let planned: HashSet<String> = planned.into_iter().map(str::to_string).collect();
+
         if normal {
             // 2) NORMAL 회복: 자동 양보를 오래된 것부터 하나씩,
             //    `relief_release_interval` 간격으로 되돌린다(§2).
@@ -201,6 +267,12 @@ impl ReliefController {
                     .filter(|w| !planned.contains(w.workload_id.as_str()))
                     .filter_map(|w| {
                         let record = self.records.get(&w.workload_id)?;
+                        // 독점 중인 워크로드는 복원하지 않는다 — 초과가 끊기면
+                        // `cpu_over_since_ms`가 None이 되어 다음 릴리스 간격에
+                        // 보통 자동 양보처럼 복원된다.
+                        if hot(record) {
+                            return None;
+                        }
                         (!record.manual_yield)
                             .then(|| record.since_ms())
                             .flatten()
@@ -428,6 +500,18 @@ mod tests {
         ReliefController::new(ReliefPolicy { auto_yield }, INTERVAL)
     }
 
+    /// CPU 독점 없이(빈 초과 집합) 도는 `plan` — 기존 시험들의 기본 경로.
+    fn plan_no_hog(
+        c: &mut ReliefController,
+        now: u64,
+        level: PressureLevel,
+        focused: &[SessionId],
+        live: &[LiveWorkload],
+        supported: bool,
+    ) -> Vec<ReliefOp> {
+        c.plan(now, level, focused, live, supported, &[], 20_000)
+    }
+
     fn workload(state: WorkloadState) -> LiveWorkload {
         LiveWorkload {
             workload_id: WorkloadId::generate(),
@@ -491,7 +575,8 @@ mod tests {
         let focused = running();
         let live = vec![a.clone(), b.clone(), focused.clone()];
 
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_000,
             PressureLevel::Warning,
             std::slice::from_ref(&focused.session_id),
@@ -506,15 +591,15 @@ mod tests {
         settle(&mut c, &ops, 1_000);
 
         // 멱등: 이미 양보 중인 세션은 다시 계획되지 않는다.
-        assert!(c
-            .plan(
-                2_000,
-                PressureLevel::Warning,
-                std::slice::from_ref(&focused.session_id),
-                &live,
-                true
-            )
-            .is_empty());
+        assert!(plan_no_hog(
+            &mut c,
+            2_000,
+            PressureLevel::Warning,
+            std::slice::from_ref(&focused.session_id),
+            &live,
+            true
+        )
+        .is_empty());
         assert!(matches!(
             c.view(&a.workload_id).0,
             ReliefState::Yielded {
@@ -532,7 +617,8 @@ mod tests {
         let mut c = controller(true);
         let queued = workload(WorkloadState::Queued);
         let run = running();
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_000,
             PressureLevel::Critical,
             &[],
@@ -558,7 +644,7 @@ mod tests {
             .is_empty());
         assert!(c.view(&guarded.workload_id).1, "protected로 보고된다");
 
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Warning, &[], &live, true);
         assert_eq!(yielded_ids(&ops), vec![other.workload_id.as_str()]);
         settle(&mut c, &ops, 1_000);
 
@@ -568,7 +654,7 @@ mod tests {
             ReliefAction::Unprotect,
             PressureLevel::Warning,
         );
-        let ops = c.plan(2_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 2_000, PressureLevel::Warning, &[], &live, true);
         assert_eq!(yielded_ids(&ops), vec![guarded.workload_id.as_str()]);
     }
 
@@ -578,7 +664,7 @@ mod tests {
         let mut c = controller(true);
         let w = running();
         let live = vec![w.clone()];
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Warning, &[], &live, true);
         settle(&mut c, &ops, 1_000);
         assert!(c.view(&w.workload_id).0.is_yielded());
 
@@ -591,9 +677,7 @@ mod tests {
         settle(&mut c, &ops, 1_100);
         assert_eq!(c.view(&w.workload_id).0, ReliefState::None);
         // 그리고 압력이 남아 있어도 다시 걸리지 않는다.
-        assert!(c
-            .plan(2_000, PressureLevel::Warning, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 2_000, PressureLevel::Warning, &[], &live, true).is_empty());
     }
 
     /// §2: NORMAL 회복 뒤에는 한 번에 하나씩 `relief_release_interval`
@@ -604,35 +688,40 @@ mod tests {
         let a = running();
         let b = running();
         let live = vec![a.clone(), b.clone()];
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Warning, &[], &live, true);
         assert_eq!(ops.len(), 2);
         settle(&mut c, &ops, 1_000);
 
         // 첫 NORMAL 틱: 정확히 하나.
-        let first = c.plan(5_000, PressureLevel::Normal, &[], &live, true);
+        let first = plan_no_hog(&mut c, 5_000, PressureLevel::Normal, &[], &live, true);
         assert_eq!(first.len(), 1, "한 번에 하나 (got {first:?})");
         settle(&mut c, &first, 5_000);
 
         // 간격 전에는 아무것도 풀지 않는다.
-        assert!(c
-            .plan(
-                5_000 + INTERVAL - 1,
-                PressureLevel::Normal,
-                &[],
-                &live,
-                true
-            )
-            .is_empty());
+        assert!(plan_no_hog(
+            &mut c,
+            5_000 + INTERVAL - 1,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            true
+        )
+        .is_empty());
 
-        let second = c.plan(5_000 + INTERVAL, PressureLevel::Normal, &[], &live, true);
+        let second = plan_no_hog(
+            &mut c,
+            5_000 + INTERVAL,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            true,
+        );
         assert_eq!(second.len(), 1);
         settle(&mut c, &second, 5_000 + INTERVAL);
         assert_eq!(c.view(&a.workload_id).0, ReliefState::None);
         assert_eq!(c.view(&b.workload_id).0, ReliefState::None);
         // 더 풀 것이 없으면 조용하다.
-        assert!(c
-            .plan(20_000, PressureLevel::Normal, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 20_000, PressureLevel::Normal, &[], &live, true).is_empty());
     }
 
     /// 순차 복원은 가장 오래 양보한 것부터다.
@@ -643,7 +732,8 @@ mod tests {
         let recent = running();
         let live = vec![old.clone(), recent.clone()];
 
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_000,
             PressureLevel::Warning,
             &[],
@@ -651,10 +741,10 @@ mod tests {
             true,
         );
         settle(&mut c, &ops, 1_000);
-        let ops = c.plan(4_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 4_000, PressureLevel::Warning, &[], &live, true);
         settle(&mut c, &ops, 4_000);
 
-        let first = c.plan(9_000, PressureLevel::Normal, &[], &live, true);
+        let first = plan_no_hog(&mut c, 9_000, PressureLevel::Normal, &[], &live, true);
         assert_eq!(restored_ids(&first), vec![old.workload_id.as_str()]);
     }
 
@@ -664,11 +754,12 @@ mod tests {
         let mut c = controller(true);
         let w = running();
         let live = vec![w.clone()];
-        let ops = c.plan(1_000, PressureLevel::Critical, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Critical, &[], &live, true);
         settle(&mut c, &ops, 1_000);
         assert!(c.view(&w.workload_id).0.is_yielded());
 
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_500,
             PressureLevel::Critical,
             std::slice::from_ref(&w.session_id),
@@ -679,15 +770,15 @@ mod tests {
         settle(&mut c, &ops, 1_500);
         assert_eq!(c.view(&w.workload_id).0, ReliefState::None);
         // 그리고 포커스가 있는 한 다시 걸리지 않는다.
-        assert!(c
-            .plan(
-                2_500,
-                PressureLevel::Critical,
-                std::slice::from_ref(&w.session_id),
-                &live,
-                true
-            )
-            .is_empty());
+        assert!(plan_no_hog(
+            &mut c,
+            2_500,
+            PressureLevel::Critical,
+            std::slice::from_ref(&w.session_id),
+            &live,
+            true
+        )
+        .is_empty());
     }
 
     /// 수동 양보는 자동 복원되지 않는다(§0-2: 수동 > 자동).
@@ -705,18 +796,16 @@ mod tests {
         ));
 
         // NORMAL 회복도, 포커스도 수동 양보를 건드리지 않는다.
-        assert!(c
-            .plan(9_000, PressureLevel::Normal, &[], &live, true)
-            .is_empty());
-        assert!(c
-            .plan(
-                12_000,
-                PressureLevel::Normal,
-                std::slice::from_ref(&w.session_id),
-                &live,
-                true
-            )
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 9_000, PressureLevel::Normal, &[], &live, true).is_empty());
+        assert!(plan_no_hog(
+            &mut c,
+            12_000,
+            PressureLevel::Normal,
+            std::slice::from_ref(&w.session_id),
+            &live,
+            true
+        )
+        .is_empty());
         // 사용자가 직접 복원할 때만 풀린다.
         let ops = c.manual(&w.workload_id, ReliefAction::Restore, PressureLevel::Normal);
         assert_eq!(restored_ids(&ops), vec![w.workload_id.as_str()]);
@@ -729,7 +818,8 @@ mod tests {
     fn manual_yield_takes_over_an_existing_auto_yield_without_a_new_os_call() {
         let mut c = controller(true);
         let w = running();
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_000,
             PressureLevel::Warning,
             &[],
@@ -758,7 +848,7 @@ mod tests {
         let mut c = controller(true);
         let w = running();
         let live = vec![w.clone()];
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Warning, &[], &live, true);
         settle(&mut c, &ops, 1_000);
 
         let ops = c.manual(
@@ -773,19 +863,13 @@ mod tests {
         assert!(protected, "압력이 풀릴 때까지 보호된다");
 
         // 압력이 남아 있는 동안은 계속 면제.
-        assert!(c
-            .plan(3_000, PressureLevel::Warning, &[], &live, true)
-            .is_empty());
-        assert!(c
-            .plan(4_000, PressureLevel::Critical, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 3_000, PressureLevel::Warning, &[], &live, true).is_empty());
+        assert!(plan_no_hog(&mut c, 4_000, PressureLevel::Critical, &[], &live, true).is_empty());
 
         // NORMAL을 한 번 지나면 일시 보호가 풀린다.
-        assert!(c
-            .plan(5_000, PressureLevel::Normal, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 5_000, PressureLevel::Normal, &[], &live, true).is_empty());
         assert!(!c.view(&w.workload_id).1, "NORMAL에서 보호가 풀린다");
-        let ops = c.plan(6_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 6_000, PressureLevel::Warning, &[], &live, true);
         assert_eq!(yielded_ids(&ops), vec![w.workload_id.as_str()]);
     }
 
@@ -805,15 +889,15 @@ mod tests {
     fn an_unsupported_platform_plans_nothing() {
         let mut c = controller(true);
         let w = running();
-        assert!(c
-            .plan(
-                1_000,
-                PressureLevel::Critical,
-                &[],
-                std::slice::from_ref(&w),
-                false
-            )
-            .is_empty());
+        assert!(plan_no_hog(
+            &mut c,
+            1_000,
+            PressureLevel::Critical,
+            &[],
+            std::slice::from_ref(&w),
+            false
+        )
+        .is_empty());
 
         // capability는 지원한다고 했지만 실제 호출이 Unsupported를 돌려주면
         // **그 워크로드만** 더 시도하지 않는다 — 위임 cgroup Linux에서
@@ -821,7 +905,7 @@ mod tests {
         let mut c = controller(true);
         let other = running();
         let live = vec![w.clone(), other.clone()];
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Warning, &[], &live, true);
         assert_eq!(ops.len(), 2);
         let err: io::Result<SchedulingOutcome> =
             Err(io::Error::new(io::ErrorKind::Unsupported, "no"));
@@ -839,9 +923,7 @@ mod tests {
             c.view(&other.workload_id).0.is_yielded(),
             "나머지 워크로드는 그대로 양보된다"
         );
-        assert!(c
-            .plan(2_000, PressureLevel::Warning, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 2_000, PressureLevel::Warning, &[], &live, true).is_empty());
     }
 
     /// 자동 양보 스위치가 꺼져 있으면 자동 계획은 없지만 수동은 그대로 된다.
@@ -850,9 +932,7 @@ mod tests {
         let mut c = controller(false);
         let w = running();
         let live = vec![w.clone()];
-        assert!(c
-            .plan(1_000, PressureLevel::Critical, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 1_000, PressureLevel::Critical, &[], &live, true).is_empty());
 
         let ops = c.manual(&w.workload_id, ReliefAction::Yield, PressureLevel::Critical);
         assert_eq!(yielded_ids(&ops), vec![w.workload_id.as_str()]);
@@ -869,14 +949,14 @@ mod tests {
         let mut c = controller(true);
         let w = running();
         let live = vec![w.clone()];
-        let ops = c.plan(1_000, PressureLevel::Warning, &[], &live, true);
+        let ops = plan_no_hog(&mut c, 1_000, PressureLevel::Warning, &[], &live, true);
         assert!(c.record(&ops[0], &partial(), 1_000));
         assert!(matches!(
             c.view(&w.workload_id).0,
             ReliefState::Yielded { partial: true, .. }
         ));
 
-        let retry = c.plan(2_000, PressureLevel::Warning, &[], &live, true);
+        let retry = plan_no_hog(&mut c, 2_000, PressureLevel::Warning, &[], &live, true);
         assert_eq!(yielded_ids(&retry), vec![w.workload_id.as_str()]);
         assert!(c.record(&retry[0], &ok(), 2_000), "이제 완전히 걸렸다");
         match c.view(&w.workload_id).0 {
@@ -889,9 +969,7 @@ mod tests {
             other => panic!("yielded expected, got {other:?}"),
         }
         // 완전히 걸린 뒤에는 더 시도하지 않는다.
-        assert!(c
-            .plan(3_000, PressureLevel::Warning, &[], &live, true)
-            .is_empty());
+        assert!(plan_no_hog(&mut c, 3_000, PressureLevel::Warning, &[], &live, true).is_empty());
     }
 
     /// 사라진 워크로드의 기록은 버린다 — 유령에게 OS 호출을 보내지 않는다.
@@ -900,7 +978,8 @@ mod tests {
         let mut c = controller(true);
         let gone = running();
         let alive = running();
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_000,
             PressureLevel::Warning,
             &[],
@@ -911,7 +990,8 @@ mod tests {
         assert!(c.view(&gone.workload_id).0.is_yielded());
 
         // `gone`이 목록에서 빠진다: 복원 op 없이 기록만 사라진다.
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             9_000,
             PressureLevel::Normal,
             &[],
@@ -929,7 +1009,8 @@ mod tests {
         let mut c = controller(true);
         let auto = running();
         let manual = running();
-        let ops = c.plan(
+        let ops = plan_no_hog(
+            &mut c,
             1_000,
             PressureLevel::Warning,
             &[],
@@ -955,5 +1036,194 @@ mod tests {
         want.sort();
         assert_eq!(ops, want);
         assert_eq!(c.view(&auto.workload_id).0, ReliefState::None);
+    }
+
+    /// CPU 독점(가드 정책의 `cpu_cores_limit` 초과 지속)은 호스트 압력과
+    /// 무관하게 — NORMAL에서도 — 양보 대상이 된다. 지속 시간을 채우기 전에는
+    /// 아무것도 하지 않는다.
+    #[test]
+    fn cpu_hog_is_yielded_at_normal_after_sustain() {
+        let mut c = controller(true);
+        let w = running();
+        let live = vec![w.clone()];
+        let over = [w.workload_id.clone()];
+
+        assert!(c
+            .plan(0, PressureLevel::Normal, &[], &live, true, &over, 20_000)
+            .is_empty());
+        assert!(c
+            .plan(
+                19_999,
+                PressureLevel::Normal,
+                &[],
+                &live,
+                true,
+                &over,
+                20_000
+            )
+            .is_empty());
+        let ops = c.plan(
+            20_000,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            true,
+            &over,
+            20_000,
+        );
+        assert_eq!(yielded_ids(&ops), vec![w.workload_id.as_str()]);
+    }
+
+    /// 포커스된 세션의 CPU 독점은 끝까지 양보하지 않는다(§0-3).
+    #[test]
+    fn cpu_hog_focused_is_never_yielded() {
+        let mut c = controller(true);
+        let w = running();
+        let live = vec![w.clone()];
+        let over = [w.workload_id.clone()];
+        for now in [0, 20_000, 120_000] {
+            assert!(c
+                .plan(
+                    now,
+                    PressureLevel::Normal,
+                    std::slice::from_ref(&w.session_id),
+                    &live,
+                    true,
+                    &over,
+                    20_000
+                )
+                .is_empty());
+        }
+    }
+
+    /// 보호(수동 Protect)·수동 양보된 독점은 자동 양보 대상이 아니다.
+    #[test]
+    fn cpu_hog_protected_or_manual_is_skipped() {
+        let mut c = controller(true);
+        let w = running();
+        let live = vec![w.clone()];
+        let over = [w.workload_id.clone()];
+        assert!(c
+            .manual(&w.workload_id, ReliefAction::Protect, PressureLevel::Normal)
+            .is_empty());
+        assert!(c
+            .plan(
+                120_000,
+                PressureLevel::Normal,
+                &[],
+                &live,
+                true,
+                &over,
+                20_000
+            )
+            .is_empty());
+
+        // 수동 양보로 이미 걸려 있으면 그대로 둔다(새 op 없음).
+        let mut c = controller(true);
+        let w = running();
+        let live = vec![w.clone()];
+        let over = [w.workload_id.clone()];
+        let ops = c.manual(&w.workload_id, ReliefAction::Yield, PressureLevel::Normal);
+        settle(&mut c, &ops, 1_000);
+        assert!(c
+            .plan(
+                120_000,
+                PressureLevel::Normal,
+                &[],
+                &live,
+                true,
+                &over,
+                20_000
+            )
+            .is_empty());
+        assert!(c.view(&w.workload_id).0.is_yielded());
+    }
+
+    /// 독점이 끊기면(초과 집합에서 빠지면) NORMAL의 순차 복원이 되돌린다.
+    /// 초과가 이어지는 동안에는 릴리스 간격이 지나도 복원하지 않는다.
+    #[test]
+    fn cpu_hog_restores_after_over_ends() {
+        let mut c = controller(true);
+        let w = running();
+        let live = vec![w.clone()];
+        let over = [w.workload_id.clone()];
+        assert!(c
+            .plan(0, PressureLevel::Normal, &[], &live, true, &over, 20_000)
+            .is_empty());
+        let ops = c.plan(
+            20_000,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            true,
+            &over,
+            20_000,
+        );
+        settle(&mut c, &ops, 20_000);
+        assert!(c.view(&w.workload_id).0.is_yielded());
+
+        // 초과가 계속되는 동안에는 복원하지 않는다.
+        assert!(c
+            .plan(
+                26_000,
+                PressureLevel::Normal,
+                &[],
+                &live,
+                true,
+                &over,
+                20_000
+            )
+            .is_empty());
+        // 초과가 끊기면 다음 틱에 복원 후보가 된다.
+        let ops = c.plan(27_000, PressureLevel::Normal, &[], &live, true, &[], 20_000);
+        assert_eq!(restored_ids(&ops), vec![w.workload_id.as_str()]);
+    }
+
+    /// 초과가 한 틱이라도 끊기면 지속 시간은 처음부터 다시 센다.
+    #[test]
+    fn cpu_hog_gap_resets_sustain() {
+        let mut c = controller(true);
+        let w = running();
+        let live = vec![w.clone()];
+        let over = [w.workload_id.clone()];
+        assert!(c
+            .plan(0, PressureLevel::Normal, &[], &live, true, &over, 20_000)
+            .is_empty());
+        // t=10_000에 초과가 끊기고 t=10_001부터 다시 시작된다.
+        assert!(c
+            .plan(10_000, PressureLevel::Normal, &[], &live, true, &[], 20_000)
+            .is_empty());
+        assert!(c
+            .plan(
+                10_001,
+                PressureLevel::Normal,
+                &[],
+                &live,
+                true,
+                &over,
+                20_000
+            )
+            .is_empty());
+        assert!(c
+            .plan(
+                30_000,
+                PressureLevel::Normal,
+                &[],
+                &live,
+                true,
+                &over,
+                20_000
+            )
+            .is_empty());
+        let ops = c.plan(
+            30_001,
+            PressureLevel::Normal,
+            &[],
+            &live,
+            true,
+            &over,
+            20_000,
+        );
+        assert_eq!(yielded_ids(&ops), vec![w.workload_id.as_str()]);
     }
 }

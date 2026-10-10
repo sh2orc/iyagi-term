@@ -65,7 +65,7 @@
   },
   "cpu_pressure": {"warning_used_percent": 85, "critical_used_percent": 95, "recovery_used_percent": 70},
   "relief": {"auto_yield": true},
-  "resource_guard": {"auto_suspend": true, "cpu_cores_limit": 6, "rss_limit_bytes": "4294967296", "sustain_ms": "20000", "auto_resume": false},
+  "resource_guard": {"auto_suspend": true, "cpu_cores_limit": 6, "rss_limit_bytes": "4294967296", "sustain_ms": "20000", "rss_sustain_ms": "5000", "auto_resume": false},
   "ui": {"leaf_min_width_px": 240, "leaf_min_height_px": 144, "pane_header_px": 24, "divider_px": 4, "resource_strip_px": 28, "font_size_px": 13, "line_height": 1.1},
   "remote": {"snapshot_bytes": 1073741824, "file_bytes": 67108864, "reconnect_ms": [1000, 2000, 4000, 8000, 16000, 30000]}
 }

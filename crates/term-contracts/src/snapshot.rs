@@ -185,10 +185,18 @@ pub struct GuardPolicy {
     pub cpu_cores_limit: u32,
     /// 워크로드 귀속 메모리 한도(바이트).
     pub rss_limit_bytes: U64String,
-    /// 한도 초과를 "지속"으로 인정하는 시간(밀리초).
+    /// 한도 초과를 "지속"으로 인정하는 시간(밀리초) — CPU 양보 판정이 쓴다.
     pub sustain_ms: U64String,
+    /// 메모리 한도 초과를 "지속"으로 인정하는 시간(밀리초). CPU보다 짧다 —
+    /// 메모리 급등은 20초를 기다리면 스왑이 먼저 온다.
+    #[serde(default = "default_rss_sustain_ms")]
+    pub rss_sustain_ms: U64String,
     /// 정지된 워크로드를 조건 회복 시 자동 재개한다(기본 off: 사용자 재개).
     pub auto_resume: bool,
+}
+
+fn default_rss_sustain_ms() -> U64String {
+    U64String::new(5_000).expect("5 s in range")
 }
 
 impl Default for GuardPolicy {
@@ -198,6 +206,7 @@ impl Default for GuardPolicy {
             cpu_cores_limit: 6,
             rss_limit_bytes: U64String::new(4 * 1024 * 1024 * 1024).expect("4 GiB in range"),
             sustain_ms: U64String::new(20_000).expect("20 s in range"),
+            rss_sustain_ms: default_rss_sustain_ms(),
             auto_resume: false,
         }
     }

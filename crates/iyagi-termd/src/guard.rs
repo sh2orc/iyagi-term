@@ -157,7 +157,8 @@ impl GuardController {
         ordered.sort_by(|a, b| a.workload_id.as_str().cmp(b.workload_id.as_str()));
 
         let mut ops = Vec::new();
-        let sustain = self.policy.sustain_ms.get().max(1);
+        // 메모리 초과의 지속 창 — CPU의 sustain_ms(양보 판정이 쓴다)와 별개다.
+        let sustain = self.policy.rss_sustain_ms.get().max(1);
         let rss_limit = self.policy.rss_limit_bytes.get().max(1);
 
         for workload in &ordered {
@@ -453,7 +454,12 @@ mod tests {
     use super::*;
 
     fn policy() -> GuardPolicy {
-        GuardPolicy::default()
+        // 이 모듈의 기존 시험들은 20 s 창의 타이밍을 가정한다 — 메모리 창의
+        // 새 기본(5 s)과 무관하게 유지한다(새 기본은 아래 독립 시험이 다룬다).
+        GuardPolicy {
+            rss_sustain_ms: U64String::new(20_000).expect("20 s in range"),
+            ..GuardPolicy::default()
+        }
     }
 
     fn usage(cpu: Option<f64>, rss: Option<u64>) -> LiveUsage {
@@ -1151,6 +1157,38 @@ mod tests {
         assert!(matches!(
             ops.as_slice(),
             [GuardOp::Suspend { workload_id, .. }] if workload_id == &other.workload_id
+        ));
+    }
+
+    /// 메모리 지속 창은 CPU 창과 별개다 — 기본 정책(rss 5 s / cpu 20 s)에서
+    /// RSS 초과는 CPU 창이 지나기 전에 이미 정지한다.
+    #[test]
+    fn rss_sustain_is_independent_from_cpu_sustain() {
+        let mut guard = GuardController::new(GuardPolicy::default());
+        let w = usage(Some(7.5), Some(5 * 1024 * 1024 * 1024));
+        let live = vec![w.clone()];
+        guard.plan(
+            0,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            &live,
+            None,
+        );
+        let ops = guard.plan(
+            5_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            &live,
+            None,
+        );
+        assert!(matches!(
+            ops.as_slice(),
+            [GuardOp::Suspend {
+                reason: GuardReason::MemoryLimit,
+                ..
+            }]
         ));
     }
 }

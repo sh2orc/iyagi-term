@@ -344,6 +344,7 @@ export class MockDaemonClient implements DaemonClient {
     cpu_cores_limit: 6,
     rss_limit_bytes: "4294967296",
     sustain_ms: "20000",
+    rss_sustain_ms: "5000",
     auto_resume: false,
   };
   private revision = 1;

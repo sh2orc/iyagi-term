@@ -8,7 +8,7 @@
 //! `04-ui.md`: "direct shell workload는 session 단위 자원 관측이다").
 //! 셸 사용량은 관리 예약 합에 절대 더하지 않는다(03 §3).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use term_contracts::ids::{ProcessIdentity, WorkloadId};
@@ -173,11 +173,22 @@ fn run_guard(
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .clone();
-    let live: Vec<crate::guard::LiveUsage> = state
-        .live_workloads_for_relief()
+    // 완화 쪽 보호 표시(sticky·압력 중 수동 복원)도 가드의 자동 정지 대상에서
+    // 뺀다 — relief 락을 먼저 잡고 푼 뒤 guard 락을 잠근다(교착 규율).
+    let live_raw = state.live_workloads_for_relief();
+    let protected_ids: HashSet<WorkloadId> = {
+        let relief = state.relief.lock().unwrap_or_else(|p| p.into_inner());
+        live_raw
+            .iter()
+            .map(|w| w.workload_id.clone())
+            .filter(|id| relief.is_protected(id))
+            .collect()
+    };
+    let live: Vec<crate::guard::LiveUsage> = live_raw
         .into_iter()
         .map(|w| {
             let u = usage.get(&w.workload_id);
+            let protected = protected_ids.contains(&w.workload_id);
             let measured = |q: term_contracts::metrics::MetricQuality| {
                 matches!(
                     q,
@@ -201,6 +212,7 @@ fn run_guard(
                             .flatten()
                     })
                     .map(|v| v.get()),
+                protected,
             }
         })
         .collect();

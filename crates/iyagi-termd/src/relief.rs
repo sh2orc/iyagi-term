@@ -147,6 +147,14 @@ impl ReliefController {
             .is_some_and(|record| record.unsupported)
     }
 
+    /// 사용자가 보호한 워크로드인가(sticky 또는 압력 중 수동 복원). 가드가
+    /// 자동 정지 대상에서 빼는 데 쓴다.
+    pub fn is_protected(&self, workload_id: &WorkloadId) -> bool {
+        self.records
+            .get(workload_id)
+            .is_some_and(|record| record.protected())
+    }
+
     /// 한 틱의 계획. 부수효과는 기록 정리(죽은 워크로드 제거, NORMAL에서
     /// 일시 보호 해제, 순차 복원 타이머)뿐이고 OS는 건드리지 않는다.
     ///

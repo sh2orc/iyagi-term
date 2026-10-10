@@ -76,6 +76,8 @@ pub struct LiveUsage {
     pub cpu_cores: Option<f64>,
     /// 귀속 상주 바이트(측정·추정만).
     pub resident_bytes: Option<u64>,
+    /// 완화 쪽 보호 표시 — 자동 정지(개별 한도·호스트 압력) 대상에서 뺀다.
+    pub protected: bool,
 }
 
 /// 워크로드 하나의 가드 기록.
@@ -201,7 +203,9 @@ impl GuardController {
                 continue;
             }
 
-            if over {
+            // 보호 표시된 워크로드는 자동 정지 대상이 아니다 — 아래 else에서
+            // over_since_ms가 None으로 유지된다.
+            if over && !workload.protected {
                 record.over_since_ms.get_or_insert(now_ms);
                 let over_for = now_ms.saturating_sub(record.over_since_ms.unwrap_or(now_ms));
                 let already = record.state.is_suspended();
@@ -259,6 +263,7 @@ impl GuardController {
                     .iter()
                     .filter(|w| w.state == WorkloadState::Running)
                     .filter(|w| !focused.contains(w.session_id.as_str()))
+                    .filter(|w| !w.protected)
                     .filter(|w| {
                         self.records
                             .get(&w.workload_id)
@@ -458,7 +463,14 @@ mod tests {
             state: WorkloadState::Running,
             cpu_cores: cpu,
             resident_bytes: rss,
+            protected: false,
         }
+    }
+
+    fn protected_usage(cpu: Option<f64>, rss: Option<u64>) -> LiveUsage {
+        let mut w = usage(cpu, rss);
+        w.protected = true;
+        w
     }
 
     fn suspended(state: &GuardState) -> bool {
@@ -1094,5 +1106,51 @@ mod tests {
             matches!(ops.as_slice(), [GuardOp::Resume { .. }]),
             "백오프가 지나면 재시도: {ops:?}"
         );
+    }
+
+    /// 보호 표시된 워크로드는 개별 메모리 한도를 넘어도 자동 정지하지 않는다.
+    #[test]
+    fn protected_workload_is_never_auto_suspended() {
+        let mut guard = GuardController::new(policy());
+        let w = protected_usage(Some(0.1), Some(5 * 1024 * 1024 * 1024));
+        let live = vec![w.clone()];
+        guard.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            &live,
+            None,
+        );
+        let ops = guard.plan(
+            60_000,
+            PressureLevel::Normal,
+            PressureLevel::Warning,
+            &[],
+            &live,
+            None,
+        );
+        assert!(ops.is_empty(), "보호된 워크로드는 얼리지 않는다: {ops:?}");
+    }
+
+    /// CRITICAL 희생 선택에서도 보호된 것은 빠진다 — RSS 최대여도 두 번째가
+    /// 희생된다.
+    #[test]
+    fn protected_workload_is_skipped_as_pressure_victim() {
+        let mut guard = GuardController::new(policy());
+        let protected = protected_usage(Some(0.1), Some(6 * 1024 * 1024 * 1024));
+        let other = usage(Some(0.1), Some(2 * 1024 * 1024 * 1024));
+        let ops = guard.plan(
+            1_000,
+            PressureLevel::Normal,
+            PressureLevel::Critical,
+            &[],
+            &[protected.clone(), other.clone()],
+            None,
+        );
+        assert!(matches!(
+            ops.as_slice(),
+            [GuardOp::Suspend { workload_id, .. }] if workload_id == &other.workload_id
+        ));
     }
 }

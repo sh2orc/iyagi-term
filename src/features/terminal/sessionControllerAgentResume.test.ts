@@ -15,7 +15,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionRecord } from "../../generated/AgentSessionRecord";
+import type { HostSample } from "../../generated/HostSample";
 import type { LaunchRequest } from "../../generated/LaunchRequest";
+import type { Metric } from "../../generated/Metric";
 import type { DaemonClient, DaemonEvent } from "../daemon/client";
 import { RpcClientError } from "../daemon/client";
 import { MockDaemonClient } from "../daemon/mockClient";
@@ -152,6 +154,38 @@ function holdLaunches(client: MockDaemonClient): LaunchRequest[] {
   return launches;
 }
 
+/** 실행 요청을 기록하고 결과를 잡아 둔다 — release(n)로 하나씩 풀면 그때 비로소 끝난다. */
+function heldLaunches(client: MockDaemonClient): { launches: LaunchRequest[]; release: (n: number) => void } {
+  const launches: LaunchRequest[] = [];
+  const releases: Array<() => void> = [];
+  const original = client.workloadLaunch.bind(client);
+  vi.spyOn(client, "workloadLaunch").mockImplementation((request: LaunchRequest) => {
+    launches.push(request);
+    const outcome = original(request);
+    return new Promise((resolve) => {
+      releases.push(() => { void outcome.then(resolve); });
+    });
+  });
+  return { launches, release: (n) => releases[n]?.() };
+}
+
+/** 압력 문자열만 바꾼 최소 호스트 샘플(ResourceStrip 시험의 sample()을 줄였다). */
+function hostSample(pressure: "NORMAL" | "WARNING" | "CRITICAL"): HostSample {
+  const metric = <T,>(value: T): Metric<T> => ({ value, source: "test", quality: "measured", reason: null });
+  return {
+    monotonic_ms: 1000,
+    logical_cpu_count: 10,
+    cpu_cores_used: metric(1),
+    physical_total_bytes: metric("1000"),
+    physical_available_bytes: metric("500"),
+    swap_used_bytes: metric("0"),
+    pressure,
+    cpu_pressure: "NORMAL",
+    disks: [],
+    interfaces: [],
+  };
+}
+
 const commandLine = (request: LaunchRequest): string => [request.program, ...request.argv].join(" ");
 
 describe("복원: 기록이 있으면 그 자리에서 이어서 열고, 없으면 출력을 재생한다", () => {
@@ -214,6 +248,60 @@ describe("복원: 기록이 있으면 그 자리에서 이어서 열고, 없으�
       const panes = useWorkbenchStore.getState().panes;
       expect([panes["leaf-1"].phase, panes["leaf-2"].phase]).toEqual(["starting", "starting"]);
     } finally { controller.dispose(); }
+  });
+
+  it("자동 재개는 한 번에 3개까지만 띄우고, 하나가 끝나면 다음을 띄운다", async () => {
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    client.seedAgentSessions([1, 2, 3, 4, 5].map((n) => record({
+      id: `rec-${n}`, workload_id: `w-old${n}`, pty_session_id: `s-old${n}`,
+      agent_session_id: `agent-session-000${n}`, cwd: `/work/p${n}`,
+    })));
+    const { launches, release } = heldLaunches(client);
+    seedWorkspace(...[1, 2, 3, 4, 5].map((n) => savedPane({
+      leafId: `leaf-${n}`, viewId: `view-${n}`, sessionId: `s-old${n}`, workloadId: `w-old${n}`, cwd: `/work/p${n}`,
+    })));
+
+    const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+    try {
+      await controller.restoreWorkspace();
+      await vi.waitFor(() => expect(launches).toHaveLength(3));
+      // 마이크로태스크가 더 흘러도 4·5번째는 대기 중이다.
+      await new Promise<void>((done) => setTimeout(done, 0));
+      expect(launches).toHaveLength(3);
+      // 첫 실행이 끝나면(성공·실패 무관) 다음이 뜬다.
+      release(0);
+      await vi.waitFor(() => expect(launches).toHaveLength(4));
+    } finally { controller.dispose(); }
+  });
+
+  it("메모리 압력이 CRITICAL이면 자동 재개를 미루고 풀리면 띄운다", async () => {
+    vi.useFakeTimers();
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const launches = holdLaunches(client);
+    // 복원이 적용하는 시스템 스냅샷의 host 압력을 CRITICAL로 만든다 — mock은
+    // 항상 NORMAL을 주므로 여기서 바꿔친다.
+    const originalSnapshot = client.systemSnapshot.bind(client);
+    vi.spyOn(client, "systemSnapshot").mockImplementation(async () => {
+      const snapshot = await originalSnapshot();
+      return { ...snapshot, host: { ...snapshot.host, pressure: "CRITICAL" as const } };
+    });
+    try {
+      client.seedAgentSessions([record()]);
+      seedWorkspace(savedPane());
+
+      const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+      try {
+        await controller.restoreWorkspace();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(launches).toHaveLength(0);
+        useWorkbenchStore.setState({ host: hostSample("NORMAL") });
+        await vi.advanceTimersByTimeAsync(600);
+        expect(launches.length).toBeGreaterThanOrEqual(1);
+      } finally { controller.dispose(); }
+    } finally {
+      useWorkbenchStore.setState({ host: null });
+      vi.useRealTimers();
+    }
   });
 
   it("같은 대화를 가리키는 pane이 둘이면 한 번만 띄우고 나머지는 버튼으로 남긴다", async () => {

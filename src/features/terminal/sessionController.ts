@@ -187,6 +187,11 @@ const SNAPSHOT_AFTER_REPLAY_BYTES = 256 * 1024;
 const SNAPSHOT_QUIT_FLUSH_MS = 1500;
 /** 앱 시작 때 활성 탭 재생을 먼저 끝내도록 나머지 pane 연결을 미루는 상한. */
 const DEFERRED_ATTACH_MAX_WAIT_MS = 3000;
+/** 한 번에 띄우는 자동 재개 수. 에이전트는 기동 때 Node 로딩·대화 기록 읽기로 잠깐
+ *  CPU·RAM을 많이 쓰므로 전부 동시에 띄우지 않는다. 3개면 10코어 PC에서 체감되지 않는다. */
+const RESTORED_RESUME_CONCURRENCY = 3;
+/** CRITICAL 메모리 압력이 풀리길 기다리는 상한. 넘기면 그냥 띄운다(영원히 안 띄우지 않는다). */
+const RESTORED_RESUME_PRESSURE_WAIT_MS = 30_000;
 /** 전체 강제 종료와 종료 상태 확인의 대기 상한. 실패하면 앱을 유지한다. */
 const QUIT_CANCEL_TIMEOUT_MS = 10000;
 /** 새 pane의 PTY 크기를 재려고 mount를 기다리는 프레임 수 상한. */
@@ -2293,22 +2298,42 @@ export class SessionController {
   }
 
   /**
-   * 앱 복원이 "이어서 열기" 자리로 남긴 에이전트 대화를 한꺼번에 이어서 연다.
-   * pane마다 따로 띄우고 서로를 기다리지 않는다(하나가 느리거나 실패해도 나머지는
-   * 그대로 뜬다). 그사이 그 pane을 닫았거나 '새 셸'·'이어서 열기'를 직접 눌렀으면
-   * 건너뛴다. 같은 대화를 가리키는 pane이 여럿이면 첫 pane만 열고 나머지는 버튼으로
+   * 앱 복원이 "이어서 열기" 자리로 남긴 에이전트 대화를 이어서 연다. 한 번에
+   * RESTORED_RESUME_CONCURRENCY개까지만 띄우고 하나가 끝나면(성공·실패 무관)
+   * 다음을 띄운다 — 에이전트 여럿이 동시에 뜨면 기동 비용이 한꺼번에 몰린다.
+   * 시작 전 호스트 메모리가 CRITICAL이면 풀릴 때까지(상한 있음) 기다린다.
+   * 그사이 그 pane을 닫았거나 '새 셸'·'이어서 열기'를 직접 눌렀으면 건너뛴다.
+   * 같은 대화를 가리키는 pane이 여럿이면 첫 pane만 열고 나머지는 버튼으로
    * 남긴다 — 같은 대화를 두 번 띄우지 않는다.
    */
   private async resumeRestoredAgents(targets: readonly RestoredResume[]): Promise<void> {
     const seen = new Set<string>();
-    const launches: Promise<void>[] = [];
-    for (const target of targets) {
+    const queue = targets.filter((target) => {
       const key = `${target.resume.agent}:${target.resume.agentSessionId}`;
-      if (seen.has(key)) continue;
+      if (seen.has(key)) return false;
       seen.add(key);
-      launches.push(this.resumeRestoredAgent(target));
+      return true;
+    });
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const next = queue.shift();
+        if (!next || this.disposed) return;
+        await this.waitForMemoryHeadroom(RESTORED_RESUME_PRESSURE_WAIT_MS);
+        if (this.disposed) return;
+        try { await this.resumeRestoredAgent(next); } catch { /* 개별 실패는 pane에 남는다 */ }
+      }
+    };
+    await Promise.all(Array.from({ length: RESTORED_RESUME_CONCURRENCY }, worker));
+  }
+
+  /** 호스트 메모리가 CRITICAL이 아닐 때까지 500ms 간격으로 기다린다(상한 있음). 샘플이
+   *  아직 없으면(host null) 기다리지 않는다. */
+  private async waitForMemoryHeadroom(maxMs: number): Promise<void> {
+    const start = Date.now();
+    while (useWorkbenchStore.getState().host?.pressure === "CRITICAL") {
+      if (this.disposed || Date.now() - start >= maxMs) return;
+      await new Promise<void>((done) => setTimeout(done, 500));
     }
-    await Promise.allSettled(launches);
   }
 
   private async resumeRestoredAgent({ leafId, viewId, resume }: RestoredResume): Promise<void> {

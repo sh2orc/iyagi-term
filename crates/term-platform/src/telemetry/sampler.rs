@@ -1105,7 +1105,8 @@ mod tests {
         let (mut sampler, core, _clock) = sampler_with_host_core();
         sampler.poll_host(0);
         sampler.poll_host(500); // cached: not pushed again
-        core.lock().unwrap().mem.available_bytes = 1 << 30; // pressure → critical
+        // 바이트 floor 한 칸 아래(1 GiB - 1) → critical.
+        core.lock().unwrap().mem.available_bytes = (1 << 30) - 1;
         sampler.poll_host(1_000);
         let history = sampler.host_history();
         assert_eq!(history.len(), 2);

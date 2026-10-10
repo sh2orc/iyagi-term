@@ -2208,7 +2208,7 @@ export class MockDaemonClient implements DaemonClient {
       physical_total_bytes: { value: String(total), source: "mock.host", quality: "measured", reason: null },
       physical_available_bytes: { value: String(available), source: "mock.host", quality: "measured", reason: null },
       swap_used_bytes: { value: String(Math.round(1.2 * GiB)), source: "mock.host", quality: "measured", reason: null },
-      pressure: available / total < 0.1 ? "CRITICAL" : available / total < 0.2 ? "WARNING" : "NORMAL",
+      pressure: available < GiB ? "CRITICAL" : available / total < 0.12 ? "WARNING" : "NORMAL",
       cpu_pressure: "NORMAL",
       // 첫 differential sample은 null(03 §2).
       cpu_cores_used: {

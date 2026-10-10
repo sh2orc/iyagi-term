@@ -609,7 +609,7 @@ npm run typecheck && npm run test:unit
   프로세스를 새로 긁고, `telemetry_loop.rs` 251·254줄이 워크로드마다 두 번 부른다.
 - 틱 시작에 한 번 스냅샷을 만들어 모든 워크로드가 공유하게 바꾼다.
 
-### P2-4. 커널 메모리 압력 신호를 쓴다
+### P2-4. 커널 메모리 압력 신호를 쓴다 — **완료(3.5절 T7으로 앞당겨 시행)**
 - `crates/term-core/src/pressure.rs` 190줄 `force_critical`은 호출처가 없다.
 - macOS: `sysctl kern.memorystatus_vm_pressure_level`(1 normal, 2 warn, 4 critical)을 틱마다 읽어
   4면 `force_critical`. Linux: `/proc/pressure/memory`의 `some avg10 > 20` 또는 `full avg10 > 5`.
@@ -618,6 +618,36 @@ npm run typecheck && npm run test:unit
 ### P2-5. 셸 경로 에이전트 실행에 가벼운 admission을 건다
 - 퀵스타트·이어서 열기·수동 재개(`sessionController.resumeAgentSession`)도 T5의
   `waitForMemoryHeadroom`을 거치게 한다. 거부는 하지 않는다(대기 상한 30초).
+
+## 3.5 1단계 완료 후 시행: 커널 압력 신호와 임계 완화 (P2-4 앞당김)
+
+T1~T6 완료 뒤 사용자 승인으로 시행했다. 동기: 큰 RAM 호스트에서 `<10%` 비율
+규칙이 압축·스왑이 잘 감당하는 상황에도 거짓 CRITICAL을 냈다 — "1GB 남았는데
+새 세션이 막힌다"는 보고의 원인. 실제 위기의 1차 신호는 비율이 아니라 커널
+판정이다(커널이 warn을 반환하는 동안에도 페이지 비율은 여유로울 수 있고, 그
+반대도 있다).
+
+**T7. 커널 메모리 압력 신호를 잇는다 (P2-4)**
+- `crates/term-platform/src/telemetry/kernel_pressure.rs` 신설.
+  `kernel_memory_critical()`: macOS는 `sysctl kern.memorystatus_vm_pressure_level`
+  (1=normal, 2=warn, 4=critical; **4 이상일 때만** 위기 — warn은 흔해서 반영하면
+  거짓이 늘어난다), Linux는 `/proc/pressure/memory` PSI(`some avg10 > 20` 또는
+  `full avg10 > 5`), Windows는 미지원(항상 false).
+- `telemetry_loop.rs`의 매 틱: tracker 갱신 뒤 커널이 위기면
+  `force_critical()`로 즉시 CRITICAL. 이미 CRITICAL이면 건너뛴다 — 회복
+  게이트가 쌓은 10초 창을 매 틱 리셋하면 커널이 회복돼도 풀리지 않는다.
+- 읽기 실패·파싱 실패는 "모름"(행동 없음). 관측 불가는 0이 아니다.
+
+**T8. 메모리 임계를 완화한다**
+- `defaults.json`: `critical_available_percent` 10 → **0**(비율 규칙 끔),
+  `warning_available_percent` 20 → **12**, `recovery_available_percent` 25 → **10**.
+  `critical_available_bytes`(1 GiB)는 그대로 — CRITICAL의 절대선.
+- 효과(24 GiB 호스트 기준): CRITICAL은 가용 < 1 GiB 또는 커널 위기일 때뿐.
+  회복은 가용 ≥ max(10%, S=15%floor 2 GiB) 10초 지속(예전 25% = 6 GiB보다
+  훨씬 덜 끈적이다). WARNING은 가용 < 12%(2.88 GiB).
+- `term-platform`의 순간 분류기 `classify_pressure`와 `term-core`의
+  `PressureConfig`가 어긋나지 않게 같이 맞췄다. mock 데몬(`mockClient.ts`)도
+  같은 규칙(1 GiB floor + 12%)로 미러링.
 
 ## 4. 3단계 (구조 변경 — 설계 메모)
 
@@ -635,7 +665,7 @@ npm run typecheck && npm run test:unit
 
 | 항목 | 값 | 위치 |
 |---|---|---|
-| 메모리 CRITICAL / WARNING / 회복 | 가용 <10% 또는 <1GiB / <20% / ≥25% 10초 | `crates/term-core/src/pressure.rs` |
+| 메모리 CRITICAL / WARNING / 회복 | 가용 <1GiB 또는 커널 위기 신호 / <12% / ≥max(10%, S) 10초 | `crates/term-core/src/pressure.rs`, `term-platform/src/telemetry/kernel_pressure.rs` |
 | CPU WARNING / CRITICAL / 회복 | ≥85% / ≥95% / ≤70% 10초 | 같은 파일 |
 | 악화 판정 | 2샘플 연속 | 같은 파일 |
 | 가드 한도 | 6코어, 4GiB, 20초, auto_resume off | `crates/term-contracts/src/snapshot.rs` `GuardPolicy` |

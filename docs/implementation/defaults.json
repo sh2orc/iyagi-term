@@ -58,10 +58,10 @@
     "host_reserve_min_bytes": 2147483648,
     "host_reserve_percent": 15,
     "managed_budget_percent": 50,
-    "critical_available_percent": 10,
+    "critical_available_percent": 0,
     "critical_available_bytes": 1073741824,
-    "warning_available_percent": 20,
-    "recovery_available_percent": 25
+    "warning_available_percent": 12,
+    "recovery_available_percent": 10
   },
   "cpu_pressure": {"warning_used_percent": 85, "critical_used_percent": 95, "recovery_used_percent": 70},
   "relief": {"auto_yield": true},

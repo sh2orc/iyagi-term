@@ -11,11 +11,15 @@ pub const CRITICAL_ABSOLUTE_BYTES: u64 = 1 << 30;
 /// Classifies memory pressure from physical totals.
 ///
 /// Boundary semantics (integer cross-multiplication, no float error), per
-/// spec `03-resources.md` §3 prose and identical to `term-core`'s tracker:
-/// * CRITICAL when `available < 1 GiB`, or `available/total` is strictly
-///   below 10% (`available * 10 < total`). Exactly 10.0% is WARNING.
-/// * WARNING when the ratio is strictly below 20% (`available * 5 < total`).
-///   Exactly 20.0% is NORMAL per the spec's `<20%` wording.
+/// the resource governance plan: CRITICAL is the 1 GiB absolute floor (or a
+/// zero total = broken telemetry) — the old `<10%` ratio rule is gone, it
+/// raised false CRITICALs on large-RAM hosts where macOS keeps compressing
+/// and swapping well below it. Real crises surface through the kernel signal
+/// (`kernel_pressure::kernel_memory_critical`) instead, which the daemon
+/// feeds to the tracker's `force_critical`.
+///
+/// * WARNING when the ratio is strictly below 12% (`available * 25 <
+///   total * 3`). Exactly 12.0% is NORMAL.
 /// * A total of 0 is broken telemetry and classifies conservatively as
 ///   CRITICAL — identical to `term-core`'s tracker, so the instantaneous
 ///   `HostSample.pressure` and the hysteresis level never disagree on it.
@@ -25,12 +29,8 @@ pub fn classify_pressure(total_bytes: u64, available_bytes: u64) -> PressureLeve
     }
     let total = total_bytes as u128;
     let avail = available_bytes as u128;
-    // available/total < 10%  <=>  available * 10 < total
-    if avail * 10 < total {
-        return PressureLevel::Critical;
-    }
-    // available/total < 20%  <=>  available * 5 < total
-    if avail * 5 < total {
+    // available/total < 12%  <=>  available * 25 < total * 3
+    if avail * 25 < total * 3 {
         return PressureLevel::Warning;
     }
     PressureLevel::Normal
@@ -49,37 +49,33 @@ mod tests {
     #[test]
     fn comfortable_headroom_is_normal() {
         assert_eq!(classify_pressure(16 * GIB, 12 * GIB), Normal);
-        // Exactly 20.0% available: <20% is WARNING, so 20.0% itself is NORMAL.
-        assert_eq!(classify_pressure(T, 200 * GIB), Normal);
+        // Exactly 12.0% available: <12% is WARNING, so 12.0% itself is NORMAL.
+        assert_eq!(classify_pressure(T, 120 * GIB), Normal);
         assert_eq!(classify_pressure(10 * GIB, 2 * GIB), Normal);
     }
 
     #[test]
-    fn below_twenty_percent_is_warning() {
-        assert_eq!(classify_pressure(T, 199 * GIB), Warning); // 19.9%
-        assert_eq!(classify_pressure(16 * GIB, 3 * GIB), Warning); // 18.75%
-                                                                   // Just above the critical line: 10.1% is WARNING territory.
+    fn below_twelve_percent_is_warning() {
+        assert_eq!(classify_pressure(T, 119 * GIB), Warning); // 11.9%
+        assert_eq!(classify_pressure(16 * GIB, GIB + 1), Warning); // ~6%
+                                                                       // Just above the critical floor: WARNING territory, never CRITICAL
+                                                                       // by ratio.
         assert_eq!(classify_pressure(T, 101 * GIB), Warning);
     }
 
     #[test]
-    fn ten_percent_boundary_is_warning_strict() {
-        // Exactly 10.0% is WARNING (spec: `<10%` is critical); one below is CRITICAL.
-        assert_eq!(classify_pressure(T, 100 * GIB), Warning);
-        assert_eq!(classify_pressure(T, 100 * GIB - 1), Critical);
-        assert_eq!(classify_pressure(10 * GIB, GIB), Warning);
-        // Comfortably below 10%.
-        assert_eq!(classify_pressure(16 * GIB, GIB), Critical); // 6.25%
-    }
-
-    #[test]
-    fn one_gib_absolute_floor() {
+    fn one_gib_absolute_floor_is_the_only_critical_rule() {
         // avail = 1 GiB exactly is not "< 1 GiB"; with a large total it falls
-        // to the ratio rule (12.5% here → WARNING).
-        assert_eq!(classify_pressure(8 * GIB, GIB), Warning);
-        // One byte under the floor is CRITICAL regardless of ratio.
+        // to the ratio rule (6.25% of 16 GiB here → WARNING).
+        assert_eq!(classify_pressure(16 * GIB, GIB), Warning);
+        // One byte under the floor is CRITICAL regardless of ratio — even on
+        // a huge host where that is a tiny fraction (the old <10% rule).
         assert_eq!(classify_pressure(64 * GIB, GIB - 1), Critical);
         assert_eq!(classify_pressure(10_000, 0), Critical);
+        // A large host deep under the old ratio line stays WARNING, not
+        // CRITICAL: the kernel signal owns real crises now.
+        assert_eq!(classify_pressure(24 * GIB, 2 * GIB), Warning); // 8.3%
+        assert_eq!(classify_pressure(32 * GIB, 2 * GIB), Warning); // 6.25%
     }
 
     #[test]
@@ -93,11 +89,12 @@ mod tests {
 
     #[test]
     fn boundary_math_survives_large_byte_values() {
-        // Large totals divisible by 10 so `total/10` is an exact 10.0%.
-        let total: u64 = 10 * (2 << 40) / 10 * 10; // 10 TiB-scale, divisible by 10
-        assert_eq!(classify_pressure(total, total / 10), Warning); // exactly 10%
-        assert_eq!(classify_pressure(total, total / 10 - 1), Critical);
-        assert_eq!(classify_pressure(total, total / 10 + 1), Warning);
+        // Large total divisible by 100 so `total*3/25` is an exact 12.0%.
+        let total: u64 = 25 * (2 << 40) / 100 * 100;
+        let twelve_percent = (total as u128 * 3).div_ceil(25) as u64;
+        assert_eq!(classify_pressure(total, twelve_percent), Normal); // exactly 12%
+        assert_eq!(classify_pressure(total, twelve_percent - 1), Warning);
+        assert_eq!(classify_pressure(total, twelve_percent + 1), Normal);
         assert_eq!(classify_pressure(u64::MAX, u64::MAX / 2), Normal);
     }
 }

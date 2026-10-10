@@ -1,12 +1,15 @@
 //! Host memory pressure classification with hysteresis
-//! (spec `03-resources.md` §3).
+//! (spec `03-resources.md` §3, 자원 거버넌스 계획의 임계 완화).
 //!
-//! Raw thresholds: `available/T < 10%` **or** `available < 1 GiB` → CRITICAL;
-//! `< 20%` → WARNING; else NORMAL. Hysteresis: worsening requires 2
-//! consecutive worse samples; recovery to NORMAL requires
-//! `available/T >= 25%` **and** `available >= S` sustained for
-//! `timing_ms.pressure_recovery` (default 10 s). A native memory-pressure
-//! critical signal raises CRITICAL immediately ([`PressureTracker::force_critical`]).
+//! Raw thresholds: `available < 1 GiB` → CRITICAL — the old `<10%` ratio
+//! rule is off by default (`critical_available_percent: 0`): 큰 RAM 호스트에서
+//! 압축·스왑이 잘 감당하는 데도 거짓 CRITICAL을 냈고, 실제 위기는 커널
+//! 신호(`force_critical`)가 잡는다. `< 12%` → WARNING; else NORMAL.
+//! Hysteresis: worsening requires 2 consecutive worse samples; recovery to
+//! NORMAL requires `available/T >= 10%` **and** `available >= S` sustained
+//! for `timing_ms.pressure_recovery` (default 10 s). A native memory-pressure
+//! critical signal raises CRITICAL immediately
+//! ([`PressureTracker::force_critical`]).
 //!
 //! Staleness is admission's business, not pressure's: a stale sample simply
 //! is not fed here, while admission returns `WAIT_TELEMETRY` for it. All math
@@ -21,13 +24,14 @@ use crate::clock::Clock;
 /// Thresholds from `defaults.json` (`admission.*`, `timing_ms.pressure_recovery`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PressureConfig {
-    /// `critical_available_percent` (default 10).
+    /// `critical_available_percent` (default 0 = 비율 규칙 끔. 실제 위기는
+    /// 커널 신호가 잡고 CRITICAL의 절대선은 바이트 floor가 담당한다).
     pub critical_available_percent: u64,
     /// `critical_available_bytes` (default 1 GiB).
     pub critical_available_bytes: u64,
-    /// `warning_available_percent` (default 20).
+    /// `warning_available_percent` (default 12).
     pub warning_available_percent: u64,
-    /// `recovery_available_percent` (default 25).
+    /// `recovery_available_percent` (default 10).
     pub recovery_available_percent: u64,
     /// `timing_ms.pressure_recovery` (default 10_000): sustained-good window.
     pub recovery_sustain_ms: u64,
@@ -59,9 +63,10 @@ impl PressureConfig {
         )
     }
 
-    /// Raw per-sample classification, no hysteresis. `available/T < pct` is
-    /// strict (exactly 10% is not critical); a zero total is broken telemetry
-    /// and classifies conservatively as CRITICAL.
+    /// Raw per-sample classification, no hysteresis. The byte floor binds
+    /// first; the ratio rule (`available/T < pct`) is strict and inert at the
+    /// default `pct = 0`; a zero total is broken telemetry and classifies
+    /// conservatively as CRITICAL.
     pub fn classify(&self, total_bytes: u64, available_bytes: u64) -> PressureLevel {
         if total_bytes == 0 {
             return PressureLevel::Critical;
@@ -370,10 +375,10 @@ mod tests {
     #[test]
     fn from_defaults_pins_spec_thresholds() {
         let cfg = config();
-        assert_eq!(cfg.critical_available_percent, 10);
+        assert_eq!(cfg.critical_available_percent, 0);
         assert_eq!(cfg.critical_available_bytes, GIB);
-        assert_eq!(cfg.warning_available_percent, 20);
-        assert_eq!(cfg.recovery_available_percent, 25);
+        assert_eq!(cfg.warning_available_percent, 12);
+        assert_eq!(cfg.recovery_available_percent, 10);
         assert_eq!(cfg.recovery_sustain_ms, 10_000);
         assert_eq!(cfg.host_reserve_bytes(T16), 2_576_980_378);
     }
@@ -381,17 +386,17 @@ mod tests {
     #[test]
     fn raw_classification_thresholds_are_strict() {
         let cfg = config();
-        // Ratio rule: exactly 10% of 16 GiB is 1717986918.4 -> 1717986918 is
-        // under (CRITICAL), 1717986919 is at-or-above (WARNING until 20%).
-        assert_eq!(cfg.classify(T16, 1_717_986_918), PressureLevel::Critical);
-        assert_eq!(cfg.classify(T16, 1_717_986_919), PressureLevel::Warning);
-        // Byte rule binds when 1 GiB > 10% of T (8 GiB host, 11.25% free).
+        // The old 10% ratio line is gone: a deep-but-absolute-fine ratio on a
+        // big host is WARNING territory, never CRITICAL.
+        assert_eq!(cfg.classify(T16, 1_717_986_918), PressureLevel::Warning);
+        // Byte floor: one byte under 1 GiB is CRITICAL regardless of ratio.
+        assert_eq!(cfg.classify(T16, GIB - 1), PressureLevel::Critical);
+        assert_eq!(cfg.classify(T16, GIB), PressureLevel::Warning); // 6.25%
         assert_eq!(cfg.classify(8 * GIB, GIB - 1), PressureLevel::Critical);
-        assert_eq!(cfg.classify(8 * GIB, GIB), PressureLevel::Warning);
-        // Exactly 20% (3435973836.8) is the WARNING/NORMAL line: 836 is
-        // under (WARNING), 837 is at-or-above (NORMAL).
-        assert_eq!(cfg.classify(T16, 3_435_973_836), PressureLevel::Warning);
-        assert_eq!(cfg.classify(T16, 3_435_973_837), PressureLevel::Normal);
+        // Exactly 12% of 16 GiB is 2061584302.08 -> ...302 is under (WARNING),
+        // ...303 is at-or-above (NORMAL).
+        assert_eq!(cfg.classify(T16, 2_061_584_302), PressureLevel::Warning);
+        assert_eq!(cfg.classify(T16, 2_061_584_303), PressureLevel::Normal);
         assert_eq!(cfg.classify(0, 4 * GIB), PressureLevel::Critical);
     }
 
@@ -426,9 +431,10 @@ mod tests {
     #[test]
     fn worsening_to_warning_also_needs_two_samples() {
         let (mut t, _clock) = tracker();
-        // 15.6% free: WARNING raw.
-        assert_eq!(t.update(T16, Some(2_500_000_000)), PressureLevel::Normal);
-        assert_eq!(t.update(T16, Some(2_500_000_000)), PressureLevel::Warning);
+        // 10.9% free(1.75 GiB of 16 GiB): WARNING raw.
+        let warn = 1_879_048_192u64;
+        assert_eq!(t.update(T16, Some(warn)), PressureLevel::Normal);
+        assert_eq!(t.update(T16, Some(warn)), PressureLevel::Warning);
         // Worsening further from WARNING to CRITICAL needs 2 fresh samples.
         assert_eq!(
             t.update(T16, Some(500 * 1024 * 1024)),
@@ -443,7 +449,8 @@ mod tests {
     #[test]
     fn mixed_worse_streak_uses_the_worst_pending_level() {
         let (mut t, _clock) = tracker();
-        assert_eq!(t.update(T16, Some(2_500_000_000)), PressureLevel::Normal); // WARNING raw
+        let warn = 1_879_048_192u64;
+        assert_eq!(t.update(T16, Some(warn)), PressureLevel::Normal); // WARNING raw
         assert_eq!(
             t.update(T16, Some(500 * 1024 * 1024)),
             PressureLevel::Critical
@@ -460,7 +467,7 @@ mod tests {
             t.update(T16, Some(500 * 1024 * 1024)),
             PressureLevel::Critical
         );
-        // Good samples (25% of 16 GiB = 4 GiB; S = ~2.4 GiB -> satisfied).
+        // Good samples (4 GiB of 16 GiB: ≥10% and above S ≈ 2.4 GiB).
         for _ in 0..10 {
             clock.advance(1_000);
             assert_eq!(t.update(T16, Some(4 * GIB)), PressureLevel::Critical);
@@ -483,7 +490,8 @@ mod tests {
             clock.advance(1_000);
             t.update(T16, Some(4 * GIB));
         }
-        // A bad-but-not-worse sample (WARNING raw) breaks the good stretch.
+        // A bad-but-not-worse sample (NORMAL raw yet under the reserve S, so
+        // the recovery gate fails) breaks the good stretch.
         clock.advance(1_000);
         assert_eq!(t.update(T16, Some(2_500_000_000)), PressureLevel::Critical);
         // Window restarts at the next good sample: 10 samples inside the

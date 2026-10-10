@@ -3,6 +3,7 @@
 
 mod bridge;
 mod quit;
+mod single_instance;
 
 use bridge::commands::{
     bridge_ack, bridge_connect, bridge_connection_status, bridge_disconnect, bridge_open_data,
@@ -79,17 +80,53 @@ fn setup_tray(app: &tauri::App) {
     }
 }
 
-/// 메인 창을 보이게 하고 포커스를 돌린다(트레이 "열기"·아이콘 클릭 공용).
+/// 메인 창을 보이게 하고 포커스를 돌린다(트레이 "열기"·아이콘 클릭·두 번째 실행 공용).
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 
+/// 이 데이터 디렉터리의 첫 앱이면 그 잠금을 돌려준다. 다른 앱이 이미 떠 있으면
+/// 그 앱을 앞으로 불러내고 `Err(())` — 이 실행은 뜨지 않는다. 판정 자체를 하지
+/// 못하면(데이터 디렉터리를 모름·권한) 막지 않고 띄운다(`Ok(None)`).
+fn claim_single_instance() -> Result<Option<single_instance::Primary>, ()> {
+    // UI는 데이터 디렉터리를 바꾸지 않는다(bridge_connect의 재정의는 시험용) —
+    // 브리지가 붙을 데몬의 기본 디렉터리가 곧 이 앱이 쓰는 디렉터리다.
+    let Ok(data_dir) = bridge::daemon_manager::default_data_dir() else {
+        return Ok(None);
+    };
+    match single_instance::claim(&data_dir) {
+        Ok(single_instance::Startup::Primary(primary)) => Ok(Some(primary)),
+        Ok(single_instance::Startup::Secondary { signaled }) => {
+            eprintln!(
+                "iyagi: IYAGI Term is already running on {} — {}",
+                data_dir.display(),
+                if signaled {
+                    "brought it to the front"
+                } else {
+                    "it did not answer"
+                }
+            );
+            Err(())
+        }
+        Err(error) => {
+            eprintln!("iyagi: single-instance check failed ({error}) — starting anyway");
+            Ok(None)
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 같은 데이터 디렉터리의 앱은 하나만 뜬다(single_instance) — 두 번째 실행은
+    // 첫 앱을 앞으로 불러내고 여기서 끝난다.
+    let Ok(instance) = claim_single_instance() else {
+        return;
+    };
     // Refresh the per-user daemon copy that the baked paths (ccd/ccg, CLI
     // hooks) point at — heals a moved/renamed checkout just by launching the
     // app, and is a no-op when nothing changed (stamp check).
@@ -138,8 +175,17 @@ pub fn run() {
             app_quit_ack,
             app_quit_cancel
         ])
-        .setup(|app| {
+        .setup(move |app| {
             setup_tray(app);
+            if let Some(primary) = instance {
+                use tauri::Manager as _;
+                let handle = app.handle().clone();
+                if let Err(error) = primary.listen(move || show_main_window(&handle)) {
+                    eprintln!("iyagi: cannot receive second-launch signals ({error})");
+                }
+                // 잠금은 앱이 사는 동안 쥐고 있는다.
+                app.manage(primary);
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

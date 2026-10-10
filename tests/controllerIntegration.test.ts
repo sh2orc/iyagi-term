@@ -338,6 +338,35 @@ describe("controller end-to-end (mock daemon)", () => {
     controller.stop(); registry.disposeAll(); mock.dispose();
   });
 
+  it("closing a tab's last pane closes the tab too; tabs with other panes and fresh empty tabs stay", async () => {
+    const { mock, controller, registry } = makeStack();
+    controller.start();
+    controller.newTerminal();
+    await vi.waitFor(() => expect(Object.values(useWorkbenchStore.getState().panes)).toHaveLength(1));
+    const lone = Object.keys(useWorkbenchStore.getState().panes)[0];
+    const tabA = useWorkbenchStore.getState().activeTabId!;
+    controller.newTab();
+    controller.newTerminal();
+    controller.splitFocused("row");
+    await vi.waitFor(() => expect(Object.values(useWorkbenchStore.getState().panes)).toHaveLength(3));
+    const tabB = useWorkbenchStore.getState().activeTabId!;
+    const [b1, b2] = Object.keys(useWorkbenchStore.getState().panes).filter((id) => id !== lone);
+    // 사용자가 일부러 만든 빈 그룹은 닫은 창과 상관없으므로 그대로 둔다.
+    const fresh = controller.newGroup();
+    const tabIds = () => useWorkbenchStore.getState().tabs.map((tab) => tab.id);
+
+    await controller.confirmClosePanes([b1], false);
+    expect(tabIds()).toEqual([tabA, tabB, fresh]);
+
+    await controller.confirmClosePanes([lone], false);
+    expect(tabIds()).toEqual([tabB, fresh]);
+
+    await controller.confirmClosePanes([b2], true);
+    expect(tabIds()).toEqual([fresh]);
+    expect(useWorkbenchStore.getState().panes).toEqual({});
+    controller.stop(); registry.disposeAll(); mock.dispose();
+  });
+
   it("always asks before closing every tab and applies the selected termination policy to all panes", async () => {
     const { mock, controller, registry } = makeStack();
     const cancel = vi.spyOn(mock, "workloadCancel");

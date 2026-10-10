@@ -3,11 +3,12 @@
  *
  * 네 가지 계약을 고정한다:
  * 1) 복원 — PTY가 사라진 저장 pane에 "지금 돌고 있지 않은" 기록이 있으면
- *    닫지 않고 재개 가능한 자리로 남긴다. 일반 터미널은 저널을 재생한다.
- *    어느 쪽이든 자동으로 다시 실행하지 않는다(01 §6).
- * 2) 재개 — 사용자가 눌렀을 때만, 기록된 cwd에서 claude/codex의 재개
- *    인자로 셸 워크로드를 만든다(자율 실행 설정 on/off 모두). 인자로 쓸 수
- *    없는 세션 id나 자리를 못 만든 경우에는 조용히 끝나지 않는다.
+ *    닫지 않고 그 자리에서 대화를 이어서 연다. 이어서 열 pane이 여럿이면
+ *    서로를 기다리지 않고 한꺼번에 띄우며, 복원도 그 실행을 기다리지 않는다.
+ *    같은 대화는 한 번만 띄운다. 일반 터미널은 저널을 재생하고 다시 실행하지 않는다.
+ * 2) 재개 — 기록된 cwd에서 claude/codex의 재개 인자로 셸 워크로드를 만든다
+ *    (자율 실행 설정 on/off 모두). 인자로 쓸 수 없는 세션 id나 자리를 못
+ *    만든 경우에는 조용히 끝나지 않는다.
  * 3) 배지 — 같은 값의 감지 결과로는 pane을 다시 쓰지 않는다.
  * 4) 목록 seam — mock이 데몬과 같은 순서·중복 제거를 한다.
  */
@@ -141,33 +142,126 @@ beforeEach(() => {
   usePreferences.setState({ claudeFullAutonomy: true, codexFullAutonomy: true });
 });
 
-describe("복원: 기록이 있으면 pane을 남기고, 없으면 닫는다", () => {
-  it("돌고 있지 않은 기록이 일치하면 pane을 재개 가능한 빈 자리로 남긴다", async () => {
+/** 실행 요청을 기록만 하고 끝내지 않는다 — 요청이 모두 나가기 전에 앞 요청이 끝나지 않게. */
+function holdLaunches(client: MockDaemonClient): LaunchRequest[] {
+  const launches: LaunchRequest[] = [];
+  vi.spyOn(client, "workloadLaunch").mockImplementation((request: LaunchRequest) => {
+    launches.push(request);
+    return new Promise(() => undefined);
+  });
+  return launches;
+}
+
+const commandLine = (request: LaunchRequest): string => [request.program, ...request.argv].join(" ");
+
+describe("복원: 기록이 있으면 그 자리에서 이어서 열고, 없으면 출력을 재생한다", () => {
+  it("돌고 있지 않은 기록이 일치하면 같은 pane에서 그 대화를 바로 이어서 연다", async () => {
     const client = new MockDaemonClient({ resourceIntervalMs: 0 });
     client.seedAgentSessions([record()]);
+    const launches = holdLaunches(client);
     seedWorkspace(savedPane());
 
     const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
-    await controller.restoreWorkspace();
+    try {
+      await controller.restoreWorkspace();
+      await vi.waitFor(() => expect(launches).toHaveLength(1));
+      // 최근 종료에서 원래 작업을 '연결'해도 새 pane·새 대화 없이 이 pane으로 온다.
+      useWorkbenchStore.setState({ workloads: [{ workload_id: "w-old", session_id: "s-old", state: "INTERRUPTED" } as never] });
+      await controller.attachWorkloadTerminal("w-old");
+      expect(launches).toHaveLength(1);
+      expect(Object.keys(useWorkbenchStore.getState().panes)).toEqual(["leaf-1"]);
 
-    const pane = useWorkbenchStore.getState().panes["leaf-1"];
-    expect(pane).toBeDefined();
-    expect(pane.phase).toBe("exited");
-    expect(pane.sessionId).toBe("s-old");
-    expect(pane.workloadId).toBe("w-old");
-    expect(pane.agent ?? null).toBeNull();
-    expect(pane.viewId).not.toBe("view-1"); // 예전 뷰는 버린다
-    expect(pane.resume).toEqual({
-      recordId: "rec-1",
-      agent: "claude",
-      agentSessionId: "agent-session-0001",
-      cwd: "/work/iyagi",
-      title: "iyagi",
-      program: "/opt/bin/claude",
-    } satisfies AgentResumeInfo);
-    // 자동 재실행 없음: 아무 워크로드도 만들지 않았다.
-    expect(useWorkbenchStore.getState().workloads).toEqual([]);
-    controller.dispose();
+      expect(launches[0].cwd).toBe("/work/iyagi");
+      expect(commandLine(launches[0])).toContain("/opt/bin/claude");
+      expect(commandLine(launches[0])).toContain("agent-session-0001");
+      const pane = useWorkbenchStore.getState().panes["leaf-1"];
+      expect(pane.phase).toBe("starting");
+      expect(pane.viewId).not.toBe("view-1"); // 예전 뷰는 버린다
+      expect(pane.resume).toEqual({
+        recordId: "rec-1",
+        agent: "claude",
+        agentSessionId: "agent-session-0001",
+        cwd: "/work/iyagi",
+        title: "iyagi",
+        program: "/opt/bin/claude",
+      } satisfies AgentResumeInfo);
+    } finally { controller.dispose(); }
+  });
+
+  it("이어서 열 pane이 여럿이면 서로를 기다리지 않고 한꺼번에 띄운다", async () => {
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    client.seedAgentSessions([
+      record(),
+      record({
+        id: "rec-2", workload_id: "w-old2", pty_session_id: "s-old2",
+        agent: "codex", agent_session_id: "agent-session-0002", cwd: "/work/web", program: "/opt/bin/codex",
+      }),
+    ]);
+    const launches = holdLaunches(client);
+    seedWorkspace(
+      savedPane(),
+      savedPane({ leafId: "leaf-2", viewId: "view-2", sessionId: "s-old2", workloadId: "w-old2", cwd: "/work/web" }),
+    );
+
+    const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+    try {
+      // 실행 요청이 하나도 끝나지 않았는데 복원은 끝난다 — 복원이 실행을 기다리지 않는다.
+      await controller.restoreWorkspace();
+      // 첫 요청이 끝나지 않은 채로 둘째 요청도 나간다 — 하나씩 차례로 띄우지 않는다.
+      await vi.waitFor(() => expect(launches).toHaveLength(2));
+      expect(launches.map(l => l.cwd).sort()).toEqual(["/work/iyagi", "/work/web"]);
+      expect(commandLine(launches.find(l => l.cwd === "/work/web")!)).toContain("agent-session-0002");
+      const panes = useWorkbenchStore.getState().panes;
+      expect([panes["leaf-1"].phase, panes["leaf-2"].phase]).toEqual(["starting", "starting"]);
+    } finally { controller.dispose(); }
+  });
+
+  it("같은 대화를 가리키는 pane이 둘이면 한 번만 띄우고 나머지는 버튼으로 남긴다", async () => {
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const launches = holdLaunches(client);
+    const resume = info();
+    seedWorkspace(
+      savedPane({ sessionId: null, workloadId: null, phase: "exited", resume }),
+      savedPane({ leafId: "leaf-2", viewId: "view-2", sessionId: null, workloadId: null, phase: "exited", resume }),
+    );
+
+    const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+    try {
+      await controller.restoreWorkspace();
+      await vi.waitFor(() => expect(launches).toHaveLength(1));
+      await new Promise((done) => setTimeout(done, 0));
+
+      expect(launches).toHaveLength(1);
+      const panes = useWorkbenchStore.getState().panes;
+      expect(panes["leaf-1"].phase).toBe("starting");
+      expect(panes["leaf-2"].phase).toBe("exited");
+      expect(panes["leaf-2"].resume?.agentSessionId).toBe("agent-session-0001");
+    } finally { controller.dispose(); }
+  });
+
+  it("복원 직후 사용자가 '새 셸'을 고른 pane은 자동으로 이어서 열지 않는다", async () => {
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const launches = holdLaunches(client);
+    seedWorkspace(savedPane({ sessionId: null, workloadId: null, phase: "exited", resume: info({ program: null }) }));
+    // 자동 재개가 실행 파일을 찾는 사이(await) pane이 다른 view로 바뀐다.
+    let release: (() => void) | undefined;
+    const controller = new SessionController({
+      client,
+      registry: registry(),
+      platform: "darwin",
+      resolveAgentProgram: () => new Promise<string>((done) => { release = () => done("/opt/bin/claude"); }),
+    });
+    try {
+      await controller.restoreWorkspace();
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      useWorkbenchStore.setState(s => ({
+        panes: { ...s.panes, "leaf-1": { ...s.panes["leaf-1"], viewId: "view-new-shell", phase: "starting" } },
+      }));
+      release!();
+      await new Promise((done) => setTimeout(done, 0));
+
+      expect(launches).toHaveLength(0);
+    } finally { controller.dispose(); }
   });
 
   it("PTY session id로도 기록을 찾는다(workload id가 달라졌을 때)", async () => {
@@ -979,7 +1073,7 @@ describe("대기열 터미널 연결에서 종료된 에이전트 복구", () =>
 
 
 describe("비정상 종료 복구 회귀", () => {
-  it.each(["claude", "codex", "opencode"] as const)("%s: 프로세스 마킹은 저장·재시작 뒤 연결 클릭에서 정확한 ID로 복구한다", async agent => {
+  it.each(["claude", "codex", "opencode"] as const)("%s: 프로세스 마킹은 저장·재시작 뒤 정확한 ID로 한 번만 복구한다", async agent => {
     seedWorkspace(savedPane({ phase: "live" }));
     useWorkbenchStore.getState().paneAgent("leaf-1", {
       agent, pid: 1234, detected_at_ms: 1, session_id: "marked-conversation",
@@ -990,6 +1084,11 @@ describe("비정상 종료 복구 회귀", () => {
     useWorkbenchStore.setState(saved);
     const probe = launchProbe();
     probe.client.agentSessionList = vi.fn().mockResolvedValue([]);
+    // 실행 요청을 끝내지 않는다 — 자동 재개가 도는 중에 '연결'을 누른 경우다.
+    probe.client.workloadLaunch = ((request: LaunchRequest) => {
+      probe.launches.push(request);
+      return new Promise(() => undefined);
+    }) as DaemonClient["workloadLaunch"];
     const base = await new MockDaemonClient({ resourceIntervalMs: 0 }).systemSnapshot();
     probe.client.systemSnapshot = async () => base;
     probe.client.interventionList = async () => [];
@@ -999,13 +1098,15 @@ describe("비정상 종료 복구 회귀", () => {
     });
     try {
       await controller.restoreWorkspace();
-      expect(probe.launches).toHaveLength(0);
+      // 재시작 복원이 저장된 마킹 ID로 그 자리에서 바로 이어서 연다.
+      await vi.waitFor(() => expect(probe.launches).toHaveLength(1));
+      expect(probe.launches[0]).toMatchObject({ program: `/opt/bin/${agent}`, cwd: "/work/iyagi" });
+      expect(probe.launches[0].argv).toContain("marked-conversation");
       expect(useWorkbenchStore.getState().panes["leaf-1"].resume?.agentSessionId).toBe("marked-conversation");
+      // 그사이 '연결'을 두 번 눌러도 같은 대화를 또 띄우지 않는다.
       useWorkbenchStore.setState({ workloads: [{ workload_id: "w-old", session_id: "s-old", state: "INTERRUPTED" } as never] });
       await Promise.all([controller.attachWorkloadTerminal("w-old"), controller.attachWorkloadTerminal("w-old")]);
       expect(probe.launches).toHaveLength(1);
-      expect(probe.launches[0]).toMatchObject({ program: `/opt/bin/${agent}`, cwd: "/work/iyagi" });
-      expect(probe.launches[0].argv).toContain("marked-conversation");
       expect(Object.keys(useWorkbenchStore.getState().panes)).toEqual(["leaf-1"]);
     } finally { controller.dispose(); }
   });
@@ -1115,13 +1216,14 @@ describe("비정상 종료 복구 회귀", () => {
     }))]);
     seedWorkspace(savedPane());
     const list = vi.spyOn(client, "agentSessionList");
-    const launch = vi.spyOn(client, "workloadLaunch");
+    const launches = holdLaunches(client);
     const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
     try {
       await controller.restoreWorkspace();
       expect(useWorkbenchStore.getState().panes["leaf-1"].resume?.agentSessionId).toBe("agent-session-0001");
       expect(list).toHaveBeenCalledWith({ workload_id: "w-old", pty_session_id: "s-old", limit: 1 });
-      expect(launch).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(launches).toHaveLength(1));
+      expect(commandLine(launches[0])).toContain("agent-session-0001");
     } finally { controller.dispose(); }
   });
 

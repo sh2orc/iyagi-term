@@ -267,6 +267,14 @@ type RecoveryTarget =
   /** 에이전트 기록이 없는 일반 터미널 — 이전 출력 아래에서 새 셸로 잇는다. */
   | { kind: "shell" };
 
+/** 앱 복원이 "이어서 열기" 자리로 남긴 pane — 복원 직후 한꺼번에 이어서 연다. */
+interface RestoredResume {
+  leafId: string;
+  /** 복원이 새로 준 view — 그사이 바뀌었으면(닫기·새 셸·직접 재개) 건너뛴다. */
+  viewId: string;
+  resume: AgentResumeInfo;
+}
+
 /** 새 셸이 이을 끝난 작업(재생이 끝나기를 기다리는 복구). */
 interface PendingShellRecovery {
   /** 재생 중인 이전 세션 — 이 세션의 재생이 끝나야 새 셸을 띄운다. */
@@ -462,6 +470,7 @@ export class SessionController {
     const active = snapshot.workloads.filter(w => ["STARTING", "RUNNING", "STOPPING", "DRAINING"].includes(w.state));
     const byWorkload = new Map(active.map(w => [w.workload_id, w]));
     const attach: Array<{ leafId: string; sessionId: string; workloadId: string }> = [];
+    const autoResume: RestoredResume[] = [];
     for (const pane of savedPanes) {
       if (this.disposed) return;
       if (this.pipelines.has(pane.viewId)) continue;
@@ -493,6 +502,7 @@ export class SessionController {
             };
           });
           useWorkbenchStore.getState().patchLeaf(pane.leafId, { view_id: viewId });
+          autoResume.push({ leafId: pane.leafId, viewId, resume });
           continue;
         }
         // 일반 터미널도 보관된 출력 저널을 다시 붙여 읽을 수 있다.
@@ -505,6 +515,9 @@ export class SessionController {
         attach.push({ leafId: pane.leafId, sessionId: pane.sessionId, workloadId: pane.workloadId });
       }
     }
+    // 이어서 열 대화는 pane마다 버튼을 누르게 하지 않고 한 번에 모두 띄운다. 기다리지
+    // 않는다 — 나머지 복원(고아 탭·출력 재생)이 이 실행들 뒤에 줄 서지 않는다.
+    if (autoResume.length > 0) void this.resumeRestoredAgents(autoResume);
     const state = useWorkbenchStore.getState();
     const known = new Set(Object.values(state.panes).map(p => p.sessionId));
     const activeTabId = state.activeTabId, focusedLeafId = state.focusedLeafId;
@@ -805,12 +818,28 @@ export class SessionController {
    * 닫는다(마지막 탭이면 빈 프로젝트 화면 — 새 셸을 대신 띄우지 않는다).
    */
   private async autoCloseExitedPane(leafId: string): Promise<void> {
-    const tabId = useWorkbenchStore.getState().tabs
-      .find((tab) => tab.kind === "terminal" && findLeaf(tab.root, leafId) !== null)?.id ?? null;
+    const tabId = this.terminalTabOf(leafId);
     await this.closePane(leafId, false);
     if (this.disposed || tabId === null) return;
-    const tab = useWorkbenchStore.getState().tabs.find((candidate) => candidate.id === tabId);
-    if (tab?.kind === "terminal" && !tab.root) useWorkbenchStore.getState().closeTab(tabId);
+    this.closeTabsLeftEmpty([tabId]);
+  }
+
+  /** 이 pane이 들어 있는 터미널 탭(그룹). */
+  private terminalTabOf(leafId: string): string | null {
+    return useWorkbenchStore.getState().tabs
+      .find((tab) => tab.kind === "terminal" && findLeaf(tab.root, leafId) !== null)?.id ?? null;
+  }
+
+  /**
+   * 창을 닫아 비어 버린 탭은 탭까지 닫는다 — 빈 그룹을 남기지 않는다. 닫은 창이 들어 있던
+   * 탭만 본다: 처음부터 비어 있던 새 탭(빠른 실행 화면)은 건드리지 않는다. 그사이 창이
+   * 새로 들어온 탭도 그대로 둔다. 마지막 탭이었으면 빈 프로젝트 화면이 된다.
+   */
+  private closeTabsLeftEmpty(tabIds: Iterable<string>): void {
+    for (const tabId of new Set(tabIds)) {
+      const tab = useWorkbenchStore.getState().tabs.find((candidate) => candidate.id === tabId);
+      if (tab?.kind === "terminal" && !tab.root) useWorkbenchStore.getState().closeTab(tabId);
+    }
   }
 
   stop(): void {
@@ -2263,6 +2292,41 @@ export class SessionController {
     );
   }
 
+  /**
+   * 앱 복원이 "이어서 열기" 자리로 남긴 에이전트 대화를 한꺼번에 이어서 연다.
+   * pane마다 따로 띄우고 서로를 기다리지 않는다(하나가 느리거나 실패해도 나머지는
+   * 그대로 뜬다). 그사이 그 pane을 닫았거나 '새 셸'·'이어서 열기'를 직접 눌렀으면
+   * 건너뛴다. 같은 대화를 가리키는 pane이 여럿이면 첫 pane만 열고 나머지는 버튼으로
+   * 남긴다 — 같은 대화를 두 번 띄우지 않는다.
+   */
+  private async resumeRestoredAgents(targets: readonly RestoredResume[]): Promise<void> {
+    const seen = new Set<string>();
+    const launches: Promise<void>[] = [];
+    for (const target of targets) {
+      const key = `${target.resume.agent}:${target.resume.agentSessionId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      launches.push(this.resumeRestoredAgent(target));
+    }
+    await Promise.allSettled(launches);
+  }
+
+  private async resumeRestoredAgent({ leafId, viewId, resume }: RestoredResume): Promise<void> {
+    if (this.disposed) return;
+    const pane = useWorkbenchStore.getState().panes[leafId];
+    if (!pane || pane.viewId !== viewId || pane.phase !== "exited") return;
+    if (pane.resume?.agent !== resume.agent || pane.resume.agentSessionId !== resume.agentSessionId) return;
+    // 복원 사이 다른 곳에서 같은 대화가 떴으면 그 자리로 포커스를 옮기지 않고 버튼으로 남긴다.
+    if (this.activeAgentSession(resume, pane.workloadId)) return;
+    // 끝난 원래 작업과 잇는다(개별 '연결'과 같다): 최근 종료의 연결은 새 대화를 또 띄우지 않고
+    // 이 pane으로 오며, 새 작업이 뜨면 원래 작업은 최근 종료에서 빠진다.
+    if (pane.workloadId) {
+      this.recoveredWorkloadPanes.set(pane.workloadId, leafId);
+      this.linkRecovery(leafId, pane.workloadId);
+    }
+    await this.resumeAgentSession(resume, { leafId });
+  }
+
   /** 이 끝난 작업이 되살아났는가 — 새 창이 살아 있거나 실행 중 대화로 옮겨 갔다. */
   private agentWorkloadRevived(workloadId: string): boolean {
     const state = useWorkbenchStore.getState();
@@ -3076,6 +3140,7 @@ export class SessionController {
     tabId?: string,
     closeAllTabs = false,
   ): Promise<void> {
+    const owners = leafIds.map((leafId) => this.terminalTabOf(leafId)).filter((id): id is string => id !== null);
     for (const leafId of leafIds) await this.closePane(leafId, terminate);
     if (closeAllTabs) {
       for (const tab of [...useWorkbenchStore.getState().tabs]) {
@@ -3083,6 +3148,8 @@ export class SessionController {
       }
     } else if (tabId) {
       useWorkbenchStore.getState().closeTab(tabId);
+    } else if (!this.disposed) {
+      this.closeTabsLeftEmpty(owners);
     }
   }
 

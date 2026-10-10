@@ -160,7 +160,9 @@ where the work actually runs:
 - Exited Claude Code, Codex and OpenCode sessions offer Resume in place, and the recent agent
   sessions dialog lets you jump to, resume or forget a session. **Attach terminal** in the
   recently finished list resumes Claude/Codex/OpenCode by their saved session ID, or replays
-  retained output for an ordinary terminal. Starting the app alone does not relaunch agents
+  retained output for an ordinary terminal. On relaunch, every restored pane whose agent
+  conversation had ended resumes it in place, all at once and without holding up the rest of
+  the restore
 - Notification center for agent permission requests, questions and finished responses (through
   Claude/Codex hooks and an injected OpenCode session plugin — no global CLI config edits) and for
   finished managed runs, with desktop notifications while hidden
@@ -200,8 +202,10 @@ where the work actually runs:
 
 - Admission checks in a fixed order — telemetry freshness, host pressure, 2 concurrent managed
   jobs, CPU slots, reservation budget, memory headroom — with a 64-job queue that ages priorities
-- Resource strip (CPU, RAM and pressure, disk, network, managed running/queued with the wait
-  reason) plus 5-minute graphs (300 samples) with per-metric source and quality labels
+- Resource strip (CPU, RAM and pressure, disk, network, the AI agents detected in your terminals
+  per kind with how many are working or waiting for you, and managed running/queued with the
+  wait reason when there are any) plus 5-minute graphs (300 samples) with per-metric source and
+  quality labels
 - Bounded output queues with flow control (per-view credits; a slow consumer blocks only its own
   view), rolling session journals (128 MiB per session, 2 GiB in total, 7-day retention) and
   capped history

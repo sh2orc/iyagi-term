@@ -55,15 +55,19 @@ Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택
 
 ## 다운로드
 
+**최신: 0.1.1** (2026-10-10) — CPU를 많이 쓰는 터미널은 정지 대신 양보시키고, 고정 10% 규칙 대신
+커널의 메모리 압력 신호로 위기를 판정하며, 메모리 때문에 정지된 터미널은 호스트가 회복되면 스스로
+재개합니다. 자세한 내용은 [릴리스 노트](RELEASE.md)를 참고하세요.
+
 <p align="center">
-  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg">
+  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg">
     <img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="IYAGI Terminal macOS(Apple Silicon) 다운로드">
   </a>
 </p>
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `352c1f365887a05128cbe164b091e967fa665491bba5db2cdd4c1ba5c081d72e` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.1_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg) | 17 MB | `aed7aab63a89d203f215edb01a44bf6321494807453a7daea531534647535186` |
 
 <details>
 <summary>macOS 서명과 신뢰</summary>
@@ -85,6 +89,16 @@ CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Wind
 소스에서 직접 빌드: `npm ci && npm run tauri build`.
 </details>
 
+## 빠른 시작
+
+1. DMG를 열고 **IYAGI Term**을 응용 프로그램(Applications) 폴더로 끌어 놓습니다.
+2. 어느 pane에서든 평소처럼 `claude`·`codex`·`opencode`를 실행합니다 — IYAGI가 프로세스로
+   감지해 pane 헤더에 에이전트·모델·작업 중/응답 대기 상태를 보여 줍니다. 빈 탭에서는 이 PC에
+   설치된 AI CLI를 한 번에 관리 실행할 수도 있습니다.
+3. `Cmd+D` / `Cmd+Shift+D`로 분할하고, `Cmd+Shift+P`로 커맨드 팔레트, `Cmd+B`로 관리 실행
+   대기열을 엽니다.
+4. 창을 닫아도 터미널은 데몬에서 계속 실행됩니다. 앱을 다시 열면 기록을 재생하며 다시 붙습니다.
+
 ## 왜 IYAGI인가
 
 개발 PC 하나에 AI 코딩 에이전트 여러 개를 돌리면 CPU와 메모리가 금방 포화됩니다. IYAGI는
@@ -95,12 +109,14 @@ CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Wind
 - 관리 작업을 **자손까지** OS 수준에서 묶고 트리 전체를 한 번에 중단합니다 — Windows Job Object,
   위임된 서브트리가 있을 때의 Linux cgroup v2, macOS는 독립 guardian 프로세스와 프로세스 트리
   관측. CPU·메모리·프로세스 수 상한은 OS가 지원하는 곳에서만 강제합니다.
-- **자원 가드**: 특정 터미널의 CPU·메모리 사용이 한도를 계속 넘으면 데몬이 그 프로세스 트리를
-  일시 정지(SIGSTOP / 가능하면 cgroup freeze)하고 원클릭 재개를 제안합니다. 시스템 메모리가
-  치명적으로 부족하면 포커스 없는 최대 소비자부터 먼저 정지합니다. 보고 있는 세션은 절대
-  자동으로 정지하지 않습니다.
-- **압력 완화(relief)**는 백그라운드 에이전트를 낮은 스케줄링 등급으로 내릴 뿐 종료하지 않으며,
-  pane별 보호/양보 표시와 전체 재개를 제공합니다. 항상 되돌릴 수 있습니다.
+- **압력 완화(relief)**는 CPU를 얼리지 않고 나눠 씁니다: CPU 압력이 높을 때의 백그라운드
+  에이전트와, CPU 한도를 계속 넘는 터미널을 낮은 스케줄링 등급으로 내릴 뿐 멈추지 않고, 압력이나
+  초과가 끝나면 되돌립니다. pane별 보호/양보 표시와 전체 재개를 제공합니다.
+- **자원 가드**는 메모리를 다룹니다: 호스트 메모리에 압력이 있을 때 프로세스 트리의 메모리가
+  한도를 계속 넘는 터미널을 일시 정지(SIGSTOP / 가능하면 cgroup freeze)하고, 치명적 압력 —
+  가용 1 GiB 미만이거나 커널 스스로 위기를 알릴 때 — 에서는 포커스 없는 최대 소비자부터
+  정지합니다. 메모리가 회복되면 하나씩 스스로 재개합니다. 보고 있는 세션과 사용자가 보호한
+  터미널은 절대 자동으로 정지하지 않습니다.
 - 작업별 프로세스 트리 단위로 자원 사용을 표시합니다.
 - 창을 닫거나 앱을 종료해도 터미널이 삽니다. PTY는 앱이 아니라 데몬이 소유하고, 앱을 다시 열면
   기록을 재생하며 다시 붙습니다(IndexedDB 화면 스냅샷 + 저널 꼬리 재생으로 재시작 때 전체
@@ -150,8 +166,8 @@ CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Wind
 - 끝난 Claude Code·Codex·OpenCode 세션은 그 자리에서 '이어서 열기'를 제공하고, 최근 에이전트 세션
   대화상자에서 이동·재개·기록 삭제를 합니다. 최근 종료된 터미널의 **터미널 연결**은
   Claude·Codex·OpenCode를 원래 세션 ID로 재개하고, 일반 터미널은 보관된 이전 출력을 복원합니다.
-  앱을 다시 실행하면 이어서 열 대화가 남은 pane을 모두 그 자리에서 한꺼번에 이어서 열고, 나머지
-  복원은 이 실행을 기다리지 않습니다
+  앱을 다시 실행하면 이어서 열 대화가 남은 pane을 그 자리에서 이어서 엽니다 — 동시에 최대 3개씩,
+  호스트 메모리가 치명적일 때는 잠시 기다리며 — 나머지 복원은 이 실행을 기다리지 않습니다
 - 에이전트의 권한 요청·질문·응답 완료(Claude/Codex hooks와 주입형 OpenCode 세션 플러그인 — CLI
   전역 설정은 건드리지 않음)와 관리 실행 종료를 모으는 알림 센터, 창이 숨어 있을 때는 데스크톱 알림
 - 상태 표시줄의 Codex·Claude·Z.ai 구독 사용량 게이지
@@ -178,13 +194,17 @@ CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Wind
 - 대기열 drawer(`Cmd+B` / `Ctrl+B`): 대기 사유, 취소, 터미널 연결, 종료. 작업 이름은 붙은 터미널의
   제목을 따릅니다
 - 멱등 시작: 같은 요청 ID를 재전송해도 CLI를 두 번 실행하지 않습니다(요청 지문, 입력 중복 제거 링)
-- 사용자·데이터 디렉터리당 데몬 하나, 터미널마다 입력 소유자 하나. 터미널은 창·앱을 닫아도
-  살지만 데몬이 재시작되면 끝납니다(실행 중이던 작업은 중단됨으로 표시)
+- 사용자·데이터 디렉터리당 데몬 하나와 앱 인스턴스 하나(다시 실행하면 떠 있는 창을 앞으로
+  가져옴), 터미널마다 입력 소유자 하나. 터미널은 창·앱을 닫아도 살지만 데몬이 재시작되면
+  끝납니다(실행 중이던 작업은 중단됨으로 표시)
 
 **자원 거버넌스·모니터링**
 
 - 정해진 순서의 admission 검사(텔레메트리 신선도, 호스트 압력, 관리 작업 동시 2개, CPU 슬롯, 예약
   예산, 메모리 여유)와 기다릴수록 우선순위가 오르는 64개 대기열
+- 메모리 압력은 커널 자체 판정(macOS memory-status 수준, Linux PSI)과 가용 1 GiB 하한으로,
+  CPU 압력은 사용률 85% / 95%로 판정합니다. 임계값은 데몬 바이너리에 내장됩니다
+  ([defaults.json](docs/implementation/defaults.json))
 - 자원 스트립(CPU, RAM·압력, 디스크, 네트워크, 터미널에서 감지한 AI 에이전트의 종류별 수와 작업 중·
   응답 대기 수, 관리 작업이 있으면 실행·대기 수와 대기 사유)과 5분(300 샘플) 그래프, 지표별 출처·품질 라벨
 - 흐름 제어가 있는 출력 큐(뷰별 크레딧, 느린 소비자는 자기 뷰만 차단), 순환하는 세션 저널(세션당
@@ -228,17 +248,17 @@ flowchart LR
 
 ```text
 src/                  React 앱 (탭·분할 터미널·AI 작업·모니터·대기열·설정·프로필)
-src-tauri/           Tauri 셸 (창·트레이, 데몬 분리 spawn, IPC 브리지)
+src-tauri/            Tauri 셸 (창·트레이, 데몬 분리 spawn, IPC 브리지)
 crates/
-  term-contracts/    계층 간 타입·검증·TS 생성 (의존 방향의 한가운데)
-  term-core/         상태 머신·admission·대기열·멱등·AI 작업 계획 (순수 로직)
-  term-platform/     OS 자원 그룹(Linux cgroup/Windows Job/macOS guardian+관측)·텔레메트리
-  term-pty/          PTY 세션 액터·MTJ1 저널·출력 흐름 제어·실행 게이트
-  term-storage/      SQLite 메타데이터·마이그레이션·지문·크래시 복구
-  term-secrets/      앱 로컬 암호화 비밀 저장소 (AES-256-GCM 소유자 전용 파일)
+  term-contracts/     계층 간 타입·검증·TS 생성 (의존 방향의 한가운데)
+  term-core/          상태 머신·admission·대기열·멱등·AI 작업 계획 (순수 로직)
+  term-platform/      OS 자원 그룹(Linux cgroup/Windows Job/macOS guardian+관측)·텔레메트리
+  term-pty/           PTY 세션 액터·MTJ1 저널·출력 흐름 제어·실행 게이트
+  term-storage/       SQLite 메타데이터·마이그레이션·지문·크래시 복구
+  term-secrets/       앱 로컬 암호화 비밀 저장소 (AES-256-GCM 소유자 전용 파일)
   iyagi-termd/        실행 관리자 데몬 + launch helper·에이전트 감시·AI 작업 서비스와 어댑터
-  term-fixture/      검증용 결정적 부하·프로토콜 fixture (제품 번들 제외)
-  iyagi-bench/       실제 데몬 대상 벤치마크 하니스 (latency, idle, flood, queue, replay)
+  term-fixture/       검증용 결정적 부하·프로토콜 fixture (제품 번들 제외)
+  iyagi-bench/        실제 데몬 대상 벤치마크 하니스 (latency, idle, flood, queue, replay)
 ```
 
 의존 방향은 `UI → bridge → contracts → core`입니다. `term-core`는 trait로 platform/pty/storage를
@@ -303,14 +323,20 @@ Silicon용입니다(x86_64 호스트에서는 생략). 이미지는 워크스페
 | [docs/orchestration/USER_GUIDE_KR.md](docs/orchestration/USER_GUIDE_KR.md) (+ EN, 상세) | AI 작업 사용법 — 설정, 결정, 복구 |
 | [ORCHESTRATION_SPEC.md](ORCHESTRATION_SPEC.md) + [docs/orchestration/](docs/orchestration/) | AI 작업 엔진 명세·티켓, 검증 증거를 담은 [구현 상태](docs/orchestration/IMPLEMENTATION_STATUS.md) |
 | [docs/implementation/07-korean-ime.md](docs/implementation/07-korean-ime.md) | 한글 IME 브리지 계약 (macOS WKWebView × xterm) |
+| [docs/implementation/resource-governance-plan.md](docs/implementation/resource-governance-plan.md) | 자원 가드·압력 완화 설계와 현재 임계값 |
 | [docs/security/](docs/security/) | 보안 감사 기록 |
-| [releases/README.md](releases/README.md) | 릴리스 바이너리와 신뢰 모델 |
+| [RELEASE.md](RELEASE.md) | 버전별 릴리스 노트 (영어) |
+| [releases/README.md](releases/README.md) | 릴리스 바이너리, 서명·공증 절차와 신뢰 모델 |
 
 ## 상태 및 로드맵
 
-v0.1.0 — **R1(로컬 터미널 + 관리 실행) 출시 완료.** 이후로 탭 재그룹핑과 배치 편집, 터미널
-우클릭 메뉴, `Shift+Space` 한/영 전환, 자원 가드와 압력 완화, 에이전트 세션 재개, Z.ai(GLM)
-라우팅, AI 작업 엔진이 더해졌습니다.
+v0.1.1 — **자원 거버넌스 릴리스.** CPU 경합은 정지 대신 나눠 쓰고, 메모리 위기는 커널의 압력
+신호로 판정하며, 메모리 때문에 정지된 터미널은 스스로 재개하고, 다시 실행할 때 에이전트 대화를
+시차를 두고 이어서 엽니다([릴리스 노트](RELEASE.md)).
+
+v0.1.0 — **R1(로컬 터미널 + 관리 실행) 출시**: 탭 재그룹핑과 배치 편집, 터미널 우클릭 메뉴,
+`Shift+Space` 한/영 전환, 자원 가드와 압력 완화, 에이전트 세션 재개, Z.ai(GLM) 라우팅, AI 작업
+엔진.
 
 - **O1 — AI 작업(mission/task/run): 개발 빌드 전용 게이트 뒤에 구현 완료.** 데몬 엔진(계획, DAG
   스케줄링, 작업 공간, 예산, outbox 복구, 메시지 전달), 저장소, RPC, Codex/Claude Code/OpenCode

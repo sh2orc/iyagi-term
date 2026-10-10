@@ -2190,7 +2190,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "iyagi-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "core-foundation",
@@ -2214,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "iyagi-bench"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2226,7 +2226,7 @@ dependencies = [
 
 [[package]]
 name = "iyagi-termd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -4785,7 +4785,7 @@ dependencies = [
 
 [[package]]
 name = "term-contracts"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -4798,7 +4798,7 @@ dependencies = [
 
 [[package]]
 name = "term-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4810,7 +4810,7 @@ dependencies = [
 
 [[package]]
 name = "term-fixture"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -4827,7 +4827,7 @@ dependencies = [
 
 [[package]]
 name = "term-platform"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "serde",
@@ -4844,7 +4844,7 @@ dependencies = [
 
 [[package]]
 name = "term-pty"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4862,7 +4862,7 @@ dependencies = [
 
 [[package]]
 name = "term-secrets"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ring",
  "tempfile",
@@ -4872,7 +4872,7 @@ dependencies = [
 
 [[package]]
 name = "term-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rusqlite",
  "serde",

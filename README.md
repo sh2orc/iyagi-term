@@ -56,15 +56,19 @@ CLI; IYAGI owns execution, process groups and resource governance.
 
 ## Download
 
+**Latest: 0.1.1** (2026-10-10) — CPU hogs yield instead of freezing, the kernel's memory-pressure
+signal replaces the fixed 10 % rule, and memory-suspended terminals resume on their own once the
+host recovers. See the [release notes](RELEASE.md).
+
 <p align="center">
-  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg">
+  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg">
     <img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download IYAGI Terminal for macOS (Apple Silicon)">
   </a>
 </p>
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.0_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.0_aarch64.dmg) | 17 MB | `352c1f365887a05128cbe164b091e967fa665491bba5db2cdd4c1ba5c081d72e` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.1_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg) | 17 MB | `aed7aab63a89d203f215edb01a44bf6321494807453a7daea531534647535186` |
 
 <details>
 <summary>Signing & trust on macOS</summary>
@@ -86,6 +90,17 @@ Windows/macOS release binaries (no installers; Windows/macOS on protected refs o
 From source: `npm ci && npm run tauri build`.
 </details>
 
+## Quick start
+
+1. Open the DMG and drag **IYAGI Term** into Applications.
+2. Run `claude`, `codex` or `opencode` in any pane as you always do — IYAGI detects them by
+   process and shows the agent, model and working/waiting state in the pane header. An empty tab
+   also offers one-click managed runs of the AI CLIs found on the machine.
+3. Split with `Cmd+D` / `Cmd+Shift+D`, open the command palette with `Cmd+Shift+P`, and the
+   managed-run queue with `Cmd+B`.
+4. Close the window — terminals keep running in the daemon. Reopen the app to reattach with
+   history replay.
+
 ## Why IYAGI
 
 Running several AI coding agents on one dev machine easily saturates CPU and memory. IYAGI
@@ -98,12 +113,16 @@ where the work actually runs:
   once — Windows Job Objects, Linux cgroup v2 when a delegated subtree is available, an
   independent guardian process plus observed process tree on macOS. CPU/memory/process caps
   are enforced only where the OS supports them.
-- **Resource guard**: when one terminal's attributed CPU or memory stays over a limit, the daemon
-  suspends that process tree (SIGSTOP / cgroup freeze where available) and offers one-click
-  resume; under critical system memory pressure it suspends the largest unfocused hog first.
-  The session you are looking at is never frozen automatically.
-- **Pressure relief** yields background agents to a lower scheduling tier (never stops them),
-  with per-pane protected/yielded badges and resume-all — always reversible.
+- **Pressure relief** shares CPU instead of freezing it: background agents under CPU pressure,
+  and any terminal that stays over its CPU limit, drop to a lower scheduling tier (never
+  stopped) and come back when the pressure or overage ends — with per-pane protected/yielded
+  badges and resume-all.
+- **Resource guard** handles memory: while host memory is under pressure, the daemon suspends a
+  terminal whose process tree stays over its memory limit (SIGSTOP / cgroup freeze where
+  available), and at critical pressure — under 1 GiB available, or when the kernel itself
+  reports a crisis — the largest unfocused hog first. Once memory recovers they resume on their
+  own, one at a time. The session you are looking at, and terminals you protect, are never
+  frozen automatically.
 - Attributes resource usage per job's process tree.
 - Keeps terminal sessions alive when the window closes or the app quits: the daemon owns the
   PTYs, and reopening the app reattaches with history replay (IndexedDB screen snapshot +
@@ -160,9 +179,9 @@ where the work actually runs:
 - Exited Claude Code, Codex and OpenCode sessions offer Resume in place, and the recent agent
   sessions dialog lets you jump to, resume or forget a session. **Attach terminal** in the
   recently finished list resumes Claude/Codex/OpenCode by their saved session ID, or replays
-  retained output for an ordinary terminal. On relaunch, every restored pane whose agent
-  conversation had ended resumes it in place, all at once and without holding up the rest of
-  the restore
+  retained output for an ordinary terminal. On relaunch, restored panes whose agent
+  conversation had ended resume it in place — at most three at a time, holding back while host
+  memory is critical — without holding up the rest of the restore
 - Notification center for agent permission requests, questions and finished responses (through
   Claude/Codex hooks and an injected OpenCode session plugin — no global CLI config edits) and for
   finished managed runs, with desktop notifications while hidden
@@ -195,13 +214,17 @@ where the work actually runs:
   names follow the attached terminal's title
 - Idempotent starts: replaying the same request ID never launches the CLI twice (request
   fingerprints, input dedup ring)
-- One daemon per user/data directory with a single writer per terminal; terminals outlive the
-  window and the app, but not a daemon restart (running jobs are then marked interrupted)
+- One daemon and one app instance per user/data directory (launching again brings the running
+  window forward) with a single writer per terminal; terminals outlive the window and the app,
+  but not a daemon restart (running jobs are then marked interrupted)
 
 **Resource governance & monitoring**
 
 - Admission checks in a fixed order — telemetry freshness, host pressure, 2 concurrent managed
   jobs, CPU slots, reservation budget, memory headroom — with a 64-job queue that ages priorities
+- Memory pressure from the kernel's own verdict (macOS memory-status level, Linux PSI) plus a
+  1 GiB available floor; CPU pressure at 85 % / 95 % used. Thresholds ship inside the daemon
+  binary ([defaults.json](docs/implementation/defaults.json))
 - Resource strip (CPU, RAM and pressure, disk, network, the AI agents detected in your terminals
   per kind with how many are working or waiting for you, and managed running/queued with the
   wait reason when there are any) plus 5-minute graphs (300 samples) with per-metric source and
@@ -258,7 +281,7 @@ crates/
   term-pty/           PTY session actors, MTJ1 journal, output flow control, launch gates
   term-storage/       SQLite metadata, migrations, fingerprints, crash recovery
   term-secrets/       App-local encrypted secret store (AES-256-GCM owner-only files)
-  iyagi-termd/         Execution manager daemon + launch helper, agent watch, mission service and adapters
+  iyagi-termd/        Execution manager daemon + launch helper, agent watch, mission service and adapters
   term-fixture/       Deterministic load and protocol fixtures for verification (not in the product bundle)
   iyagi-bench/        Benchmark harness over the real daemon (latency, idle, flood, queue, replay)
 ```
@@ -326,14 +349,20 @@ Apple Silicon (omit it on x86_64 hosts). The image pins Rust 1.89, the workspace
 | [docs/orchestration/USER_GUIDE.md](docs/orchestration/USER_GUIDE.md) (+ KR, details) | How AI missions work — setup, decisions, recovery |
 | [ORCHESTRATION_SPEC.md](ORCHESTRATION_SPEC.md) + [docs/orchestration/](docs/orchestration/) | Mission engine spec, tickets, and [implementation status](docs/orchestration/IMPLEMENTATION_STATUS.md) with verification evidence |
 | [docs/implementation/07-korean-ime.md](docs/implementation/07-korean-ime.md) | Korean IME bridge contract (macOS WKWebView × xterm) |
+| [docs/implementation/resource-governance-plan.md](docs/implementation/resource-governance-plan.md) | Resource guard and pressure relief design, with the current thresholds (Korean) |
 | [docs/security/](docs/security/) | Security audit records |
-| [releases/README.md](releases/README.md) | Release binaries and trust posture |
+| [RELEASE.md](RELEASE.md) | Release notes for every version |
+| [releases/README.md](releases/README.md) | Release binaries, signing/notarization and trust posture |
 
 ## Status & Roadmap
 
-v0.1.0 — **R1 (local terminal + managed execution) shipped.** Since then: tab regrouping and
-the layout editor, the terminal context menu, `Shift+Space` 한/영 toggle, resource guard and
-pressure relief, agent session resume, Z.ai (GLM) routing, and the AI mission engine.
+v0.1.1 — **Resource-governance release.** CPU contention is shared instead of frozen, the
+kernel's memory-pressure signal decides crises, memory-suspended terminals resume on their own,
+and agent conversations resume paced on relaunch ([release notes](RELEASE.md)).
+
+v0.1.0 — **R1 (local terminal + managed execution) shipped**: tab regrouping and the layout
+editor, the terminal context menu, `Shift+Space` 한/영 toggle, resource guard and pressure
+relief, agent session resume, Z.ai (GLM) routing, and the AI mission engine.
 
 - **O1 — AI missions (mission/task/run): implemented behind a development-build gate.** The
   daemon engine (planning, DAG scheduling, workspaces, budgets, outbox recovery, message

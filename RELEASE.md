@@ -4,6 +4,41 @@ Installers live in [releases/](releases/) and are linked from the [README](READM
 with their SHA-256. How releases are built, signed and notarized:
 [releases/README.md](releases/README.md).
 
+## 0.1.2 — 2026-10-11
+
+A maintenance release: a way to replace a daemon left over from an older version, and a Korean
+IME fix.
+
+### Daemon
+
+- **Daemon restart button.** Settings › General has a "Background run manager (daemon)" row. It
+  says whether the running daemon is older than the installed one and restarts it after a
+  confirmation. The daemon outlives the app, so updating or relaunching the app could leave the
+  old daemon running — for example a 0.1.0 daemon that kept refusing new terminals with "host
+  memory pressure is CRITICAL; retry shortly" under thresholds that 0.1.1 had already removed.
+  Removing the outdated-daemon banner in 0.1.1 had left no UI path to replace it, because the
+  launch-time refresh only renews the daemon binary copy and never the running process.
+  Restarting ends open terminals; agent conversations can be resumed from each pane.
+
+### Korean input
+
+- **No NBSP from native composition.** Text that xterm's own composition helper commits late
+  (deferred commits, keyCode 229 textarea diffs) is now normalized like the fallback path, so a
+  non-breaking space from the hidden textarea no longer reaches the shell as part of a command.
+  Clipboard paste and terminal responses keep their original text.
+
+### Upgrading from 0.1.0 or 0.1.1
+
+After installing, open Settings › General. If the daemon row says a newer version is installed,
+press **Restart** to switch to the 0.1.2 daemon. Relaunching the app alone does not replace a
+daemon that is still running.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.2_aarch64.dmg`](releases/IYAGI.Term_0.1.2_aarch64.dmg) | `c4087d3768e1709bda58aa9b024c4d47e9aaca71fef0768d189b50dc4b31a096` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.1 — 2026-10-10
 
 A resource-governance release: CPU contention is now shared rather than frozen, memory

@@ -56,19 +56,19 @@ CLI; IYAGI owns execution, process groups and resource governance.
 
 ## Download
 
-**Latest: 0.1.1** (2026-10-10) — CPU hogs yield instead of freezing, the kernel's memory-pressure
-signal replaces the fixed 10 % rule, and memory-suspended terminals resume on their own once the
-host recovers. See the [release notes](RELEASE.md).
+**Latest: 0.1.2** (2026-10-11) — a daemon restart button under Settings › General replaces a
+daemon left running from an older version, and Korean IME commits no longer send a non-breaking
+space to the shell. See the [release notes](RELEASE.md).
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg">
+  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.2_aarch64.dmg">
     <img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download IYAGI Terminal for macOS (Apple Silicon)">
   </a>
 </p>
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.1_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg) | 17 MB | `aed7aab63a89d203f215edb01a44bf6321494807453a7daea531534647535186` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.2_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.2_aarch64.dmg) | 17 MB | `c4087d3768e1709bda58aa9b024c4d47e9aaca71fef0768d189b50dc4b31a096` |
 
 <details>
 <summary>Signing & trust on macOS</summary>
@@ -216,7 +216,8 @@ where the work actually runs:
   fingerprints, input dedup ring)
 - One daemon and one app instance per user/data directory (launching again brings the running
   window forward) with a single writer per terminal; terminals outlive the window and the app,
-  but not a daemon restart (running jobs are then marked interrupted)
+  but not a daemon restart (running jobs are then marked interrupted). Settings › General shows
+  whether the running daemon is older than the installed one and restarts it on confirmation
 
 **Resource governance & monitoring**
 
@@ -355,6 +356,10 @@ Apple Silicon (omit it on x86_64 hosts). The image pins Rust 1.89, the workspace
 | [releases/README.md](releases/README.md) | Release binaries, signing/notarization and trust posture |
 
 ## Status & Roadmap
+
+v0.1.2 — **Maintenance release.** A daemon restart button (Settings › General) replaces a
+daemon left running from an older version, and the Korean IME path normalizes non-breaking
+spaces ([release notes](RELEASE.md)).
 
 v0.1.1 — **Resource-governance release.** CPU contention is shared instead of frozen, the
 kernel's memory-pressure signal decides crises, memory-suspended terminals resume on their own,

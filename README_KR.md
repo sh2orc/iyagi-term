@@ -55,19 +55,19 @@ Rust 실행 관리자 데몬(`iyagi-termd`)으로 구성됩니다. 모델 선택
 
 ## 다운로드
 
-**최신: 0.1.1** (2026-10-10) — CPU를 많이 쓰는 터미널은 정지 대신 양보시키고, 고정 10% 규칙 대신
-커널의 메모리 압력 신호로 위기를 판정하며, 메모리 때문에 정지된 터미널은 호스트가 회복되면 스스로
-재개합니다. 자세한 내용은 [릴리스 노트](RELEASE.md)를 참고하세요.
+**최신: 0.1.2** (2026-10-11) — 설정 › 일반의 데몬 재시작 버튼으로 이전 버전에서 계속 돌던 데몬을
+교체할 수 있고, 한글 IME 확정 시 셸에 줄바꿈 없는 공백(NBSP)이 들어가던 문제를 고쳤습니다. 자세한
+내용은 [릴리스 노트](RELEASE.md)를 참고하세요.
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg">
+  <a href="https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.2_aarch64.dmg">
     <img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="IYAGI Terminal macOS(Apple Silicon) 다운로드">
   </a>
 </p>
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.1_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.1_aarch64.dmg) | 17 MB | `aed7aab63a89d203f215edb01a44bf6321494807453a7daea531534647535186` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.2_aarch64.dmg`](https://raw.githubusercontent.com/sh2orc/iyagi-term/main/releases/IYAGI.Term_0.1.2_aarch64.dmg) | 17 MB | `c4087d3768e1709bda58aa9b024c4d47e9aaca71fef0768d189b50dc4b31a096` |
 
 <details>
 <summary>macOS 서명과 신뢰</summary>
@@ -196,7 +196,8 @@ CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Wind
 - 멱등 시작: 같은 요청 ID를 재전송해도 CLI를 두 번 실행하지 않습니다(요청 지문, 입력 중복 제거 링)
 - 사용자·데이터 디렉터리당 데몬 하나와 앱 인스턴스 하나(다시 실행하면 떠 있는 창을 앞으로
   가져옴), 터미널마다 입력 소유자 하나. 터미널은 창·앱을 닫아도 살지만 데몬이 재시작되면
-  끝납니다(실행 중이던 작업은 중단됨으로 표시)
+  끝납니다(실행 중이던 작업은 중단됨으로 표시). 설정 › 일반에서 실행 중인 데몬이 설치된 버전보다
+  오래됐는지 보여 주고, 확인을 거쳐 재시작합니다
 
 **자원 거버넌스·모니터링**
 
@@ -329,6 +330,9 @@ Silicon용입니다(x86_64 호스트에서는 생략). 이미지는 워크스페
 | [releases/README.md](releases/README.md) | 릴리스 바이너리, 서명·공증 절차와 신뢰 모델 |
 
 ## 상태 및 로드맵
+
+v0.1.2 — **유지보수 릴리스.** 이전 버전에서 계속 돌던 데몬을 설정 › 일반의 재시작 버튼으로 교체하고,
+한글 IME 경로에서 NBSP를 일반 공백으로 바꿉니다([릴리스 노트](RELEASE.md)).
 
 v0.1.1 — **자원 거버넌스 릴리스.** CPU 경합은 정지 대신 나눠 쓰고, 메모리 위기는 커널의 압력
 신호로 판정하며, 메모리 때문에 정지된 터미널은 스스로 재개하고, 다시 실행할 때 에이전트 대화를

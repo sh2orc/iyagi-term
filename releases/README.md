@@ -40,7 +40,7 @@ this repository.
 Local notarization does not replace the published installers in this directory.
 Update the download artifact and its README hash together when publishing a release.
 
-## Trust posture (as of 0.1.1)
+## Trust posture (as of 0.1.2)
 
 macOS installers are signed with a Developer ID, built with hardened runtime and notarized,
 with the notarization ticket stapled to the DMG, so they open without Gatekeeper warnings.

@@ -89,6 +89,10 @@ export interface PreferenceValues {
   claudeProvider: ClaudeProviderPreference;
   /** Z.ai 라우팅 시 주 모델(opus·sonnet 슬롯). claudeProvider가 zai-coding-plan일 때만 쓰인다. */
   zaiMainModel: ZaiMainModel;
+  /** 관측 게이트웨이: Z.ai 라우팅 Claude pane의 토큰 사용량을 데몬이 계량하고
+   *  킬 스위치를 제공한다. 데몬 정책은 세션 수명이라 앱이 붙을 때마다 다시
+   *  적용한다(참 진실 원본은 이 설정). */
+  gatewayObservability: boolean;
   /** 새 터미널이 시작하는 글꼴 크기(pane zoom의 기준점이기도 하다). */
   baseFontSize: number;
   /** 창을 닫을 때 묻지 않고 터미널까지 종료(04 §2). */
@@ -153,6 +157,7 @@ export const DEFAULT_PREFERENCES: PreferenceValues = {
   codexFullAutonomy: true,
   claudeProvider: "anthropic",
   zaiMainModel: "glm-5.3[1m]",
+  gatewayObservability: false,
   baseFontSize: DEFAULT_FONT_SIZE,
   terminateOnClose: false,
   quitBehavior: "ask",
@@ -229,6 +234,10 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
     zaiMainModel: ZAI_MAIN_MODELS.includes(value.zaiMainModel as ZaiMainModel)
       ? (value.zaiMainModel as ZaiMainModel)
       : DEFAULT_PREFERENCES.zaiMainModel,
+    gatewayObservability:
+      typeof value.gatewayObservability === "boolean"
+        ? value.gatewayObservability
+        : DEFAULT_PREFERENCES.gatewayObservability,
     fontFamily: sanitizeFontFamily(value.fontFamily),
     cursorStyle: CURSOR_STYLES.includes(value.cursorStyle as string)
       ? (value.cursorStyle as PreferenceValues["cursorStyle"])
@@ -349,6 +358,7 @@ export interface PreferencesState extends PreferenceValues {
   setClaudeProvider(provider: ClaudeProviderPreference): void;
   /** Z.ai 라우팅 주 모델 — 목록 밖 값은 기본 모델로 되돌린다. */
   setZaiMainModel(model: ZaiMainModel): void;
+  setGatewayObservability(enabled: boolean): void;
   setBaseFontSize(size: number): void;
   setTerminateOnClose(value: boolean): void;
   setQuitBehavior(value: QuitBehavior): void;
@@ -416,6 +426,7 @@ export const usePreferences = create<PreferencesState>()(
         }),
       setZaiMainModel: (model) =>
         set({ zaiMainModel: ZAI_MAIN_MODELS.includes(model) ? model : DEFAULT_PREFERENCES.zaiMainModel }),
+      setGatewayObservability: (gatewayObservability) => set({ gatewayObservability }),
       setBaseFontSize: (size) => set({ baseFontSize: clampBaseFontSize(size) }),
       setTerminateOnClose: (terminateOnClose) => set({ terminateOnClose }),
       setQuitBehavior: (quitBehavior) =>
@@ -457,6 +468,7 @@ export const usePreferences = create<PreferencesState>()(
         claudeFullAutonomy: state.claudeFullAutonomy,
         codexFullAutonomy: state.codexFullAutonomy,
         claudeProvider: state.claudeProvider,
+        gatewayObservability: state.gatewayObservability,
         zaiMainModel: state.zaiMainModel,
         baseFontSize: state.baseFontSize,
         terminateOnClose: state.terminateOnClose,

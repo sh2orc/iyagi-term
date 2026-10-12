@@ -39,6 +39,7 @@ describe("sanitizePreferences", () => {
         codexFullAutonomy: true,
         claudeProvider: "zai-coding-plan",
         zaiMainModel: "glm-5.3-flash[1m]",
+        gatewayObservability: true,
         baseFontSize: 16,
         terminateOnClose: true,
         quitBehavior: "keep",
@@ -60,6 +61,7 @@ describe("sanitizePreferences", () => {
       codexFullAutonomy: true,
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
+      gatewayObservability: true,
       baseFontSize: 16,
       terminateOnClose: true,
       quitBehavior: "keep",
@@ -174,6 +176,7 @@ describe("preferences store", () => {
     usePreferences.getState().setCliAutonomy("codex", false);
     usePreferences.getState().setClaudeProvider("zai-coding-plan");
     usePreferences.getState().setZaiMainModel("glm-5.3-flash[1m]");
+    usePreferences.getState().setGatewayObservability(true);
     usePreferences.getState().setShortcutOverride("paste", { code: "KeyG", ctrl: true, meta: false, shift: true });
     usePreferences.getState().setTabSwipe({ sensitivity: "high", wrap: true });
     expect(JSON.parse([...values.values()][0]).state).toEqual({
@@ -181,6 +184,7 @@ describe("preferences store", () => {
       codexFullAutonomy: false,
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
+      gatewayObservability: true,
       agentBackgrounds: true,
       agentBackgroundColors: {
         claude: "#e0521f",

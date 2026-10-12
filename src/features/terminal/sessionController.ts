@@ -14,6 +14,9 @@ import { classifyInputRejection, inputIssueOf, setInputIssue } from "./inputHeal
 import { screenSignature } from "./screenOutput";
 import { defaultShellArgv } from "./shellProfiles";
 import type { LaunchRequest } from "../../generated/LaunchRequest";
+import type { GatewayPolicy } from "../../generated/GatewayPolicy";
+import type { GatewayPolicyParams } from "../../generated/GatewayPolicyParams";
+import type { GatewayStatus } from "../../generated/GatewayStatus";
 import type { ReliefAction } from "../../generated/ReliefAction";
 import type { ReliefState } from "../../generated/ReliefState";
 import type { WorkloadSummary } from "../../generated/WorkloadSummary";
@@ -3407,6 +3410,17 @@ export class SessionController {
     } catch (error) {
       this.toast(errorMessage(error, t("terminal.relief.policyFailed")));
     }
+  }
+
+  /** 관측 게이트웨이 상태(설정 패널). 구 데몬이면 예외가 그대로 올라온다 —
+   * 호출부(설정 패널)가 "지원 안 함" 안내로 흡수한다. */
+  async gatewayStatus(): Promise<GatewayStatus> {
+    return this.deps.client.gatewayStatus();
+  }
+
+  /** 관측 라우팅 on/off와 킬 스위치(`gateway.set_policy`). 지정한 것만 바뀐다. */
+  async gatewaySetPolicy(params: GatewayPolicyParams): Promise<GatewayPolicy> {
+    return this.deps.client.gatewaySetPolicy(params);
   }
 
   async cancelWorkload(workloadId: string): Promise<void> {

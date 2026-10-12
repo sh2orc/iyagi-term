@@ -1,4 +1,7 @@
 import { isDeterministicIntegration, taskRunsInPhase } from "../missions/executionKind";
+import type { GatewayPolicy } from "../../generated/GatewayPolicy";
+import type { GatewayPolicyParams } from "../../generated/GatewayPolicyParams";
+import type { GatewayStatus } from "../../generated/GatewayStatus";
 import type { RepositoryInspectParams } from "../../generated/RepositoryInspectParams";
 import type { RepositoryInspectResult } from "../../generated/RepositoryInspectResult";
 /**
@@ -339,6 +342,8 @@ export class MockDaemonClient implements DaemonClient {
   private focusedSessionId: string | null = null;
   /** 데몬 전체의 완화 정책(08 §2) — 기본은 defaults.json과 같은 auto_yield. */
   private reliefPolicy: ReliefPolicy = { auto_yield: true };
+  /** 관측 게이트웨이 모의 정책(브라우저 dev — 실제 프록시는 없다). */
+  private gatewayPolicy: GatewayPolicy = { enabled: false, blocked: false };
   private guardPolicy: GuardPolicy = {
     auto_suspend: true,
     cpu_cores_limit: 6,
@@ -789,6 +794,26 @@ export class MockDaemonClient implements DaemonClient {
     this.reliefPolicy = { auto_yield: params.auto_yield };
     this.revision++;
     return { ...this.reliefPolicy };
+  }
+
+  /** 관측 게이트웨이(브라우저 dev): 실제 프록시는 없고 정책·빈 장부만 흉내 낸다. */
+  async gatewayStatus(): Promise<GatewayStatus> {
+    return {
+      enabled: this.gatewayPolicy.enabled,
+      listening: false,
+      port: 0,
+      blocked: this.gatewayPolicy.blocked,
+      totals: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, requests: 0, failures: 0 },
+      sessions: [],
+    };
+  }
+
+  async gatewaySetPolicy(params: GatewayPolicyParams): Promise<GatewayPolicy> {
+    this.gatewayPolicy = {
+      enabled: params.enabled ?? this.gatewayPolicy.enabled,
+      blocked: params.blocked ?? this.gatewayPolicy.blocked,
+    };
+    return { ...this.gatewayPolicy };
   }
 
   /** 자원 가드 수동 일시정지/해제(08 §5). mock에는 가드 루프가 없으므로

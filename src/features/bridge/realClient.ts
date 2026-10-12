@@ -37,6 +37,9 @@ import type { SessionFocusParams } from "../../generated/SessionFocusParams";
 import type { SessionFocusResult } from "../../generated/SessionFocusResult";
 import type { SessionReliefParams } from "../../generated/SessionReliefParams";
 import type { SessionReliefResult } from "../../generated/SessionReliefResult";
+import type { GatewayPolicy } from "../../generated/GatewayPolicy";
+import type { GatewayPolicyParams } from "../../generated/GatewayPolicyParams";
+import type { GatewayStatus } from "../../generated/GatewayStatus";
 import type { ReliefPolicy } from "../../generated/ReliefPolicy";
 import type { ReliefPolicyParams } from "../../generated/ReliefPolicyParams";
 import type { WorkloadSuspendParams } from "../../generated/WorkloadSuspendParams";
@@ -464,6 +467,16 @@ export class RealDaemonClient implements DaemonClient {
   /** 자원 가드 정책 변경(08 §5). */
   async guardSetPolicy(params: GuardPolicyParams): Promise<GuardPolicy> {
     return this.rpc<GuardPolicy>("guard.set_policy", params);
+  }
+
+  /** 관측 게이트웨이 상태(정책·포트·토큰 장부). */
+  async gatewayStatus(): Promise<GatewayStatus> {
+    return this.rpc<GatewayStatus>("gateway.status", {});
+  }
+
+  /** 관측 라우팅 on/off와 킬 스위치. 지정한 것만 바뀐다. */
+  async gatewaySetPolicy(params: GatewayPolicyParams): Promise<GatewayPolicy> {
+    return this.rpc<GatewayPolicy>("gateway.set_policy", params);
   }
 
   async retentionSetLimit(params: RetentionSetLimitParams): Promise<RetentionSetLimitResult> {

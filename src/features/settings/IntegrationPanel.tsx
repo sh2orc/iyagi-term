@@ -1,6 +1,6 @@
 /** CLI integrations. Settings-file mutations always require an explicit click. */
 
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useContext, useEffect, useId, useState } from "react";
 import { isTauri, tauriIpcAdapter } from "../bridge/ipc";
 import { useI18n } from "../../i18n";
 import { usePreferences, ZAI_HAIKU_MODEL, ZAI_MAIN_MODELS, type ZaiMainModel } from "../../store/preferences";
@@ -24,6 +24,8 @@ import {
 import type { ClaudeUsageStatus } from "../subscriptions/types";
 
 import { AutonomyToggle } from "../workloads/AutonomyToggle";
+import { ControllerContext } from "../../app/controllerContext";
+import type { GatewayStatus } from "../../generated/GatewayStatus";
 
 export function IntegrationPanel(): JSX.Element {
   const { t } = useI18n();
@@ -38,6 +40,7 @@ export function IntegrationPanel(): JSX.Element {
       </section>
       <ClaudeUsagePanel />
       <ZaiPanel />
+      <GatewayPanel />
       <HooksPanel
         cli="claude"
         settingId="claudeHooks"
@@ -422,6 +425,168 @@ function HooksPanel({
           <button type="button" disabled={busy} onClick={() => void refresh()}>{tp("refresh")}</button>
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * 관측 게이트웨이 카드: Z.ai 라우팅 Claude pane의 토큰 사용량 계량 + 킬 스위치.
+ *
+ * - 사용 선호(참 진실 원본)는 preferences에 저장하고, 패널이 마운트될 때
+ *   데몬에 다시 적용한다(데몬 정책은 세션 수명이다).
+ * - 상태는 2초 폴로 싱싱하게 — 데몬 재시작으로 꺼진 것도 여기서 보인다.
+ * - 구 데몬(gateway.* 없음)은 안내 문구로만 흡수한다.
+ */
+function GatewayPanel(): JSX.Element {
+  const { t } = useI18n();
+  // 컨트롤러는 앱 안에서만 산다(테스트 렌더에는 없다) — 없으면 카드를
+  // 데스크톱 전용 안내로 접는다.
+  const controller = useContext(ControllerContext);
+  const available = isTauri() && controller !== null;
+  const enabled = usePreferences((s) => s.gatewayObservability);
+  const setEnabled = usePreferences((s) => s.setGatewayObservability);
+  const routed = usePreferences((s) => s.claudeProvider) === "zai-coding-plan";
+  const [status, setStatus] = useState<GatewayStatus | null>(null);
+  const [unsupported, setUnsupported] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!available || !controller) return;
+    try {
+      setStatus(await controller.gatewayStatus());
+      setUnsupported(false);
+    } catch {
+      setUnsupported(true);
+      setStatus(null);
+    }
+  }, [available, controller]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  // 패널이 열려 있는 동안 짧게 폴한다(사용량은 이벤트가 없고 폴로 읽는다).
+  useEffect(() => {
+    const timer = window.setInterval(() => { void refresh(); }, 2000);
+    return () => { window.clearInterval(timer); };
+  }, [refresh]);
+
+  // 마운트 1회: 저장된 선호를 데몬에 다시 적용(데몬 재시작 후 복구).
+  useEffect(() => {
+    if (!available || !controller || unsupported || !enabled) return;
+    void controller.gatewaySetPolicy({ enabled: true, blocked: null }).catch(() => undefined);
+    // 의도적으로 마운트 시 1회만(busk: enabled를 끄는 쪽은 아래 토글이 담당).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available, unsupported]);
+
+  const toggle = async (value: boolean) => {
+    setBusy(true);
+    setError(null);
+    if (!controller) return;
+    try {
+      await controller.gatewaySetPolicy({ enabled: value, blocked: null });
+      setEnabled(value);
+      await refresh();
+    } catch (value_) { setError(errorText(value_)); }
+    finally { setBusy(false); }
+  };
+
+  const toggleBlock = async () => {
+    if (!status) return;
+    setBusy(true);
+    setError(null);
+    if (!controller) return;
+    try {
+      await controller.gatewaySetPolicy({ enabled: null, blocked: !status.blocked });
+      await refresh();
+    } catch (value) { setError(errorText(value)); }
+    finally { setBusy(false); }
+  };
+
+  const switchId = useId();
+  const fmt = (n: number): string => n.toLocaleString();
+  const totals = status?.totals;
+
+  return (
+    <section className="integration-block" data-setting-id="gatewayObservability">
+      <h2>{t("settings.item.gatewayObservability.label")}</h2>
+      <p>{t("settings.item.gatewayObservability.description")}</p>
+      {!available ? <p className="muted">{t("settings.usage.desktopOnly")}</p> : unsupported ? (
+        <p className="muted">{t("settings.gateway.daemonUnsupported")}</p>
+      ) : (
+        <>
+          <div className="zai-route">
+            <label className="zai-route-switch" htmlFor={switchId}>
+              <input
+                id={switchId}
+                type="checkbox"
+                role="switch"
+                aria-checked={enabled}
+                checked={enabled}
+                disabled={busy}
+                onChange={(event) => void toggle(event.currentTarget.checked)}
+              />
+              <span>{t("settings.gateway.toggle.label")}</span>
+            </label>
+            <p className="muted">{t("settings.gateway.toggle.description")}</p>
+            {!routed ? <p className="muted zai-route-hint">{t("settings.gateway.needsRouting")}</p> : null}
+          </div>
+          {status ? (
+            <div className="gateway-status">
+              <p role="status">
+                {status.listening
+                  ? t("settings.gateway.status.listening", { port: status.port })
+                  : t("settings.gateway.status.notListening")}
+              </p>
+              {status.blocked ? (
+                <p className="setting-error" role="alert">{t("settings.gateway.blocked")}</p>
+              ) : null}
+              {totals ? (
+                <p className="muted">
+                  {t("settings.gateway.totals", {
+                    input: fmt(totals.input_tokens),
+                    output: fmt(totals.output_tokens),
+                    cacheRead: fmt(totals.cache_read_tokens),
+                    cacheWrite: fmt(totals.cache_write_tokens),
+                    requests: fmt(totals.requests),
+                    failures: fmt(totals.failures),
+                  })}
+                </p>
+              ) : null}
+              {status.sessions.length > 0 ? (
+                <>
+                  <p className="muted">{t("settings.gateway.sessions", { count: status.sessions.length })}</p>
+                  <ul className="gateway-sessions">
+                    {status.sessions.map((session) => (
+                      <li key={session.workload_id}>
+                        <code>{session.model ?? "—"}</code>{" "}
+                        {t("settings.gateway.sessionRow", {
+                          input: fmt(session.usage.input_tokens),
+                          output: fmt(session.usage.output_tokens),
+                          requests: session.usage.requests,
+                        })}
+                        {session.usage.failures > 0
+                          ? ` · ${t("settings.gateway.failures", { count: session.usage.failures })}`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              <div className="integration-actions">
+                <button type="button" disabled={busy} onClick={() => void toggleBlock()}>
+                  {status.blocked ? t("settings.gateway.unblock") : t("settings.gateway.block")}
+                </button>
+                <button type="button" disabled={busy} onClick={() => void refresh()}>
+                  {t("settings.gateway.refresh")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p role="status">{t("settings.usage.desktopOnly")}</p>
+          )}
+        </>
+      )}
+      {error ? <p className="setting-error" role="alert">{t("settings.usage.error", { message: error })}</p> : null}
     </section>
   );
 }

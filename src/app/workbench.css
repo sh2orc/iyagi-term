@@ -2636,3 +2636,21 @@ body.layout-dragging.layout-drop-blocked * {
   color: var(--fg-muted);
   font-size: 11px;
 }
+
+/* 관측 게이트웨이 카드(IntegrationPanel): 상태 요약과 세션 목록. */
+.gateway-status {
+  margin-top: 8px;
+}
+
+.gateway-sessions {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.gateway-sessions code {
+  font-size: 11px;
+}

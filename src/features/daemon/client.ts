@@ -8,6 +8,9 @@ import type { RepositoryInspectResult } from "../../generated/RepositoryInspectR
  * `MockDaemonClient` drives the same code paths headlessly.
  */
 
+import type { GatewayPolicy } from "../../generated/GatewayPolicy";
+import type { GatewayPolicyParams } from "../../generated/GatewayPolicyParams";
+import type { GatewayStatus } from "../../generated/GatewayStatus";
 import type { AgentSessionForgetParams } from "../../generated/AgentSessionForgetParams";
 import type { AgentSessionForgetResult } from "../../generated/AgentSessionForgetResult";
 import type { AgentSessionListParams } from "../../generated/AgentSessionListParams";
@@ -394,6 +397,14 @@ export interface DaemonClient {
   agentSessionForget(params: AgentSessionForgetParams): Promise<AgentSessionForgetResult>;
   /** 저널 전체 substring 검색(W2 — 스크롤백 밖 과거 출력). */
   sessionSearch(params: SessionSearchParams): Promise<SessionSearchResult>;
+  /**
+   * 관측 게이트웨이 상태(정책·수신 포트·토큰 장부). Z.ai 라우팅 Claude pane의
+   * 업스트림 트래픽이 데몬을 거쳐 갈 때 세션별 사용량을 싣는다. 구 데몬에는
+   * 메서드가 없으므로 호출부는 실패를 조용히 흡수한다.
+   */
+  gatewayStatus(): Promise<GatewayStatus>;
+  /** 관측 라우팅 on/off(`enabled`)와 킬 스위치(`blocked`). 지정한 것만 바뀐다. */
+  gatewaySetPolicy(params: GatewayPolicyParams): Promise<GatewayPolicy>;
 
   // ------------------------------------------------------------ O1 mission RPCs
   //

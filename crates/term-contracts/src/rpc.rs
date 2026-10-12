@@ -292,6 +292,8 @@ pub mod methods {
     pub const AGENT_SESSION_LIST: &str = "agent_session.list";
     pub const AGENT_SESSION_FORGET: &str = "agent_session.forget";
     pub const SESSION_SEARCH: &str = "session.search";
+    pub const GATEWAY_STATUS: &str = "gateway.status";
+    pub const GATEWAY_SET_POLICY: &str = "gateway.set_policy";
     pub const DAEMON_SHUTDOWN: &str = "daemon.shutdown";
 }
 

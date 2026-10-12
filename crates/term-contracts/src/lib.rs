@@ -20,6 +20,7 @@ pub mod agent_session;
 pub mod defaults;
 pub mod error;
 pub mod gate;
+pub mod gateway;
 pub mod ids;
 pub mod intervention;
 pub mod launch;

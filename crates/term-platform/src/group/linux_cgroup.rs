@@ -46,6 +46,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::linux_recovery::{signal_member, CgroupAnchor};
+use super::scheduling;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use term_contracts::ids::ProcessIdentity;
 use term_contracts::metrics::{Metric, UsageCoverage, WorkloadUsage};
@@ -493,6 +494,36 @@ fn tree_signal_member(ident: &ProcessIdentity, signal: i32) {
 
 // ---- trait impl -----------------------------------------------------------
 
+impl LinuxCgroupPlatform {
+    /// 08 §5: `suspend_owned`/`resume_owned`의 공용 헬퍼. cgroup 위임이 있으면
+    /// `cgroup.freeze`로, 없으면 관측 트리의 검증된 멤버에 per-pid
+    /// SIGSTOP/SIGCONT로 일시정지/재개한다. nice와 달리 SIGSTOP 되돌리기에
+    /// 특권이 필요 없어 비위임 경로도 안전하다.
+    fn set_suspended(&self, group: &GroupHandle, suspend: bool) -> io::Result<SchedulingOutcome> {
+        if let GroupInner::ObservedTree(tree) = &group.inner {
+            let (verified, reused, _unverifiable) = self.tree_members(tree)?;
+            if !reused.is_empty() {
+                tracing::debug!(?reused, "skipped reused pids during suspend");
+            }
+            return scheduling::set_process_suspend(&verified, suspend);
+        }
+        let inner = cgroup_inner(group)?;
+        if inner.anchor.removed()? {
+            return Ok(SchedulingOutcome::default());
+        }
+        write_verified(
+            &inner.anchor.path(),
+            "cgroup.freeze",
+            if suspend { "1" } else { "0" },
+        )?;
+        Ok(SchedulingOutcome {
+            applied: 1,
+            failed: 0,
+            skipped_reused: 0,
+        })
+    }
+}
+
 impl super::ResourcePlatform for LinuxCgroupPlatform {
     fn capabilities(&self) -> Capabilities {
         match self.probe() {
@@ -540,7 +571,7 @@ impl super::ResourcePlatform for LinuxCgroupPlatform {
                     },
                     // 08 §5: freeze는 위임 여부와 무관하게 검증된 트리의
                     // SIGSTOP/SIGCONT로도 되돌릴 수 있다.
-                    suspend_resume: supported("cgroup v2 freeze (per-pid fallback)"),
+                    suspend_resume: supported("cgroup v2 freeze (per-pid fallback)".into()),
                     reattach: LimitCapability {
                         support: LimitSupport::Supported,
                         reason: None,
@@ -596,7 +627,10 @@ impl super::ResourcePlatform for LinuxCgroupPlatform {
                                 .into(),
                         ),
                     },
-                    suspend_resume: supported("SIGSTOP/SIGCONT on verified tree members"),
+                    suspend_resume: LimitCapability {
+                        support: LimitSupport::Supported,
+                        reason: Some("SIGSTOP/SIGCONT on verified tree members".into()),
+                    },
                     reattach: LimitCapability {
                         support: LimitSupport::Supported,
                         reason: None,
@@ -1086,30 +1120,6 @@ impl super::ResourcePlatform for LinuxCgroupPlatform {
 
     fn resume_owned(&self, group: &GroupHandle) -> io::Result<SchedulingOutcome> {
         self.set_suspended(group, false)
-    }
-
-    fn set_suspended(&self, group: &GroupHandle, suspend: bool) -> io::Result<SchedulingOutcome> {
-        if let GroupInner::ObservedTree(tree) = &group.inner {
-            let (verified, reused, _unverifiable) = self.tree_members(tree)?;
-            if !reused.is_empty() {
-                tracing::debug!(?reused, "skipped reused pids during suspend");
-            }
-            return scheduling::set_process_suspend(&verified, suspend);
-        }
-        let inner = cgroup_inner(group)?;
-        if inner.anchor.removed()? {
-            return Ok(SchedulingOutcome::default());
-        }
-        write_verified(
-            &inner.anchor.path(),
-            "cgroup.freeze",
-            if suspend { "1" } else { "0" },
-        )?;
-        Ok(SchedulingOutcome {
-            applied: 1,
-            failed: 0,
-            skipped_reused: 0,
-        })
     }
 
     fn is_empty(&self, group: &GroupHandle) -> io::Result<bool> {

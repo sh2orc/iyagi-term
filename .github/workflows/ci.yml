@@ -67,6 +67,9 @@ jobs:
     container: rust:1.89
     steps:
       - uses: actions/checkout@v4
+      # The rust:1.89 image ships only the default components — the fmt/clippy
+      # gates below need both added before they can run at all.
+      - run: rustup component add rustfmt clippy
       # The workspace includes src-tauri: its gtk/webkit2gtk -sys build scripts
       # need the GTK dev packages (pkg-config) even for `cargo check`.
       - name: Install host deps

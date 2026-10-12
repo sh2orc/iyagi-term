@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { IpcAdapter } from "../bridge/ipc";
 import {
-  createHangulToggle,
-  isHangulToggleChord,
-  showHangulBalloon,
-  type HangulHudState,
+  createImeToggle,
+  isImeToggleChord,
+  showImeBalloon,
+  type ImeHudState,
   type ImeState,
-} from "./hangulToggle";
+} from "./imeToggle";
 
 function keydown(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   const base = {
@@ -43,31 +43,39 @@ function fakeIpc(handlers: Record<string, () => Promise<unknown>>) {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-describe("isHangulToggleChord", () => {
+describe("isImeToggleChord", () => {
   it("matches exactly Shift+Space on keydown", () => {
-    expect(isHangulToggleChord(keydown())).toBe(true);
-    expect(isHangulToggleChord(keydown({ type: "keyup" }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ code: "Enter" }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ shiftKey: false }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ ctrlKey: true }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ altKey: true }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ metaKey: true }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ isComposing: true }))).toBe(false);
-    expect(isHangulToggleChord(keydown({ repeat: true }))).toBe(false);
+    expect(isImeToggleChord(keydown())).toBe(true);
+    expect(isImeToggleChord(keydown({ type: "keyup" }))).toBe(false);
+    expect(isImeToggleChord(keydown({ code: "Enter" }))).toBe(false);
+    expect(isImeToggleChord(keydown({ shiftKey: false }))).toBe(false);
+    expect(isImeToggleChord(keydown({ ctrlKey: true }))).toBe(false);
+    expect(isImeToggleChord(keydown({ altKey: true }))).toBe(false);
+    expect(isImeToggleChord(keydown({ metaKey: true }))).toBe(false);
+    expect(isImeToggleChord(keydown({ isComposing: true }))).toBe(false);
+    expect(isImeToggleChord(keydown({ repeat: true }))).toBe(false);
   });
 });
 
-describe("createHangulToggle", () => {
+describe("createImeToggle", () => {
   const korean: ImeState = {
     available: true,
-    hangul: true,
+    native: true,
+    family: "ko",
     sourceId: "com.apple.inputmethod.Korean.2SetKorean",
+    reason: null,
+  };
+  const chinese: ImeState = {
+    available: true,
+    native: true,
+    family: "zh",
+    sourceId: "com.apple.inputmethod.SCIM.ITABC",
     reason: null,
   };
 
   it("is off without Tauri IPC (browser preview) and lets the space through", () => {
     const hud = vi.fn();
-    const toggle = createHangulToggle({ ipc: null, getMode: () => "on", showHud: hud });
+    const toggle = createImeToggle({ ipc: null, getMode: () => "on", showHud: hud });
     const event = keydown();
     expect(toggle.enabled()).toBe(false);
     expect(toggle.handleKeydown(event, {})).toBe(false);
@@ -78,10 +86,10 @@ describe("createHangulToggle", () => {
   it("auto: consumes the chord only once ime_state reported availability", async () => {
     const { ipc, calls } = fakeIpc({
       ime_state: async () => ({ ...korean }),
-      ime_toggle_hangul: async () => ({ ...korean, hangul: false }),
+      ime_toggle: async () => ({ ...korean, native: false }),
     });
     const hud = vi.fn();
-    const toggle = createHangulToggle({ ipc, getMode: () => "auto", showHud: hud });
+    const toggle = createImeToggle({ ipc, getMode: () => "auto", showHud: hud });
     // 아직 모른다: 첫 키는 통과시키되 조회를 건다.
     expect(toggle.handleKeydown(keydown(), {})).toBe(false);
     await flush();
@@ -91,15 +99,15 @@ describe("createHangulToggle", () => {
     expect(toggle.handleKeydown(event, { id: "term" })).toBe(true);
     expect(event.preventDefault).toHaveBeenCalled();
     await flush();
-    expect(calls).toEqual(["ime_state", "ime_toggle_hangul"]);
-    expect(hud).toHaveBeenCalledWith({ id: "term" }, { ...korean, hangul: false });
+    expect(calls).toEqual(["ime_state", "ime_toggle"]);
+    expect(hud).toHaveBeenCalledWith({ id: "term" }, { ...korean, native: false });
   });
 
-  it("auto: stays off when the OS has no Korean input source", async () => {
+  it("auto: stays off when the OS has no CJK input source", async () => {
     const { ipc } = fakeIpc({
-      ime_state: async () => ({ available: false, hangul: null, sourceId: null, reason: "none" }),
+      ime_state: async () => ({ available: false, native: null, family: null, sourceId: null, reason: "none" }),
     });
-    const toggle = createHangulToggle({ ipc, getMode: () => "auto", showHud: vi.fn() });
+    const toggle = createImeToggle({ ipc, getMode: () => "auto", showHud: vi.fn() });
     await toggle.refresh();
     expect(toggle.enabled()).toBe(false);
     expect(toggle.handleKeydown(keydown(), {})).toBe(false);
@@ -108,55 +116,69 @@ describe("createHangulToggle", () => {
   it("on: consumes the chord, is single-flight, and reports failures in the HUD", async () => {
     let resolveToggle: (state: ImeState) => void = () => undefined;
     const { ipc, calls } = fakeIpc({
-      ime_toggle_hangul: () => new Promise<ImeState>((resolve) => (resolveToggle = resolve)),
+      ime_toggle: () => new Promise<ImeState>((resolve) => (resolveToggle = resolve)),
     });
-    const hud = vi.fn<(terminal: unknown, state: HangulHudState) => void>();
-    const toggle = createHangulToggle({ ipc, getMode: () => "on", showHud: hud });
+    const hud = vi.fn<(terminal: unknown, state: ImeHudState) => void>();
+    const toggle = createImeToggle({ ipc, getMode: () => "on", showHud: hud });
     expect(toggle.handleKeydown(keydown(), {})).toBe(true);
     expect(toggle.handleKeydown(keydown(), {})).toBe(true); // 연타는 삼키되 두 번 부르지 않는다
-    expect(calls).toEqual(["ime_toggle_hangul"]);
-    resolveToggle({ ...korean, hangul: true });
+    expect(calls).toEqual(["ime_toggle"]);
+    resolveToggle({ ...korean, native: true });
     await flush();
-    expect(hud).toHaveBeenLastCalledWith({}, { ...korean, hangul: true });
+    expect(hud).toHaveBeenLastCalledWith({}, { ...korean, native: true });
 
-    const failing = fakeIpc({ ime_toggle_hangul: async () => Promise.reject(new Error("boom")) });
-    const hud2 = vi.fn<(terminal: unknown, state: HangulHudState) => void>();
-    const toggle2 = createHangulToggle({ ipc: failing.ipc, getMode: () => "on", showHud: hud2 });
+    const failing = fakeIpc({ ime_toggle: async () => Promise.reject(new Error("boom")) });
+    const hud2 = vi.fn<(terminal: unknown, state: ImeHudState) => void>();
+    const toggle2 = createImeToggle({ ipc: failing.ipc, getMode: () => "on", showHud: hud2 });
     expect(toggle2.handleKeydown(keydown(), {})).toBe(true);
     await flush();
     expect(hud2).toHaveBeenCalledWith({}, { error: "boom" });
   });
 
   it("off: never consumes the chord", () => {
-    const { ipc, calls } = fakeIpc({ ime_toggle_hangul: async () => korean });
-    const toggle = createHangulToggle({ ipc, getMode: () => "off", showHud: vi.fn() });
+    const { ipc, calls } = fakeIpc({ ime_toggle: async () => korean });
+    const toggle = createImeToggle({ ipc, getMode: () => "off", showHud: vi.fn() });
     expect(toggle.handleKeydown(keydown(), {})).toBe(false);
     expect(calls).toEqual([]);
   });
 
   it("onState gets the same result as the HUD, and a throwing callback never flips it to an error", async () => {
-    const { ipc } = fakeIpc({ ime_toggle_hangul: async () => ({ ...korean, hangul: false }) });
-    const hud = vi.fn<(terminal: unknown, state: HangulHudState) => void>();
-    const onState = vi.fn<(state: HangulHudState) => void>(() => {
+    const { ipc } = fakeIpc({ ime_toggle: async () => ({ ...chinese, native: false }) });
+    const hud = vi.fn<(terminal: unknown, state: ImeHudState) => void>();
+    const onState = vi.fn<(state: ImeHudState) => void>(() => {
       throw new Error("caller bug");
     });
-    const toggle = createHangulToggle({ ipc, getMode: () => "on", showHud: hud });
+    const toggle = createImeToggle({ ipc, getMode: () => "on", showHud: hud });
     expect(toggle.handleKeydown(keydown(), { id: "term" }, onState)).toBe(true);
     await flush();
-    expect(onState).toHaveBeenCalledWith({ ...korean, hangul: false });
+    expect(onState).toHaveBeenCalledWith({ ...chinese, native: false });
     expect(hud).toHaveBeenCalledTimes(1);
-    expect(hud).toHaveBeenCalledWith({ id: "term" }, { ...korean, hangul: false });
+    expect(hud).toHaveBeenCalledWith({ id: "term" }, { ...chinese, native: false });
 
-    const failing = fakeIpc({ ime_toggle_hangul: async () => Promise.reject(new Error("boom")) });
-    const onFailure = vi.fn<(state: HangulHudState) => void>();
-    const toggle2 = createHangulToggle({ ipc: failing.ipc, getMode: () => "on", showHud: vi.fn() });
+    const failing = fakeIpc({ ime_toggle: async () => Promise.reject(new Error("boom")) });
+    const onFailure = vi.fn<(state: ImeHudState) => void>();
+    const toggle2 = createImeToggle({ ipc: failing.ipc, getMode: () => "on", showHud: vi.fn() });
     expect(toggle2.handleKeydown(keydown(), {}, onFailure)).toBe(true);
     await flush();
     expect(onFailure).toHaveBeenCalledWith({ error: "boom" });
   });
+
+  it("tracks the last-known family from refresh and toggle results", async () => {
+    const { ipc } = fakeIpc({
+      ime_state: async () => ({ ...chinese }),
+      ime_toggle: async () => ({ ...chinese, native: false, family: "zh" }),
+    });
+    const toggle = createImeToggle({ ipc, getMode: () => "on", showHud: vi.fn() });
+    expect(toggle.family()).toBe(null);
+    await toggle.refresh();
+    expect(toggle.family()).toBe("zh");
+    toggle.handleKeydown(keydown(), {});
+    await flush();
+    expect(toggle.family()).toBe("zh");
+  });
 });
 
-describe("showHangulBalloon", () => {
+describe("showImeBalloon", () => {
   // vitest 환경은 node(jsdom 없음): 풍선이 쓰는 DOM 표면만 흉내 낸다.
   type FakeEl = {
     className: string;
@@ -210,21 +232,35 @@ describe("showHangulBalloon", () => {
         buffer: { active: { cursorX: 3, cursorY: 2 } },
         _core: { _renderService: { dimensions: { css: { cell: { width: 10, height: 20 } } } } },
       };
-      showHangulBalloon(terminal, { available: true, hangul: true, sourceId: "x", reason: null });
+      showImeBalloon(terminal, { available: true, native: true, family: "ko", sourceId: "x", reason: null });
       let balloon = helpers.querySelector(".ime-mode-balloon")!;
       expect(balloon.textContent).toBe("한");
       expect(balloon.className).toContain("ime-mode-ko");
       expect(balloon.style.left).toBe("26px");
       expect(balloon.style.top).toBe("40px");
 
-      showHangulBalloon(terminal, { available: true, hangul: null, sourceId: null, reason: "unreadable" });
+      // 중국어·일본어 네이티브 글리프와 라틴 "A".
+      showImeBalloon(terminal, { available: true, native: true, family: "zh", sourceId: "x", reason: null });
+      balloon = helpers.querySelector(".ime-mode-balloon")!;
+      expect(balloon.textContent).toBe("中");
+      expect(balloon.className).toContain("ime-mode-zh");
+      showImeBalloon(terminal, { available: true, native: true, family: "ja", sourceId: "x", reason: null });
+      balloon = helpers.querySelector(".ime-mode-balloon")!;
+      expect(balloon.textContent).toBe("あ");
+      expect(balloon.className).toContain("ime-mode-ja");
+      showImeBalloon(terminal, { available: true, native: false, family: "ko", sourceId: "x", reason: null });
+      balloon = helpers.querySelector(".ime-mode-balloon")!;
+      expect(balloon.textContent).toBe("A");
+      expect(balloon.className).toContain("ime-mode-en");
+
+      showImeBalloon(terminal, { available: true, native: null, family: null, sourceId: null, reason: "unreadable" });
       balloon = helpers.querySelector(".ime-mode-balloon")!;
       expect(balloon.textContent).toBe("?");
       expect(balloon.title).toBe("unreadable");
 
-      showHangulBalloon(terminal, { error: "boom" });
+      showImeBalloon(terminal, { error: "boom" });
       balloon = helpers.querySelector(".ime-mode-balloon")!;
-      expect(balloon.textContent).toBe("한/영 ✕");
+      expect(balloon.textContent).toBe("전환 ✕");
       expect(balloon.title).toBe("boom");
       expect(helpers.querySelectorAll(".ime-mode-balloon")).toHaveLength(1);
     } finally {
@@ -233,6 +269,6 @@ describe("showHangulBalloon", () => {
   });
 
   it("is a no-op without a document or a terminal element", () => {
-    expect(() => showHangulBalloon({}, { error: "x" })).not.toThrow();
+    expect(() => showImeBalloon({}, { error: "x" })).not.toThrow();
   });
 });

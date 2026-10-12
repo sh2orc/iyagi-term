@@ -50,6 +50,7 @@
  */
 
 import { HangulAutomaton, isCompatJamo, latinToJamo } from "./hangulAutomaton";
+import type { ImeFamily } from "./imeToggle";
 
 /** PTY 입력의 backspace(DEL). */
 export const DEL = "\x7f";
@@ -204,6 +205,11 @@ export class WebKitImeCore {
   private holdWindow = false;
   /** 홀드 창에서 보류 중인 키들(입력 순). */
   private held: HeldKey[] = [];
+  /**
+   * 세션의 CJK 계열(null = 모름). 홀드 창·자모 복원은 한국어 IME의 이벤트
+   * 짝(keyup 자모·IME 자모 삽입)을 가정한 기계라 zh/ja가 확정되면 끈다.
+   */
+  private imeFamily: ImeFamily | null = null;
   /** IME 우회 자모 keydown을 조립하는 두벌식 오토마타. */
   private readonly automaton = new HangulAutomaton();
   /**
@@ -299,13 +305,31 @@ export class WebKitImeCore {
   }
 
   /**
-   * 앱이 입력 소스를 직접 전환한다 — Shift+Space 한/영 강제 전환(hangulToggle.ts).
+   * 세션 계열을 알린다(imeToggle의 OS 관찰 결과). null = 모름 — 한국어 전용
+   * 기계(홀드 창·자모 복원)를 그대로 둬 한국어 사용자의 동작이 바뀌지 않게
+   * 한다. zh/ja가 확정되면 그 기계를 끈다: 중국어 병음은 라틴 키가 곧 병음이라
+   * 한국어 자판표 복원이 쓰레기('n'→'ㅆ')를 만들고, 전환 직후 WebKit 이벤트
+   * 순서는 실기 트레이스 전까지 미검증이다(07-korean-ime 서문 — 트레이스 우선).
+   * 네이티브 조합은 표준 composition 경로가 맡는다.
+   */
+  setImeFamily(family: ImeFamily | null): void {
+    this.imeFamily = family;
+  }
+
+  /** 한국어 세션(또는 계열 미상 — 레거시 경로)인가. */
+  private koreanSession(): boolean {
+    return this.imeFamily === null || this.imeFamily === "ko";
+  }
+
+  /**
+   * 앱이 입력 소스를 직접 전환한다 — Shift+Space 강제 전환(imeToggle.ts).
    * 전환 키는 PTY 입력이 아니라 비인쇄 키처럼 다룬다: 보류 키(자모 keyup이 있었으면
    * 자모 복원)·오토마타 음절·IME 조합을 먼저 확정해 입력 순서를 지키고, CapsLock과
    * 같은 이유로 전환 직후 첫 키들을 홀드 창으로 가른다(WebKit이 전환 직후 IME를
    * 거치지 않는 경주 — 07-korean-ime §3-1). 호출자가 그 keydown을 preventDefault하므로
    * 짝 keypress·textarea 삽입은 오지 않는다 — keydown 한 번처럼 에코·keypress 억제
-   * 표식을 소진한다.
+   * 표식을 소진한다. zh/ja 세션에서는 홀드 창을 열지 않는다(판정 신호가 한국어
+   * 전용이라 추측 보류는 하지 않는다 — IME가 붙은 뒤로는 229로 온다).
    */
   inputSourceToggled(): ImeAction {
     this.selfEchoedKey = null;
@@ -313,6 +337,7 @@ export class WebKitImeCore {
     const release = this.releaseHeldLatin();
     this.automaton.commit();
     this.automatonTentative = false;
+    if (!this.koreanSession()) return release.emit ? { emit: release.emit } : {};
     return mergeEmit(release.emit ?? "", this.armInputSourceHold());
   }
 
@@ -361,6 +386,9 @@ export class WebKitImeCore {
     const keys = this.held;
     this.held = [];
     if (keys.length === 0) return "";
+    // zh/ja 세션: IME 삽입은 IME가 보류 키를 삼켰다는 증거다. 라틴으로
+    // 내보내면 중복이고 자모 복원은 쓰레기(병음 'n'→'ㅆ')를 만든다 — 버린다.
+    if (!this.koreanSession()) return "";
     let match = -1;
     if (isCompatJamo(data)) {
       for (let i = keys.length - 1; i >= 0; i--) {

@@ -15,7 +15,7 @@ use bridge::commands::{
     system_list_shells, system_locate_program, system_query_version, zai_api_key_remove,
     zai_api_key_set, zai_api_key_status,
 };
-use bridge::ime::{ime_set_hangul, ime_state, ime_toggle_hangul};
+use bridge::ime::{ime_state, ime_toggle};
 use bridge::paste_image::paste_save_image;
 use quit::{app_quit, app_quit_ack, app_quit_cancel};
 
@@ -152,8 +152,7 @@ pub fn run() {
             system_query_version,
             system_locate_program,
             ime_state,
-            ime_toggle_hangul,
-            ime_set_hangul,
+            ime_toggle,
             paste_save_image,
             claude_hooks_status,
             claude_hooks_apply,

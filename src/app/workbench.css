@@ -2161,10 +2161,13 @@ button.primary {
   visibility: hidden !important;
 }
 
-/* 한/영 전환 풍선 — CapsLock 토글 시 터미널 캐럿 위치에 잠깐 떴다 사라진다
- * (macOS 시스템 HUD가 WKWebView에는 오지 않아 앱이 직접 그린다). */
+/* 전환 풍선 — Shift+Space(CJK↔라틴)·CapsLock(한/영) 토글 시 터미널 캐럿 위치에
+ * 잠깐 떴다 사라진다(macOS 시스템 HUD가 WKWebView에는 오지 않아 앱이 직접
+ * 그린다). 계열(zh/ja) 변형도 같은 모양이다. */
 .ime-mode-balloon,
 .ime-mode-balloon.ime-mode-ko,
+.ime-mode-balloon.ime-mode-zh,
+.ime-mode-balloon.ime-mode-ja,
 .ime-mode-balloon.ime-mode-en {
   position: absolute;
   z-index: 10;

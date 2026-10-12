@@ -898,3 +898,54 @@ describe("입력 소스 홀드 창 — keyup 판정·자모 복원·투명 키 (
     expect(bypass.keydown(83, false, false, "ㄴ").emit).toBe("ㄴ");
   });
 });
+
+describe("WebKitImeCore — CJK 계열 게이팅(zh/ja는 한국어 기계를 끈다)", () => {
+  it("zh 세션의 inputSourceToggled는 보류를 내보내되 홀드 창을 다시 열지 않는다", () => {
+    const core = new WebKitImeCore();
+    core.setImeFamily("zh");
+    // 부착 시(계열 확정 전) 열린 창에 라틴이 보류돼 있을 수 있다.
+    core.armInputSourceHold();
+    core.keydown(76, false, false, "l");
+    core.keydown(83, false, false, "s");
+    expect(core.inputSourceToggled()).toEqual({ emit: "ls" });
+    expect(core.holding).toBe(false);
+    // 전환 뒤 라틴 keydown은 병음 입력이다 — 보류하지 않고 그대로 둔다.
+    const next = core.keydown(78, false, false, "n");
+    expect(next.block).toBeUndefined();
+    expect(next.preventDefault).toBeUndefined();
+  });
+
+  it("zh 세션에서 IME 삽입은 보류 병음을 삼킨 것으로 본다 — 자모 복원 쓰레기를 내지 않는다", () => {
+    const core = new WebKitImeCore();
+    core.setImeFamily("zh");
+    core.armInputSourceHold();
+    core.keydown(78, false, false, "n");
+    core.keydown(73, false, false, "i");
+    const action = core.input("insertReplacementText", "你", "你");
+    expect(action.emit).toBeUndefined(); // 한국어 자판표('n'→'ㅜ')를 거치지 않는다
+    expect(core.holding).toBe(false);
+  });
+
+  it("한국어(또는 계열 미상)는 종전대로 자모 복원을 시도한다 — 게이팅 회귀 핀", () => {
+    // 계열 미상(null) = 한국어 레거시 경로: SCIM과 같은 삽입에도 자모 복원이 돌아간다.
+    const unknown = new WebKitImeCore();
+    unknown.armInputSourceHold();
+    unknown.keydown(78, false, false, "n");
+    expect(unknown.input("insertReplacementText", "你", "你").emit).toBe("ㅜ");
+    // 명시적 한국어도 홀드 창·자모 복원을 그대로 쓴다.
+    const ko = new WebKitImeCore();
+    ko.setImeFamily("ko");
+    ko.armInputSourceHold();
+    ko.keydown(71, false, false, "g");
+    ko.keyup(71, "ㅎ");
+    expect(ko.releaseHeldLatin().emit).toBe("ㅎ");
+  });
+
+  it("홀드 창 만료 방출(라틴)은 계열과 무관하다", () => {
+    const core = new WebKitImeCore();
+    core.setImeFamily("ja");
+    core.armInputSourceHold();
+    core.keydown(76, false, false, "l");
+    expect(core.releaseHeldLatin()).toEqual({ emit: "l" });
+  });
+});

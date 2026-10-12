@@ -44,7 +44,7 @@ describe("sanitizePreferences", () => {
         quitBehavior: "keep",
         fontFamily: "Menlo, monospace",
         cursorStyle: "underline",
-        hangulToggle: "on",
+        imeToggle: "on",
         scrollbackLines: 5000,
         osc52Write: true,
         gpuRenderer: false,
@@ -65,7 +65,7 @@ describe("sanitizePreferences", () => {
       quitBehavior: "keep",
       fontFamily: "Menlo, monospace",
       cursorStyle: "underline",
-      hangulToggle: "on",
+      imeToggle: "on",
       scrollbackLines: 5000,
       osc52Write: true,
       gpuRenderer: false,
@@ -84,6 +84,14 @@ describe("sanitizePreferences", () => {
       DEFAULT_PREFERENCES,
     );
     expect(sanitizePreferences({ baseFontSize: 999 }).baseFontSize).toBe(MAX_BASE_FONT_SIZE);
+  });
+
+  it("예전 키 hangulToggle의 저장 값을 imeToggle으로 물려받는다(개명 마이그레이션)", () => {
+    expect(sanitizePreferences({ hangulToggle: "on" }).imeToggle).toBe("on");
+    // 새 키가 유효하면 우선하고, 둘 다 못 쓰면 기본값으로 돌아간다.
+    expect(sanitizePreferences({ imeToggle: "off", hangulToggle: "on" }).imeToggle).toBe("off");
+    expect(sanitizePreferences({ imeToggle: "bogus", hangulToggle: "on" }).imeToggle).toBe("on");
+    expect(sanitizePreferences({ imeToggle: "bogus", hangulToggle: "bogus" }).imeToggle).toBe("auto");
   });
 
   it("종료 시 터미널 처리는 ask/keep/terminate만 받고 나머지는 묻기로 되돌린다", () => {
@@ -158,7 +166,7 @@ describe("preferences store", () => {
     usePreferences.getState().setQuitBehavior("terminate");
     usePreferences.getState().setFontFamily("Menlo, monospace");
     usePreferences.getState().setCursorStyle("bar");
-    usePreferences.getState().setHangulToggle("on");
+    usePreferences.getState().setImeToggle("on");
     usePreferences.getState().setScrollbackLines(4096);
     usePreferences.getState().setOsc52Write(true);
     usePreferences.getState().setInterventionTextBadge(true);
@@ -186,7 +194,7 @@ describe("preferences store", () => {
       quitBehavior: "terminate",
       fontFamily: "Menlo, monospace",
       cursorStyle: "bar",
-      hangulToggle: "on",
+      imeToggle: "on",
       scrollbackLines: 4096,
       osc52Write: true,
       gpuRenderer: true,

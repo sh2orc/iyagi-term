@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IpcAdapter } from "../bridge/ipc";
-import type { HangulToggleMode } from "../../store/preferences";
+import type { ImeToggleMode } from "../../store/preferences";
 import { attachWebKitImeBridge, shiftEnterAction, windowsPtyOption } from "./xtermSetup";
 import { DEL, HOLD_IME_WAIT_MS, HOLD_WINDOW_MS, detectImeEngine } from "./imeBridge";
-import { createHangulToggle } from "./hangulToggle";
+import { createImeToggle, type ImeFamily } from "./imeToggle";
 
 class FakeHost {
   private readonly listeners = new Map<string, EventListenerOrEventListenerObject[]>();
@@ -796,7 +796,7 @@ describe("attachWebKitImeBridge — 커서 이동 키의 IME 선택 범위 흔�
   });
 });
 
-describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에서 코어보다 먼저)", () => {
+describe("attachWebKitImeBridge — Shift+Space 강제 전환(capture에서 코어보다 먼저)", () => {
   // 실기 트레이스 회귀: `kd 32 shift=true -> block` 뒤 공백 전송. 브리지가 Space를
   // xterm보다 먼저 차단해 xterm custom key handler의 전환 코드가 불리지 않았다.
   const shiftSpace = (): KeyboardEvent =>
@@ -808,7 +808,7 @@ describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에
       repeat: false,
     }) as unknown as KeyboardEvent;
 
-  function setup(mode: HangulToggleMode) {
+  function setup(mode: ImeToggleMode, family: ImeFamily = "ko") {
     const textarea = { value: "" };
     const host = new FakeHost(textarea);
     const triggerDataEvent = vi.fn();
@@ -819,7 +819,8 @@ describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에
         calls.push(command);
         return Promise.resolve({
           available: true,
-          hangul: false,
+          native: false,
+          family,
           sourceId: "com.apple.keylayout.ABC",
           reason: null,
         } as unknown as T);
@@ -828,10 +829,10 @@ describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에
         return {};
       },
     };
-    const hangulToggle = createHangulToggle({ ipc, getMode: () => mode, showHud: vi.fn() });
+    const imeToggle = createImeToggle({ ipc, getMode: () => mode, showHud: vi.fn() });
     const detach = attachWebKitImeBridge(host as unknown as HTMLElement, terminal, {
       engine: "webkit",
-      hangulToggle,
+      imeToggle,
     });
     const sent = (): string => triggerDataEvent.mock.calls.map(([data]) => data).join("");
     const step = (type: string, value: string): void => {
@@ -847,7 +848,8 @@ describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에
     const ku = (keyCode: number, key: string): void => {
       host.dispatch("keyup", { ...keyboardEvent(keyCode), key } as unknown as KeyboardEvent);
     };
-    return { host, sent, step, kd, ku, calls, detach };
+    const toggleCalls = (): string[] => calls.filter((c) => c.startsWith("ime_toggle"));
+    return { host, sent, step, kd, ku, calls, toggleCalls, detach, imeToggle };
   }
 
   it("켜져 있으면 공백 대신 OS 전환을 요청하고, 조합을 먼저 확정한 뒤 전환 직후 첫 키를 홀드 창으로 가른다", () => {
@@ -862,7 +864,7 @@ describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에
       t.host.dispatch("keydown", chord);
       expect(chord.preventDefault).toHaveBeenCalledOnce(); // textarea 공백 삽입·keypress 차단
       expect(chord.stopPropagation).toHaveBeenCalledOnce(); // xterm은 보지 않는다
-      expect(t.calls).toEqual(["ime_toggle_hangul"]);
+      expect(t.toggleCalls()).toEqual(["ime_toggle"]);
       expect(t.sent()).toBe("하"); // 전환 전에 조합 확정 — 공백은 없다
       const l = t.kd(76, "l");
       expect(l.preventDefault).toHaveBeenCalledOnce(); // 전환 직후 라틴 키는 keyup 판정까지 보류
@@ -883,7 +885,25 @@ describe("attachWebKitImeBridge — Shift+Space 한/영 강제 전환(capture에
     expect(chord.preventDefault).not.toHaveBeenCalled();
     t.step("insertText", "\xa0");
     expect(t.sent()).toBe(" ");
-    expect(t.calls).toEqual([]);
+    expect(t.toggleCalls()).toEqual([]);
+    t.detach();
+  });
+
+  it("zh 세션에서는 한국어 기계를 끈다 — 전환·CapsLock 뒤에도 라틴 키를 보류하지 않는다", async () => {
+    const t = setup("on", "zh");
+    // 부착 시 걸어 둔 ime_state 조회가 끝나 코어에 계열이 전달되기를 기다린다.
+    await t.imeToggle.refresh();
+    const chord = shiftSpace();
+    t.host.dispatch("keydown", chord);
+    expect(chord.preventDefault).toHaveBeenCalledOnce();
+    expect(t.toggleCalls()).toEqual(["ime_toggle"]);
+    // 병음은 라틴 키가 곧 입력이다 — 홀드 창 없이 그대로 둔다.
+    const n = t.kd(78, "n");
+    expect(n.preventDefault).not.toHaveBeenCalled();
+    // CapsLock 한/영 풍선·홀드 창 무장도 한국어 세션 전용이다.
+    t.kd(20, "CapsLock");
+    const a = t.kd(65, "a");
+    expect(a.preventDefault).not.toHaveBeenCalled();
     t.detach();
   });
 });

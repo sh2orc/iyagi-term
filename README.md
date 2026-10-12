@@ -198,8 +198,8 @@ where the work actually runs:
   exactly as typed — single-ownership of insert events, a Hangul automaton for composition,
   and holds across the IME activation race at startup and after 한/영 switches
   (contract: [docs/implementation/07-korean-ime.md](docs/implementation/07-korean-ime.md))
-- `Shift+Space` switches 한/영 on macOS (Auto / Always / Off), and a balloon shows CapsLock 한/영
-  switches
+- `Shift+Space` toggles your enabled CJK input source (Korean·Chinese·Japanese) ↔ Latin on macOS
+  (Auto / Always / Off), and a balloon shows CapsLock 한/영 switches
 - Bundled Korean coding font (Nanum Gothic Coding; D2Coding is used when installed) and UTF-8 PTY
   locale defaults
 

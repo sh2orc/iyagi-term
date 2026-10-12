@@ -28,7 +28,7 @@ import { DEFAULT_FONT_SIZE } from "./zoom";
 import { lineHeightForFont, resolveDefaultFontFamily } from "./defaultFont";
 import { WebKitImeCore, detectImeEngine, normalizeImeText, type ImeAction, type ImeEngine } from "./imeBridge";
 import { currentPlatform, type Platform } from "./shortcuts";
-import { defaultHangulToggle, isHangulToggleChord, type HangulToggle } from "./hangulToggle";
+import { defaultImeToggle, isImeToggleChord, type ImeToggle } from "./imeToggle";
 import { findUrls, openExternal } from "../security/linkOpener";
 import { setHoveredLink } from "./linkHover";
 import { base64ToBytes } from "../daemon/base64";
@@ -204,17 +204,17 @@ export function createDefaultTerminalFactory(options: TerminalFactoryOptions = {
       // 활성화 실패 시 기본 unicode 버전으로 동작한다(치명적 아님).
     }
 
-    // Shift+Space 한/영 강제 전환(hangulToggle.ts). 전역 인스턴스는 처음 만들 때 OS
+    // Shift+Space 강제 전환(imeToggle.ts). 전역 인스턴스는 처음 만들 때 OS
     // 가용성(ime_state)을 조회하므로 터미널 생성 시점에 데운다 — "자동" 모드의 첫
     // Shift+Space가 판정 전이라 공백으로 새지 않게.
-    const hangulToggle = defaultHangulToggle();
+    const imeToggle = defaultImeToggle();
     // 앱 단축키 조합은 xterm이 소비하지 않게 한다(전역 handler가 처리).
     term.attachCustomKeyEventHandler((event) => {
       // 켜져 있으면 PTY에 공백을 보내지 않고 OS 입력기를 바꾼다. WebKit(macOS)에서는
       // IME 브리지의 capture 리스너가 Space를 xterm보다 먼저 가지므로 거기서 먼저
       // 판정한다(attachWebKitImeBridge) — 이 경로는 브리지가 없는 엔진(WebView2 등)과
       // 네이티브 조합 구간을 맡는다.
-      if (hangulToggle.handleKeydown(event, term)) return false;
+      if (imeToggle.handleKeydown(event, term)) return false;
       const shiftEnter = shiftEnterAction(event);
       if (shiftEnter === "send-lf") {
         term.input("\n", true);
@@ -280,14 +280,17 @@ interface XtermInternals {
  * 맡긴다 — CapsLock 한/영 풍선도 함께 꺼진다(Windows는 CapsLock이 대소문자
  * 전환이고 한/영은 별도 키 `HangulMode`다). `options.engine`은 시험 주입용.
  *
- * Shift+Space 한/영 강제 전환(hangulToggle.ts)도 이 capture 리스너가 코어보다
- * 먼저 판정한다 — 수정키 없는 Space를 xterm보다 먼저 차단하는 곳이 여기라서다.
- * `options.hangulToggle`은 시험 주입용(기본: 앱 전역 인스턴스).
+ * Shift+Space 강제 전환(imeToggle.ts)도 이 capture 리스너가 코어보다 먼저
+ * 판정한다 — 수정키 없는 Space를 xterm보다 먼저 차단하는 곳이 여기라서다.
+ * `options.imeToggle`은 시험 주입용(기본: 앱 전역 인스턴스).
  */
 export function attachWebKitImeBridge(
   host: HTMLElement,
   terminal: unknown,
-  options: { engine?: ImeEngine; hangulToggle?: Pick<HangulToggle, "handleKeydown" | "availability"> } = {},
+  options: {
+    engine?: ImeEngine;
+    imeToggle?: Pick<ImeToggle, "handleKeydown" | "availability" | "family" | "refresh">;
+  } = {},
 ): () => void {
   if ((options.engine ?? detectImeEngine()) !== "webkit") return () => undefined;
   const internals = (terminal as { _core?: XtermInternals })._core;
@@ -311,7 +314,13 @@ export function attachWebKitImeBridge(
     compositionHelper._coreService = normalizedCompositionService;
   }
   const core = new WebKitImeCore();
-  const hangulToggle = options.hangulToggle ?? defaultHangulToggle();
+  const imeToggle = options.imeToggle ?? defaultImeToggle();
+  // 세션 계열을 코어에 알린다 — 이미 알려진 값으로 동기 시작하고, 조회(ime_state)
+  // 가 끝나면 확정한다(첫 Shift+Space 전에 한국어 게이팅이 결정되게).
+  core.setImeFamily(imeToggle.family());
+  void imeToggle.refresh().then((state) => {
+    if (state?.family) core.setImeFamily(state.family);
+  });
   let settleTimer: ReturnType<typeof setTimeout> | null = null;
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   // IME 진단 로그 — 마지막 400개 이벤트를 window.__imeEvents로 노출한다.
@@ -478,49 +487,60 @@ export function attachWebKitImeBridge(
       `kd ${ev.keyCode} key=${JSON.stringify(ev.key)} composing=${ev.isComposing} shift=${ev.shiftKey} mod=${ev.ctrlKey || ev.altKey || ev.metaKey}`,
     );
     if (nativeCompositionActive) return;
-    // Shift+Space 한/영 강제 전환(hangulToggle.ts)은 코어보다 먼저 판정한다 — 이
+    // Shift+Space 강제 전환(imeToggle.ts)은 코어보다 먼저 판정한다 — 이
     // capture 리스너는 수정키 없는 Space를 xterm보다 먼저 차단하므로(Space 단일
     // 소유, Shift는 수정키로 치지 않는다) xterm custom key handler에 둔 전환은
     // WebKit에서 영영 불리지 않았다(실기 트레이스: `kd 32 shift=true -> block` 뒤
     // 공백 전송). 소비되면 토글이 preventDefault로 공백 삽입·keypress를 막았고,
-    // 코어가 보류 키·조합을 확정한 뒤 전환 직후 첫 키들을 홀드 창으로 가른다.
-    const toggled = hangulToggle.handleKeydown(ev, terminal, (state) => {
-      note(`hangul-toggle ${JSON.stringify(state)}`);
-      // CapsLock 풍선의 방향 추적을 OS가 알려 준 실제 상태로 맞춘다.
-      if (!("error" in state) && state.hangul !== null) imeMode = state.hangul ? "ko" : "en";
+    // 코어가 보류 키·조합을 확정한 뒤(한국어 세션이면) 전환 직후 첫 키들을
+    // 홀드 창으로 가른다.
+    const toggled = imeToggle.handleKeydown(ev, terminal, (state) => {
+      note(`ime-toggle ${JSON.stringify(state)}`);
+      // CapsLock 풍선의 방향 추적을 OS가 알려 준 실제 상태로 맞춘다 — 그
+      // 풍선의 추론은 한국어 전용이므로 한국어 계열에서만.
+      if (!("error" in state) && state.family === "ko" && state.native !== null) {
+        imeMode = state.native ? "ko" : "en";
+      }
     });
     if (toggled) {
-      note("hangul-toggle-chord");
+      note("ime-toggle-chord");
+      core.setImeFamily(imeToggle.family());
       apply(core.inputSourceToggled());
       return;
     }
-    if (isHangulToggleChord(ev)) {
-      // 진단: 전환이 꺼져 있어(설정 off, 또는 자동인데 한국어 입력 소스 없음·미판정)
+    if (isImeToggleChord(ev)) {
+      // 진단: 전환이 꺼져 있어(설정 off, 또는 자동인데 CJK 입력 소스 없음·미판정)
       // Shift+Space가 보통 Space로 흘렀다 — 트레이스만 보고 원인을 가르게 남긴다.
       note(
-        `hangul-toggle-pass mode=${usePreferences.getState().hangulToggle} available=${String(hangulToggle.availability())}`,
+        `ime-toggle-pass mode=${usePreferences.getState().imeToggle} available=${String(imeToggle.availability())}`,
       );
     }
     apply(core.keydown(ev.keyCode, ev.isComposing, ev.ctrlKey || ev.altKey || ev.metaKey, key), ev);
-    if (ev.keyCode === 229 || isJamoKey(key)) {
-      imeMode = "ko";
-    } else if (ev.keyCode >= 65 && ev.keyCode <= 90 && key !== undefined && /^[A-Za-z]$/.test(key)) {
-      // 알파벳 키가 229 없이 라틴 `key`로 오면 영문 모드다. 공백·숫자·
-      // 기호는 한글 모드에서도 실제 keyCode로 오므로 판별에 쓰지 않는다.
-      imeMode = "en";
-    }
-    if (ev.keyCode === 20) {
-      // CapsLock = 한/영 전환. 풍선은 마지막으로 관찰된 모드의 반대로
-      // (타이핑 관찰로 곧 보정된다). 전환 방향과 무관하게 입력 소스 홀드
-      // 창을 연다 — 판정은 코어가 보류 키의 keyup(`key`가 라틴/자모)과 IME
-      // 삽입으로 한다(docs/implementation/07-korean-ime.md §3-1).
-      imeMode = imeMode === "ko" ? "en" : "ko";
-      showModeBalloon(imeMode);
-      apply(core.armInputSourceHold());
-    } else if (ev.keyCode === 0 || key === "Unidentified") {
-      // WebKit이 입력 소스 전환 직후 내는 잡음 keydown — 전환이 실제로
-      // 일어났다는 신호이므로(메뉴바·단축키 전환 포함) 홀드 창을 (다시) 연다.
-      apply(core.armInputSourceHold());
+    // 아래 모드 추론·홀드 창 무장은 한국어 IME의 이벤트 짝(229=한글, 자모
+    // keyup, CapsLock 한/영)을 가정한 기계다. zh/ja 세션에서는 미검증 가정을
+    // 적용하지 않는다(07-korean-ime 서문 — 새 증상은 트레이스로 먼저 확정).
+    // 계열 미상(null)은 한국어로 둬 한국어 전용 사용자의 동작을 그대로 유지한다.
+    if (imeToggle.family() === null || imeToggle.family() === "ko") {
+      if (ev.keyCode === 229 || isJamoKey(key)) {
+        imeMode = "ko";
+      } else if (ev.keyCode >= 65 && ev.keyCode <= 90 && key !== undefined && /^[A-Za-z]$/.test(key)) {
+        // 알파벳 키가 229 없이 라틴 `key`로 오면 영문 모드다. 공백·숫자·
+        // 기호는 한글 모드에서도 실제 keyCode로 오므로 판별에 쓰지 않는다.
+        imeMode = "en";
+      }
+      if (ev.keyCode === 20) {
+        // CapsLock = 한/영 전환. 풍선은 마지막으로 관찰된 모드의 반대로
+        // (타이핑 관찰로 곧 보정된다). 전환 방향과 무관하게 입력 소스 홀드
+        // 창을 연다 — 판정은 코어가 보류 키의 keyup(`key`가 라틴/자모)과 IME
+        // 삽입으로 한다(docs/implementation/07-korean-ime.md §3-1).
+        imeMode = imeMode === "ko" ? "en" : "ko";
+        showModeBalloon(imeMode);
+        apply(core.armInputSourceHold());
+      } else if (ev.keyCode === 0 || key === "Unidentified") {
+        // WebKit이 입력 소스 전환 직후 내는 잡음 keydown — 전환이 실제로
+        // 일어났다는 신호이므로(메뉴바·단축키 전환 포함) 홀드 창을 (다시) 연다.
+        apply(core.armInputSourceHold());
+      }
     }
     // 커서 이동 키(PgUp/PgDn/End/Home/방향키) — 셸의 커서는 옮겨졌지만 WebKit
     // 한글 IME는 마지막 음절을 계속 "조합 가능"으로 들고 있어 다음 Backspace가
@@ -659,8 +679,11 @@ export function attachWebKitImeBridge(
   // 앱 시작 직후에는 WebKit이 한글 입력 소스의 키를 IME에 넘기지 않는 구간이
   // 있다(실기: 자모 keydown 우회·라틴 keydown 뒤 늦은 IME 삽입). 부착 시점에
   // 홀드 창을 열어 첫 키들을 keyup 판정으로 가른다 — 영문이면 첫 키 누름
-  // 시간만큼만 지연되고, 한글이면 자모로 복원된다.
-  apply(core.armInputSourceHold());
+  // 시간만큼만 지연되고, 한글이면 자모로 복원된다. zh/ja 세션(이미 알려진)은
+  // 판정 신호가 한국어 전용이므로 무장하지 않는다.
+  if (imeToggle.family() === null || imeToggle.family() === "ko") {
+    apply(core.armInputSourceHold());
+  }
   host.addEventListener("beforeinput", onBeforeInput, true);
   host.addEventListener("input", onInput, true);
   host.addEventListener("keydown", onKeyDown, true);

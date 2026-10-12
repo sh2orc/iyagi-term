@@ -45,11 +45,12 @@ export type QuitBehavior = "ask" | "keep" | "terminate";
 export const QUIT_BEHAVIORS: readonly QuitBehavior[] = ["ask", "keep", "terminate"];
 
 /**
- * Shift+Space 한/영 강제 전환(iyagi 고유 기능, bridge/ime.rs):
- * auto = OS에 한국어 입력 소스가 있을 때만, on = 항상, off = Shift+Space는 공백.
+ * Shift+Space 강제 전환(iyagi 고유 기능, bridge/ime.rs) — 켜 둔 CJK(한국어·
+ * 중국어·일본어) 입력 소스와 라틴 자판 사이 토글:
+ * auto = OS에 CJK 입력 소스가 있을 때만, on = 항상, off = Shift+Space는 공백.
  */
-export type HangulToggleMode = "auto" | "on" | "off";
-export const HANGUL_TOGGLE_MODES: readonly HangulToggleMode[] = ["auto", "on", "off"];
+export type ImeToggleMode = "auto" | "on" | "off";
+export const IME_TOGGLE_MODES: readonly ImeToggleMode[] = ["auto", "on", "off"];
 
 /**
  * Claude Code 실행의 모델 제공자(설정 → 연동 → Z.ai Coding Plan):
@@ -102,8 +103,8 @@ export interface PreferenceValues {
   fontFamily: string | null;
   /** 커서 모양(W3-1). */
   cursorStyle: "block" | "underline" | "bar";
-  /** Shift+Space 한/영 강제 전환 — 기본은 자동(한국어 입력 소스가 있을 때). */
-  hangulToggle: HangulToggleMode;
+  /** Shift+Space CJK↔라틴 강제 전환 — 기본은 자동(CJK 입력 소스가 있을 때). */
+  imeToggle: ImeToggleMode;
   /** 스크롤백 줄 수(pane당, W3-1). */
   scrollbackLines: number;
   /** OSC 52 클립보드 쓰기 허용(기본 거절 — 04 §6, W2). */
@@ -157,7 +158,7 @@ export const DEFAULT_PREFERENCES: PreferenceValues = {
   quitBehavior: "ask",
   fontFamily: null,
   cursorStyle: "block",
-  hangulToggle: "auto",
+  imeToggle: "auto",
   scrollbackLines: 2000,
   osc52Write: false,
   gpuRenderer: true,
@@ -203,6 +204,8 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
   const value = (typeof raw === "object" && raw !== null ? raw : {}) as Partial<
     Record<keyof PreferenceValues, unknown>
   >;
+  // 예전 키 이름(hangulToggle — imeToggle으로 개명) — 새 키가 없을 때 마이그레이션 원천.
+  const legacy = value as Record<string, unknown>;
   return {
     theme: THEME_PREFERENCES.includes(value.theme as ThemePreference)
       ? (value.theme as ThemePreference)
@@ -230,9 +233,12 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
     cursorStyle: CURSOR_STYLES.includes(value.cursorStyle as string)
       ? (value.cursorStyle as PreferenceValues["cursorStyle"])
       : DEFAULT_PREFERENCES.cursorStyle,
-    hangulToggle: HANGUL_TOGGLE_MODES.includes(value.hangulToggle as HangulToggleMode)
-      ? (value.hangulToggle as HangulToggleMode)
-      : DEFAULT_PREFERENCES.hangulToggle,
+    imeToggle: IME_TOGGLE_MODES.includes(value.imeToggle as ImeToggleMode)
+      ? (value.imeToggle as ImeToggleMode)
+      : // 개명 마이그레이션: 예전 키 hangulToggle의 저장 값을 물려받는다.
+        IME_TOGGLE_MODES.includes(legacy.hangulToggle as ImeToggleMode)
+        ? (legacy.hangulToggle as ImeToggleMode)
+        : DEFAULT_PREFERENCES.imeToggle,
     scrollbackLines:
       typeof value.scrollbackLines === "number"
         ? clampScrollbackLines(value.scrollbackLines)
@@ -348,7 +354,7 @@ export interface PreferencesState extends PreferenceValues {
   setQuitBehavior(value: QuitBehavior): void;
   setFontFamily(family: string): void;
   setCursorStyle(style: PreferenceValues["cursorStyle"]): void;
-  setHangulToggle(mode: HangulToggleMode): void;
+  setImeToggle(mode: ImeToggleMode): void;
   setScrollbackLines(lines: number): void;
   setOsc52Write(value: boolean): void;
   setGpuRenderer(value: boolean): void;
@@ -416,8 +422,8 @@ export const usePreferences = create<PreferencesState>()(
         set({ quitBehavior: QUIT_BEHAVIORS.includes(quitBehavior) ? quitBehavior : "ask" }),
       setFontFamily: (family) => set({ fontFamily: sanitizeFontFamily(family) }),
       setCursorStyle: (cursorStyle) => set({ cursorStyle }),
-      setHangulToggle: (hangulToggle) =>
-        set({ hangulToggle: HANGUL_TOGGLE_MODES.includes(hangulToggle) ? hangulToggle : "auto" }),
+      setImeToggle: (imeToggle) =>
+        set({ imeToggle: IME_TOGGLE_MODES.includes(imeToggle) ? imeToggle : "auto" }),
       setScrollbackLines: (lines) => set({ scrollbackLines: clampScrollbackLines(lines) }),
       setOsc52Write: (osc52Write) => set({ osc52Write }),
       setGpuRenderer: (gpuRenderer) => set({ gpuRenderer }),
@@ -457,7 +463,7 @@ export const usePreferences = create<PreferencesState>()(
         quitBehavior: state.quitBehavior,
         fontFamily: state.fontFamily,
         cursorStyle: state.cursorStyle,
-        hangulToggle: state.hangulToggle,
+        imeToggle: state.imeToggle,
         scrollbackLines: state.scrollbackLines,
         osc52Write: state.osc52Write,
         gpuRenderer: state.gpuRenderer,

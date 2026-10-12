@@ -54,7 +54,7 @@ describe("settings schema", () => {
       "fontSize",
       "fontFamily",
       "cursorStyle",
-      "hangulToggle",
+      "imeToggle",
       "scrollback",
       "osc52",
       "gpuRenderer",

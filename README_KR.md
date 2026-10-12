@@ -182,7 +182,8 @@ CI([.github/workflows/ci.yml](.github/workflows/ci.yml))는 Linux `.deb`와 Wind
   도달하도록 하는 전용 IME 브리지 — insert 이벤트 단일 소유, 조합용 한글 오토마타,
   시작·한/영 전환 직후 IME 활성화 경주 대응 홀드
   (계약: [docs/implementation/07-korean-ime.md](docs/implementation/07-korean-ime.md))
-- macOS에서 `Shift+Space`로 한/영 전환(자동·항상·끄기), CapsLock 한/영 전환 시 풍선 표시
+- macOS에서 `Shift+Space`로 켜 둔 CJK 입력 소스(한국어·중국어·일본어) ↔ 영문 전환(자동·항상·끄기),
+  CapsLock 한/영 전환 시 풍선 표시
 - 한글 코딩 폰트 번들(나눔고딕코딩, D2Coding이 설치돼 있으면 우선)과 PTY UTF-8 로케일 기본값
 
 **관리 실행**

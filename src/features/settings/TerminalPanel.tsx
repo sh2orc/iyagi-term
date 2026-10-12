@@ -14,14 +14,14 @@ import { useI18n } from "../../i18n";
 import {
   CURSOR_STYLES,
   DEFAULT_PREFERENCES,
-  HANGUL_TOGGLE_MODES,
+  IME_TOGGLE_MODES,
   MAX_BASE_FONT_SIZE,
   MAX_SCROLLBACK_LINES,
   MIN_BASE_FONT_SIZE,
   MIN_SCROLLBACK_LINES,
   QUIT_BEHAVIORS,
   usePreferences,
-  type HangulToggleMode,
+  type ImeToggleMode,
   type PreferenceValues,
   type QuitBehavior,
 } from "../../store/preferences";
@@ -40,7 +40,7 @@ const items = itemsInGroup("terminal");
 const fontSizeItem = items.find((i) => i.id === "fontSize")!;
 const fontFamilyItem = items.find((i) => i.id === "fontFamily")!;
 const cursorStyleItem = items.find((i) => i.id === "cursorStyle")!;
-const hangulToggleItem = items.find((i) => i.id === "hangulToggle")!;
+const imeToggleItem = items.find((i) => i.id === "imeToggle")!;
 const scrollbackItem = items.find((i) => i.id === "scrollback")!;
 const osc52Item = items.find((i) => i.id === "osc52")!;
 const gpuRendererItem = items.find((i) => i.id === "gpuRenderer")!;
@@ -92,7 +92,7 @@ export function TerminalPanel(props: { platform: Platform }): JSX.Element {
     setFontDraft(usePreferences.getState().fontFamily ?? "");
   };
   const cursorStyle = usePreferences((s) => s.cursorStyle);
-  const hangulToggle = usePreferences((s) => s.hangulToggle);
+  const imeToggle = usePreferences((s) => s.imeToggle);
   const scrollbackLines = usePreferences((s) => s.scrollbackLines);
   const osc52Write = usePreferences((s) => s.osc52Write);
   const gpuRenderer = usePreferences((s) => s.gpuRenderer);
@@ -148,19 +148,19 @@ export function TerminalPanel(props: { platform: Platform }): JSX.Element {
       </SettingRow>
 
       <SettingRow
-        item={hangulToggleItem}
-        changed={hangulToggle !== DEFAULT_PREFERENCES.hangulToggle}
-        onReset={() => usePreferences.getState().resetPreference("hangulToggle")}
+        item={imeToggleItem}
+        changed={imeToggle !== DEFAULT_PREFERENCES.imeToggle}
+        onReset={() => usePreferences.getState().resetPreference("imeToggle")}
       >
         {(id) => (
-          <SettingSelect<HangulToggleMode>
+          <SettingSelect<ImeToggleMode>
             id={id}
-            value={hangulToggle}
-            options={HANGUL_TOGGLE_MODES.map((mode) => ({
+            value={imeToggle}
+            options={IME_TOGGLE_MODES.map((mode) => ({
               value: mode,
-              label: t(`settings.item.hangulToggle.${mode}`),
+              label: t(`settings.item.imeToggle.${mode}`),
             }))}
-            onChange={(value) => usePreferences.getState().setHangulToggle(value)}
+            onChange={(value) => usePreferences.getState().setImeToggle(value)}
           />
         )}
       </SettingRow>

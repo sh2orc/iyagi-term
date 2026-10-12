@@ -1,28 +1,34 @@
 /**
- * Shift+Space 한/영 강제 전환 — iyagi 고유 기능의 앱 쪽 절반.
+ * Shift+Space 네이티브(CJK)↔라틴 강제 전환 — iyagi 고유 기능의 앱 쪽 절반.
  *
- * 웹뷰는 OS 입력기를 바꿀 수 없으니 Rust 커맨드(`ime_toggle_hangul`,
+ * 웹뷰는 OS 입력기를 바꿀 수 없으니 Rust 커맨드(`ime_toggle`,
  * src-tauri/src/bridge/ime.rs)가 실제 전환을 맡고, 여기서는
  * - Shift+Space keydown을 xterm보다 먼저 가로채(PTY에 공백이 가지 않게),
- * - 설정(`hangulToggle`: auto/on/off)과 OS 가용성(`ime_state`)으로 켜짐을 정하고,
+ * - 설정(`imeToggle`: auto/on/off)과 OS 가용성(`ime_state`)으로 켜짐을 정하고,
  * - 전환 결과(실제 OS 상태)를 캐럿 옆 풍선으로 보여 준다.
  *
- * 브라우저 미리보기(모의 데몬)에는 Tauri IPC가 없으므로 항상 꺼진다.
- * 모르는 상태는 추측하지 않는다: OS가 `hangul: null`을 주면 "?"를 띄운다.
+ * 대상은 한국어 고정이 아니라 사용자가 켜 둔 CJK 입력 소스(한국어·중국어·
+ * 일본어)와 라틴 자판이다. 브라우저 미리보기(모의 데몬)에는 Tauri IPC가
+ * 없으므로 항상 꺼진다. 모르는 상태는 추측하지 않는다: OS가 `native: null`을
+ * 주면 "?"를 띄운다.
  */
 
 import { isTauri, tauriIpcAdapter, type IpcAdapter } from "../bridge/ipc";
-import { usePreferences, type HangulToggleMode } from "../../store/preferences";
+import { usePreferences, type ImeToggleMode } from "../../store/preferences";
+
+/** 세션의 CJK 계열 — 풍선 글리프와 한국어 전용 경로(자모 복원·CapsLock 풍선) 게이팅. */
+export type ImeFamily = "ko" | "zh" | "ja";
 
 /** `bridge/ime.rs`의 `ImeState`(camelCase). */
 export interface ImeState {
   available: boolean;
-  hangul: boolean | null;
+  native: boolean | null;
+  family: ImeFamily | null;
   sourceId: string | null;
   reason: string | null;
 }
 
-export type HangulHudState = ImeState | { error: string };
+export type ImeHudState = ImeState | { error: string };
 
 type ChordEvent = Pick<
   KeyboardEvent,
@@ -30,7 +36,7 @@ type ChordEvent = Pick<
 >;
 
 /** 정확히 Shift+Space(다른 수식키 없음, 조합 중 아님, 반복 아님)인 keydown. */
-export function isHangulToggleChord(event: ChordEvent): boolean {
+export function isImeToggleChord(event: ChordEvent): boolean {
   return (
     event.type === "keydown" &&
     event.code === "Space" &&
@@ -43,14 +49,14 @@ export function isHangulToggleChord(event: ChordEvent): boolean {
   );
 }
 
-export interface HangulToggleDeps {
+export interface ImeToggleDeps {
   /** null = Tauri 밖(브라우저 미리보기): 전환 불가. */
   ipc: IpcAdapter | null;
-  getMode: () => HangulToggleMode;
-  showHud: (terminal: unknown, state: HangulHudState) => void;
+  getMode: () => ImeToggleMode;
+  showHud: (terminal: unknown, state: ImeHudState) => void;
 }
 
-export interface HangulToggle {
+export interface ImeToggle {
   /** 설정과 OS 가용성으로 지금 코드가 켜져 있는지. */
   enabled(): boolean;
   /**
@@ -60,16 +66,19 @@ export interface HangulToggle {
   handleKeydown(
     event: KeyboardEvent,
     terminal: unknown,
-    onState?: (state: HangulHudState) => void,
+    onState?: (state: ImeHudState) => void,
   ): boolean;
-  /** OS 가용성 재조회(auto 모드용). 실패는 "불가"로 캐시한다. */
+  /** OS 가용성·계열 재조회(auto 모드용). 실패는 "불가"로 캐시한다. */
   refresh(): Promise<ImeState | null>;
   /** 마지막으로 알려진 OS 가용성(null = 아직 모름). */
   availability(): boolean | null;
+  /** 마지막으로 알려진 세션 계열(null = 모름 — 호출자는 한국어 레거시 경로). */
+  family(): ImeFamily | null;
 }
 
-export function createHangulToggle(deps: HangulToggleDeps): HangulToggle {
+export function createImeToggle(deps: ImeToggleDeps): ImeToggle {
   let available: boolean | null = deps.ipc ? null : false;
+  let family: ImeFamily | null = null;
   let refreshing: Promise<ImeState | null> | null = null;
   let inFlight = false;
 
@@ -84,6 +93,7 @@ export function createHangulToggle(deps: HangulToggleDeps): HangulToggle {
       .invoke<ImeState>("ime_state")
       .then((state) => {
         available = state.available;
+        family = state.family;
         return state;
       })
       .catch(() => {
@@ -111,14 +121,14 @@ export function createHangulToggle(deps: HangulToggleDeps): HangulToggle {
   const handleKeydown = (
     event: KeyboardEvent,
     terminal: unknown,
-    onState?: (state: HangulHudState) => void,
+    onState?: (state: ImeHudState) => void,
   ): boolean => {
-    if (!isHangulToggleChord(event) || !enabled()) return false;
+    if (!isImeToggleChord(event) || !enabled()) return false;
     event.preventDefault();
     event.stopPropagation();
     if (inFlight || !deps.ipc) return true; // 단일 진행: 연타는 삼킨다
     inFlight = true;
-    const report = (state: HangulHudState): void => {
+    const report = (state: ImeHudState): void => {
       deps.showHud(terminal, state);
       try {
         onState?.(state);
@@ -127,9 +137,10 @@ export function createHangulToggle(deps: HangulToggleDeps): HangulToggle {
       }
     };
     deps.ipc
-      .invoke<ImeState>("ime_toggle_hangul")
+      .invoke<ImeState>("ime_toggle")
       .then((state) => {
         available = state.available;
+        family = state.family;
         report(state);
       })
       .catch((error: unknown) => {
@@ -145,7 +156,13 @@ export function createHangulToggle(deps: HangulToggleDeps): HangulToggle {
     return true;
   };
 
-  return { enabled, handleKeydown, refresh, availability: () => available };
+  return {
+    enabled,
+    handleKeydown,
+    refresh,
+    availability: () => available,
+    family: () => family,
+  };
 }
 
 type TerminalInternals = {
@@ -156,21 +173,27 @@ type TerminalInternals = {
   };
 };
 
+/** 계열별 네이티브 글리프 — macOS 입력 메뉴 표기 관행. 라틴은 항상 "A". */
+const NATIVE_GLYPH: Record<ImeFamily, string> = { ko: "한", zh: "中", ja: "あ" };
+
 /**
- * 캐럿 옆 한/영 풍선 — xtermSetup의 CapsLock 풍선과 같은 CSS(.ime-mode-balloon)를
- * 쓴다. 실제 OS 상태를 그리며, 모르면 "?", 실패면 "한/영 ✕"(툴팁에 이유).
+ * 캐럿 옆 전환 풍선 — xtermSetup의 CapsLock 풍선과 같은 CSS(.ime-mode-balloon)를
+ * 쓴다. 실제 OS 상태를 그리며, 모르면 "?", 실패면 "전환 ✕"(툴팁에 이유).
  */
-export function showHangulBalloon(terminal: unknown, state: HangulHudState): void {
+export function showImeBalloon(terminal: unknown, state: ImeHudState): void {
   if (typeof document === "undefined") return;
   const term = terminal as TerminalInternals;
   const parent = term.element?.querySelector<HTMLElement>(".xterm-helpers") ?? term.element ?? null;
   if (!parent) return;
   const failed = "error" in state ? state.error : state.available ? null : state.reason ?? "unavailable";
-  const hangul = "error" in state ? null : state.hangul;
+  const native = "error" in state ? null : state.native;
+  // 계열을 모르면 한국어 글리프(기존 동작) — 다른 계열을 추측해 그리지 않는다.
+  const glyph = ("error" in state ? null : state.family) ?? "ko";
   parent.querySelector(".ime-mode-balloon")?.remove();
   const balloon = document.createElement("div");
-  balloon.className = `ime-mode-balloon ime-mode-${hangul === true ? "ko" : "en"}`;
-  balloon.textContent = failed !== null ? "한/영 ✕" : hangul === true ? "한" : hangul === false ? "영" : "?";
+  balloon.className = `ime-mode-balloon ime-mode-${native === true ? glyph : "en"}`;
+  balloon.textContent =
+    failed !== null ? "전환 ✕" : native === true ? NATIVE_GLYPH[glyph] : native === false ? "A" : "?";
   balloon.title = failed ?? ("error" in state ? "" : state.reason ?? "");
   const cell = term._core?._renderService?.dimensions?.css?.cell;
   const cursor = term.buffer?.active;
@@ -182,15 +205,15 @@ export function showHangulBalloon(terminal: unknown, state: HangulHudState): voi
   parent.appendChild(balloon);
 }
 
-let singleton: HangulToggle | null = null;
+let singleton: ImeToggle | null = null;
 
 /** 앱 전역 인스턴스(설정 스토어 + Tauri IPC). 미리보기에선 항상 꺼짐. */
-export function defaultHangulToggle(): HangulToggle {
+export function defaultImeToggle(): ImeToggle {
   if (!singleton) {
-    singleton = createHangulToggle({
+    singleton = createImeToggle({
       ipc: isTauri() ? tauriIpcAdapter : null,
-      getMode: () => usePreferences.getState().hangulToggle,
-      showHud: showHangulBalloon,
+      getMode: () => usePreferences.getState().imeToggle,
+      showHud: showImeBalloon,
     });
     void singleton.refresh();
   }
@@ -198,6 +221,6 @@ export function defaultHangulToggle(): HangulToggle {
 }
 
 /** 시험용: 전역 인스턴스를 버린다. */
-export function resetHangulToggleForTests(): void {
+export function resetImeToggleForTests(): void {
   singleton = null;
 }

@@ -34,8 +34,8 @@ time = { version = "0.3.44", features = ["parsing"] }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
-# 한/영 강제 전환(bridge/ime.rs): macOS는 Carbon TIS를 CoreFoundation 값으로
-# 다루고, Windows는 IMM32/키 합성을 쓴다(컴파일만 검증).
+# Shift+Space CJK↔라틴 강제 전환(bridge/ime.rs): macOS는 Carbon TIS를
+# CoreFoundation 값으로 다루고, Windows는 IMM32/키 합성을 쓴다(컴파일만 검증).
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 

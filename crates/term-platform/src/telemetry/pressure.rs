@@ -58,8 +58,8 @@ mod tests {
     fn below_twelve_percent_is_warning() {
         assert_eq!(classify_pressure(T, 119 * GIB), Warning); // 11.9%
         assert_eq!(classify_pressure(16 * GIB, GIB + 1), Warning); // ~6%
-                                                                       // Just above the critical floor: WARNING territory, never CRITICAL
-                                                                       // by ratio.
+                                                                   // Just above the critical floor: WARNING territory, never CRITICAL
+                                                                   // by ratio.
         assert_eq!(classify_pressure(T, 101 * GIB), Warning);
     }
 

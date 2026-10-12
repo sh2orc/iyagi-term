@@ -365,6 +365,9 @@ pub struct DaemonState {
     pub flow_budget: Arc<Mutex<term_pty::flow::GlobalOutputBudget>>,
 
     pub data_tokens: DataTokens,
+    /// 로컬 관측 게이트웨이(루프백 프록시 + 토큰 장부). 수신은 별도
+    /// 태스크(`gateway::serve`), 정책은 `gateway.set_policy`가 소유한다.
+    pub gateway: Arc<crate::gateway::Gateway>,
 
     /// Cached per-workload usage from the telemetry loop.
     pub usage_cache: Mutex<HashMap<WorkloadId, WorkloadUsage>>,
@@ -750,6 +753,8 @@ impl DaemonState {
         // 있는 워크로드 수에 묶이게 종료 시점에 지운다(다른 락을 쥔 뒤가
         // 아니라 링 락을 놓은 지점에서 호출한다).
         self.forget_shell_identity(workload_id);
+        // 게이트웨이 장부 항목도 같이 논다(토큰 무효화).
+        self.gateway.forget_workload(workload_id);
         for id in evicted {
             let removed = {
                 let mut registry = self.workloads.lock().unwrap_or_else(|p| p.into_inner());

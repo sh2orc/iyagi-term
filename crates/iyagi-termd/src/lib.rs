@@ -16,6 +16,7 @@ pub mod connections;
 pub mod dispatch;
 pub mod exec;
 pub mod gate_listener;
+pub mod gateway;
 pub mod guard;
 pub mod helper;
 pub mod hook;
@@ -158,6 +159,10 @@ impl Daemon {
         }
         let (shutdown_tx, _) = tokio::sync::watch::channel(false);
 
+        // 관측 게이트웨이: 수신은 run()에서 시작하고 상태는 여기서 산다.
+        // 바인드 실패는 기능 침묵(라우팅 불가)일 뿐 기동 실패가 아니다.
+        let gateway = Arc::new(crate::gateway::Gateway::new(paths.root().to_path_buf()));
+
         // The global journal budget is on-disk bytes, but a fresh budget
         // starts at zero: journals left by previous daemon generations stay
         // on disk for `journal_retention_days` (default 7) before retention
@@ -213,6 +218,7 @@ impl Daemon {
             journal_budget,
             flow_budget: term_pty::flow::GlobalOutputBudget::shared(),
             data_tokens: auth::DataTokens::new(DaemonConfig::load().data_token_ttl()),
+            gateway,
             usage_cache: Mutex::new(std::collections::HashMap::new()),
             focused_sessions: Mutex::new(std::collections::HashMap::new()),
             relief: Mutex::new(crate::relief::ReliefController::new(
@@ -296,6 +302,14 @@ impl Daemon {
         supervisor::spawn_supervised(&state, "journal-retention", retention::run);
         supervisor::spawn_supervised(&state, "idle-watcher", lifecycle::run_idle_watcher);
         let mission_actor = mission::actor::spawn(Arc::clone(&state));
+        // 관측 게이트웨이 수신 루프. `Connection: close` 단발 요청만 다루므로
+        // 종료는 accept 루프만 멈추면 된다(진행 중 스트림은 프로세스 퇴장과
+        // 함께 끝난다).
+        let gateway_task = {
+            let gateway = Arc::clone(&state.gateway);
+            let shutdown = state.shutdown.subscribe();
+            tokio::spawn(crate::gateway::serve(gateway, shutdown))
+        };
 
         let ipc_state = Arc::clone(&state);
         let ipc_failed = Arc::new(AtomicBool::new(false));
@@ -323,6 +337,7 @@ impl Daemon {
         let _ = shutdown_rx.wait_for(|stop| *stop).await;
         tracing::info!("shutdown requested");
         ipc_task.abort();
+        gateway_task.abort();
         if let Some(actor) = mission_actor {
             // Keep storage and the daemon runtime alive until owned mission
             // processes are closed and their final projections are recorded.

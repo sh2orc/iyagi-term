@@ -203,6 +203,8 @@ pub async fn route(
             run_blocking(move || session_relief(&state, &params).map(Some)).await
         }
         methods::RELIEF_SET_POLICY => relief_set_policy(&state, &request.params).map(Some),
+        methods::GATEWAY_STATUS => gateway_status(&state).map(Some),
+        methods::GATEWAY_SET_POLICY => gateway_set_policy(&state, &request.params).map(Some),
         methods::WORKLOAD_SUSPEND => {
             let state = Arc::clone(&state);
             let params = request.params.clone();
@@ -1920,6 +1922,26 @@ fn session_relief(
 /// `relief.set_policy` — 데몬 전체의 자동 완화 스위치(08 §2).
 /// 끄는 것만으로는 이미 양보 중인 세션이 복원되지 않는다: NORMAL 회복
 /// 경로나 수동 복원이 되돌린다.
+/// `gateway.status` — 관측 게이트웨이의 정책·수신 상태·토큰 장부.
+fn gateway_status(state: &Arc<DaemonState>) -> Result<serde_json::Value, RpcError> {
+    serde_json::to_value(state.gateway.status())
+        .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, e.to_string()))
+}
+
+/// `gateway.set_policy` — 관측 라우팅 on/off(`enabled`)와 킬 스위치
+/// (`blocked`). 지정한 것만 바뀐다. 결과는 적용된 정책 전체.
+fn gateway_set_policy(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: term_contracts::gateway::GatewayPolicyParams =
+        serde_json::from_value(params.clone())
+            .map_err(|e| RpcError::new(ErrorCode::InvalidArgument, e.to_string()))?;
+    let policy = state.gateway.set_policy(params.enabled, params.blocked);
+    serde_json::to_value(policy)
+        .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, e.to_string()))
+}
+
 fn relief_set_policy(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,

@@ -220,7 +220,7 @@ fn launch_shell(
     state: &Arc<DaemonState>,
     request: &LaunchRequest,
     canonical_cwd: std::path::PathBuf,
-    claude_provider: Option<ResolvedClaudeProvider>,
+    mut claude_provider: Option<ResolvedClaudeProvider>,
 ) -> Result<LaunchOutcome, RpcError> {
     // Admission: session limit only (spec: shells spawn directly; no queue,
     // no resource group). Host memory pressure never blocks a shell launch:
@@ -236,6 +236,13 @@ fn launch_shell(
     }
 
     let (workload_id, session_id) = (WorkloadId::generate(), SessionId::generate());
+    // 관측 게이트웨이가 열려 있으면 라우팅을 감싼다 — base URL은 지금
+    // 포트로, 토큰은 1회용 게이트웨이 토큰으로 바뀐다(실제 키는 자식
+    // 환경에 아예 실리지 않는다). `register_workload`가 redactor를 복사해
+    // 가기 전에 감싸야 엔트리의 redactor도 게이트웨이 토큰을 지운다.
+    if let Some(routed) = &mut claude_provider {
+        state.gateway.rewire(routed, &workload_id, &session_id);
+    }
     record_intent(state, request, &request.policy, &workload_id, &session_id)?;
     let entry = register_workload(
         state,
@@ -585,18 +592,32 @@ fn start_managed_admitted(
     // 토큰이 없다 — 대기열에 있는 동안 Settings에서 키가 지워졌으면 여기서
     // `zai_key_missing`으로 실패하고, 바뀌었으면 새 키로 시작한다. redactor도
     // 이 키로 다시 만들어 엔트리에 둔다(런치 시점 것은 옛 키일 수 있다).
+    // 관측 게이트웨이가 열려 있으면 실제 키 대신 1회용 게이트웨이 토큰을
+    // 발급한다(실제 키는 게이트웨이가 요청 시점마다 다시 읽는다 — 키가
+    // 없어도 시작은 되고 첫 요청에서 502로 드러난다). 판정은 이 한 곳에서
+    // 내려 아래 프레임 env의 base URL과 어긋나지 않는다.
+    let mut via_gateway = false;
     let start_token = if routed {
-        match crate::claude_provider::StartToken::read(state.paths.root()) {
-            Ok(token) => Some(token),
-            Err(error) => {
-                fail_workload(
-                    state,
-                    workload_id,
-                    ErrorCode::InvalidArgument,
-                    crate::claude_provider::reason_code(&error).unwrap_or("claude_provider"),
-                );
-                return Err(error);
+        match state
+            .gateway
+            .start_route(workload_id, &descriptor.session_id)
+        {
+            Some(token) => {
+                via_gateway = true;
+                Some(token)
             }
+            None => match crate::claude_provider::StartToken::read(state.paths.root()) {
+                Ok(token) => Some(token),
+                Err(error) => {
+                    fail_workload(
+                        state,
+                        workload_id,
+                        ErrorCode::InvalidArgument,
+                        crate::claude_provider::reason_code(&error).unwrap_or("claude_provider"),
+                    );
+                    return Err(error);
+                }
+            },
         }
     } else {
         None
@@ -767,15 +788,22 @@ fn start_managed_admitted(
     };
 
     // (6) Send the target spec (helper still creates nothing).
+    let mut frame_env = match &start_token {
+        Some(token) => token.env_with_token(&descriptor.env_overrides),
+        None => descriptor.env_overrides.clone(),
+    };
+    // 게이트웨이 토큰을 발급받았으면 base URL도 지금 포트로 확정한다(대기
+    // 중 데몬 재시작 등으로 descriptor의 값이 옛 것일 수 있다). 발급받지
+    // 않았으면 직접 경로로 되돌린다 — 토큰과 URL은 한 판정으로 묶여 있다.
+    if routed {
+        state.gateway.frame_env(&mut frame_env, via_gateway);
+    }
     let mut target = GateTarget {
         program: descriptor.program.clone(),
         argv: full_argv(&descriptor.program, &descriptor.argv),
         // 라우팅된 pane: 토큰은 이 프레임의 env에만 얹는다(엔트리의
         // descriptor에는 없다).
-        env_overrides: match &start_token {
-            Some(token) => token.env_with_token(&descriptor.env_overrides),
-            None => descriptor.env_overrides.clone(),
-        },
+        env_overrides: frame_env,
         env_clear: false,
         // 라우팅된 Claude pane만 상속 provider/auth 변수를 지운다(helper가
         // env_overrides를 얹기 **전에** 적용). 비라우팅은 빈 목록.

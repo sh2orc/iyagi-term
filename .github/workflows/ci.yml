@@ -50,9 +50,12 @@ on:
 permissions:
   contents: read
 
+# Supersede stale runs on branches/PRs only. Protected refs run to the end:
+# cancelling there starves the host gates and can interrupt linux-cgroup
+# mid-test (leaving cgroups behind).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   CARGO_HOME: ${{ github.workspace }}/.cargo
@@ -85,28 +88,30 @@ jobs:
           path: |
             .cargo/registry/
             target/
-      # iyagi-app is in --workspace, and its Tauri build script requires the
-      # triple-suffixed sidecar resource to exist even for fmt/clippy/test.
-      # bundle-linux stages the release one via npm; the debug daemon is
-      # enough here — the smoke step below builds it anyway.
-      - name: Stage the sidecar binary the Tauri build script requires
-        run: >
-          cargo build -p iyagi-termd --locked && mkdir -p src-tauri/binaries &&
-          cp target/debug/iyagi-termd
-          "src-tauri/binaries/iyagi-termd-$(rustc -vV | sed -n 's/^host: //p')"
+      # fmt runs no build scripts — keep the fast gate first.
       - run: cargo fmt --all --check
+      # iyagi-app is in --workspace, and its Tauri build script requires the
+      # triple-suffixed sidecar resource to exist for clippy/test. The debug
+      # daemon is enough here (bundle-linux stages the release one via npm);
+      # prepare-bundle.mjs owns the triple naming for every job.
+      - run: cargo build -p iyagi-termd --locked
+      - name: Stage the sidecar binary the Tauri build script requires
+        run: node scripts/prepare-bundle.mjs --profile debug
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # `git status` also catches newly exported types that were never committed.
       - name: src/generated must be committed in sync
-        run: git diff --exit-code -- src/generated || (echo 'src/generated stale'; exit 1)
+        run: |
+          dirty="$(git status --porcelain -- src/generated)"
+          if [ -n "$dirty" ]; then echo "src/generated stale:"; echo "$dirty"; exit 1; fi
       # Real daemon binary over the UDS wire (hello/snapshot/launch/dedup/shutdown).
       - run: cargo build -p iyagi-termd -p term-fixture --locked
       - run: python3 scripts/smoke_e2e.py
 
-  # Linux cgroup delegation test on a dedicated self-hosted runner label.
-  # `cgroup_lifecycle_when_delegated` self-skips without a delegated subtree;
-  # IYAGI_CGROUP_REQUIRE_DELEGATION makes that skip a failure here so the job
-  # proves the real cgroup path instead of passing vacuously.
+  # Linux cgroup delegation tests on a dedicated self-hosted runner label.
+  # They self-skip without a delegated subtree; IYAGI_CGROUP_REQUIRE_DELEGATION
+  # makes that skip a failure here so the job proves the real cgroup paths
+  # (lifecycle, recovery, pidfd signalling) instead of passing vacuously.
   linux-cgroup:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, cgroup-delegated]
@@ -115,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Touches a host-delegated cgroup subtree — nothing cached (note 4).
-      - run: cargo test -p term-platform --locked cgroup_lifecycle_when_delegated -- --nocapture
+      - run: cargo test -p term-platform --locked linux_cgroup -- --nocapture
 
   # ---------- Windows (self-hosted; protected refs) ----------
   windows-check:
@@ -123,27 +128,29 @@ jobs:
     runs-on: [self-hosted, windows]
     steps:
       - uses: actions/checkout@v4
-      # Same sidecar requirement as linux-check (Tauri build script checks the
-      # resource path during clippy/test of the workspace).
-      - name: Stage the sidecar binary the Tauri build script requires
-        shell: pwsh
-        run: >
-          cargo build -p iyagi-termd --locked;
-          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null;
-          $triple = (rustc -vV | Where-Object { $_ -match '^host: ' }) -replace '^host: ', '';
-          Copy-Item target\debug\iyagi-termd.exe "src-tauri\binaries\iyagi-termd-$triple.exe"
       - run: cargo fmt --all --check
+      # Same sidecar requirement as linux-check (Tauri build script checks the
+      # resource path during clippy/test of the workspace). Separate steps so
+      # a failed build stops here instead of surfacing as a missing file.
+      - run: cargo build -p iyagi-termd --locked
+      - name: Stage the sidecar binary the Tauri build script requires
+        run: node scripts/prepare-bundle.mjs --profile debug
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # pwsh (the runner default): `(a; b)` and `||` are parse errors there.
       - name: src/generated must be committed in sync
-        run: git diff --exit-code -- src/generated || (echo 'src/generated stale'; exit 1)
+        shell: pwsh
+        run: |
+          $dirty = git status --porcelain -- src/generated
+          if ($dirty) { Write-Output "src/generated stale:"; Write-Output $dirty; exit 1 }
 
   windows-pty-integration:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, windows]
     steps:
       - uses: actions/checkout@v4
-      - run: cargo test -p term-pty --locked --ignored conpty
+      # Test-binary flags go after `--`; cargo itself rejects `--ignored`.
+      - run: cargo test -p term-pty --locked conpty -- --ignored
 
   # ---------- macOS (self-hosted; protected refs) ----------
   macos-check:
@@ -151,14 +158,12 @@ jobs:
     runs-on: [self-hosted, macos]
     steps:
       - uses: actions/checkout@v4
+      - run: cargo fmt --all --check
       # Same sidecar requirement as linux-check (Tauri build script checks the
       # resource path during clippy/test of the workspace).
+      - run: cargo build -p iyagi-termd --locked
       - name: Stage the sidecar binary the Tauri build script requires
-        run: >
-          cargo build -p iyagi-termd --locked && mkdir -p src-tauri/binaries &&
-          cp target/debug/iyagi-termd
-          "src-tauri/binaries/iyagi-termd-$(rustc -vV | sed -n 's/^host: //p')"
-      - run: cargo fmt --all --check
+        run: node scripts/prepare-bundle.mjs --profile debug
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 

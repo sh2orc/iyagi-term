@@ -1,25 +1,40 @@
-# Release binaries
+# Releases
 
-Installers committed for direct download from the README (raw.githubusercontent.com links
-served from this repository). Naming: `IYAGI.Term_<version>_<arch>.<ext>`.
+Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**,
+one release per version, tagged `v<version>` (for example `v0.1.3`). Each release carries its
+installers as assets, the release notes for that version and the SHA-256 of every asset.
+Installers are no longer committed to this repository; until 0.1.2 they were, and those
+DMGs are now attached to their own releases (`v0.1.0` – `v0.1.2`).
 
-What changed in each version is in [RELEASE.md](../RELEASE.md), which also records every
-installer's SHA-256; the README download section carries the latest one. Keep this directory
-to installers only — one file per platform per version; prune old versions when the history
-cost outweighs their value.
+What changed in each version is in [RELEASE.md](../RELEASE.md). Asset naming:
+`IYAGI.Term_<version>_<arch>.<ext>`.
 
 ## Publishing a release
 
-1. Bump the version in `Cargo.toml` (`[workspace.package]`), `package.json`,
-   `package-lock.json` and `src-tauri/tauri.conf.json`, then refresh the lockfile with
-   `cargo update -w`.
-2. Build on the release Mac: `npm run tauri build`. The DMG lands in
+1. **Bump the version** in `Cargo.toml` (`[workspace.package]`), `package.json`,
+   `package-lock.json` and `src-tauri/tauri.conf.json` (`npm version <v> --no-git-tag-version`
+   covers both npm files), then refresh the lockfile with `cargo update -w`.
+2. **Build** on the release Mac: `npm run tauri build`. The DMG lands in
    `target/release/bundle/dmg/IYAGI Term_<version>_<arch>.dmg`.
-3. Notarize and staple the DMG (next section), then check that `spctl` reports
+3. **Notarize and staple** the DMG (next section), then check that `spctl` reports
    `source=Notarized Developer ID` for the DMG and for the app inside it.
-4. Copy the DMG here under the dotted name (`IYAGI.Term_<version>_<arch>.dmg`).
-5. Record its SHA-256 (`shasum -a 256`) and size in `README.md`, `README_KR.md` and
-   `RELEASE.md` together with the release notes.
+4. **Record the hash and notes.** Run `shasum -a 256` on the DMG, then add the release notes
+   to `RELEASE.md` and update the download section of `README.md` and `README_KR.md`. Commit
+   with the version bump and push to `main`.
+5. **Publish** the GitHub Release from that commit, attaching the DMG under its dotted name:
+
+   ```sh
+   cp "target/release/bundle/dmg/IYAGI Term_<v>_aarch64.dmg" /tmp/IYAGI.Term_<v>_aarch64.dmg
+   gh release create v<v> /tmp/IYAGI.Term_<v>_aarch64.dmg \
+     --target main --title "IYAGI Terminal <v>" --notes-file <notes.md> --latest
+   ```
+
+   The notes file is the version's section of `RELEASE.md` plus the asset table.
+6. **Verify** the published asset: download it from the release page and compare its
+   `shasum -a 256` with the recorded hash and with the digest GitHub shows for the asset.
+
+README download buttons point to `releases/latest`, so they follow the newest release; the
+direct file links in the tables point to the exact tag.
 
 ## Local macOS signing and notarization
 
@@ -29,35 +44,32 @@ select one with `APPLE_SIGNING_IDENTITY`. Development builds retain their local
 signing behavior. Signing alone does not notarize the app.
 
 On the configured release Mac, notarization credentials are stored in the keychain
-profile `iyagi-notary`. Submit the signed app as a ZIP (created with
-`ditto -c -k --keepParent`) or submit the signed DMG using
-`xcrun notarytool submit <archive> --keychain-profile iyagi-notary --wait`.
-After an `Accepted` result, run `xcrun stapler staple <app-or-dmg>`; when distributing
-a ZIP, recreate it from the stapled app. To staple the app itself as well, staple it
-before packaging it into a DMG. Keep certificates, private keys, and credentials outside
-this repository.
+profile `iyagi-notary`. Submit the signed DMG with
+`xcrun notarytool submit <dmg> --keychain-profile iyagi-notary --wait`, or submit the app as a
+ZIP (created with `ditto -c -k --keepParent`). After an `Accepted` result, run
+`xcrun stapler staple <app-or-dmg>`; when distributing a ZIP, recreate it from the stapled
+app. Keep certificates, private keys and credentials outside this repository.
 
-Local notarization does not replace the published installers in this directory.
-Update the download artifact and its README hash together when publishing a release.
-
-## Trust posture (as of 0.1.2)
+## Trust posture (as of 0.1.3)
 
 macOS installers are signed with a Developer ID, built with hardened runtime and notarized,
 with the notarization ticket stapled to the DMG, so they open without Gatekeeper warnings.
-They are still built and published from a developer machine rather than CI.
+They are still built on a developer machine rather than in CI.
 
-The published SHA-256 travels in this same repository as the DMG it describes. The hash
-therefore protects against transport corruption only: anyone able to replace the installer
-can replace the hash too. Until the roadmap below lands, downloads from this repository are
-exactly as trustworthy as the repository itself.
+The SHA-256 is recorded in `RELEASE.md` and the READMEs, and GitHub computes its own digest
+for each release asset. Both still sit under the same GitHub account as the installer, so they
+detect transport corruption, not a compromise of that account.
 
 ## Release integrity roadmap
 
 - [x] **Developer ID signing + notarization (macOS)** — done for macOS since 0.1.0; Windows
       and Linux artifacts still need equivalent signing.
+- [x] **Installers out of the git tree** — since 0.1.3, installers ship as GitHub Release assets
+      instead of committed files.
 - [ ] **CI-built releases on protected refs** — build and publish every installer from a
-      protected branch or tag in CI (`.github/workflows/ci.yml`), never from a developer
-      machine, so a shipped artifact always corresponds to reviewed code.
-- [ ] **Independent hash/signature channel** — publish release hashes or signatures through
-      a channel outside this repository (signed release API response or separate trusted
-      origin), so the hash and the artifact cannot be swapped together.
+      protected tag in CI (`.github/workflows/ci.yml`), never from a developer machine, so a
+      shipped artifact always corresponds to reviewed code. Needs a self-hosted macOS runner
+      with the signing identity.
+- [ ] **Independent hash/signature channel** — publish build provenance or signatures that
+      do not depend on the same account (for example artifact attestations from CI), so the
+      hash and the artifact cannot be swapped together.

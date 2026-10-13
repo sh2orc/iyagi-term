@@ -25,6 +25,10 @@ use term_contracts::error::{ErrorCode, RpcError};
 
 /// 세션의 CJK 계열 — HUD 글리프와 자모 복원 게이팅에 쓴다(serde: "ko"|"zh"|"ja").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "windows", test)),
+    allow(dead_code)
+)]
 pub enum ImeFamily {
     #[serde(rename = "ko")]
     Korean,
@@ -102,6 +106,10 @@ pub async fn ime_toggle(app: AppHandle) -> Result<ImeState, RpcError> {
 /// 입력 소스/입력 모드 식별자 → CJK 계열. 소문자 부분일치, 판정 순서 ko→zh→ja.
 /// Apple 표준(두벌식, SCIM/TCIM 모든 모드, Kotoeri — 로마자 입력 모드 포함,
 /// 로마자 입력도 일본어 IME다)과 주요 서드파티(구름, Rime/Squirrel, AquaSKK)를 덮는다.
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "windows", test)),
+    allow(dead_code)
+)]
 pub fn cjk_family(id: &str) -> Option<ImeFamily> {
     let lower = id.to_ascii_lowercase();
     if lower.contains("korean") || lower.contains("hangul") || lower.contains(".gureum.") {
@@ -131,6 +139,10 @@ pub fn cjk_family(id: &str) -> Option<ImeFamily> {
 
 /// 라틴 목표: 마지막으로 떠났던 비-CJK 소스(아직 켜져 있으면) → ABC → US →
 /// 아무 `com.apple.keylayout.*` → 그 외 첫 비-CJK 소스.
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "windows", test)),
+    allow(dead_code)
+)]
 pub fn pick_latin_source<'a>(enabled: &'a [String], last_latin: Option<&str>) -> Option<&'a str> {
     let latin = || enabled.iter().filter(|id| cjk_family(id).is_none());
     if let Some(last) = last_latin {
@@ -152,6 +164,10 @@ pub fn pick_latin_source<'a>(enabled: &'a [String], last_latin: Option<&str>) ->
 /// 네이티브(CJK) 목표: 마지막으로 쓴 CJK 소스(아직 켜져 있으면) → 그 계열의
 /// 선호 모드 → 아무 CJK 소스. 계열 힌트가 없으면 enabled 순서상 첫 CJK의
 /// 계열을 쓴다 — 목록 순서는 시스템 설정의 사용자 순서를 따르므로 결정적이다.
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "windows", test)),
+    allow(dead_code)
+)]
 pub fn pick_native_source<'a>(enabled: &'a [String], last_native: Option<&str>) -> Option<&'a str> {
     let cjk = || enabled.iter().filter(|id| cjk_family(id).is_some());
     if let Some(last) = last_native {

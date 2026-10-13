@@ -4868,6 +4868,8 @@ name = "term-secrets"
 version = "0.1.2"
 dependencies = [
  "ring",
+ "serde",
+ "serde_json",
  "tempfile",
  "uuid",
  "zeroize",

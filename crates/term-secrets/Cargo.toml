@@ -10,6 +10,8 @@ description = "App-local authenticated-encryption secret store shared by the Tau
 [dependencies]
 ring = "0.17.14"
 uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 zeroize = "1.8"
 
 [dev-dependencies]

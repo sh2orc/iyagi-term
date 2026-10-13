@@ -15,10 +15,13 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
-const FORMAT: &[u8] = b"IYAGI-SECRET-1\0";
+pub(crate) const FORMAT: &[u8] = b"IYAGI-SECRET-1\0";
 const CONTEXT: &[u8] = b"iyagi:zai-coding-plan-api-key:v1";
-const LIMIT: u64 = 4096;
+pub(crate) const LIMIT: u64 = 4096;
 static ACCESS: Mutex<()> = Mutex::new(());
+
+pub mod pool;
+pub use pool::{KeyPoolStore, PoolKeyInfo};
 
 pub struct LocalSecretStore {
     directory: PathBuf,
@@ -36,7 +39,7 @@ impl LocalSecretStore {
         let Some(bytes) = read_private(&self.directory.join("zai.enc"))? else {
             return Ok(None);
         };
-        let key = self.load_key()?;
+        let key = load_master_key(&self.directory)?;
         if !bytes.starts_with(FORMAT) || bytes.len() < FORMAT.len() + 12 + AES_256_GCM.tag_len() {
             return Err("credential_store_error");
         }
@@ -77,28 +80,8 @@ impl LocalSecretStore {
             fs::set_permissions(&self.directory, fs::Permissions::from_mode(0o700))
                 .map_err(|_| "credential_store_error")?;
         }
-        let key_path = self.directory.join("master.key");
-        // Never generate a replacement key over an existing encrypted secret.
-        // Missing/corrupt key material must leave that secret untouched.
-        if !key_path.exists() {
-            if self.directory.join("zai.enc").exists() {
-                return Err("credential_store_error");
-            }
-            let mut key = [0u8; 32];
-            SystemRandom::new()
-                .fill(&mut key)
-                .map_err(|_| "credential_store_error")?;
-            let temp = self.write_temp(&key)?;
-            // Publish a complete key without overwriting a concurrent creator.
-            let result = fs::hard_link(&temp, &key_path);
-            let _ = fs::remove_file(&temp);
-            if let Err(error) = result {
-                if error.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err("credential_store_error");
-                }
-            }
-        }
-        let key = self.load_key()?;
+        ensure_master_key(&self.directory, &self.directory.join("zai.enc"))?;
+        let key = load_master_key(&self.directory)?;
         let mut nonce = [0u8; 12];
         SystemRandom::new()
             .fill(&mut nonce)
@@ -114,7 +97,7 @@ impl LocalSecretStore {
         let mut envelope = FORMAT.to_vec();
         envelope.extend_from_slice(&nonce);
         envelope.extend_from_slice(&encrypted);
-        let temp = self.write_temp(&envelope)?;
+        let temp = write_private_temp(&self.directory, &envelope)?;
         let result = fs::rename(&temp, self.directory.join("zai.enc"));
         if result.is_err() {
             let _ = fs::remove_file(&temp);
@@ -130,53 +113,90 @@ impl LocalSecretStore {
             Err(_) => Err("credential_store_error"),
         }
     }
-
-    fn load_key(&self) -> Result<[u8; 32], &'static str> {
-        read_private(&self.directory.join("master.key"))?
-            .ok_or("credential_store_error")?
-            .try_into()
-            .map_err(|_| "credential_store_error")
-    }
-
-    fn write_temp(&self, bytes: &[u8]) -> Result<PathBuf, &'static str> {
-        let path = self
-            .directory
-            .join(format!(".{}.tmp", uuid::Uuid::new_v4()));
-        let result = (|| {
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&path)?;
-            file.write_all(bytes)?;
-            file.sync_all()
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&path);
-        }
-        result
-            .map(|()| path)
-            .map_err(|_: std::io::Error| "credential_store_error")
-    }
 }
 
-fn cipher(key: &[u8; 32]) -> Result<LessSafeKey, &'static str> {
+/// master.key가 없으면 만든다. **이미 암호문(`secret_file`)이 있는데 키가
+/// 없는 상태에서는 새 키를 만들지 않는다** — 그렇게 만들면 옛 암호문을
+/// 영영 못 여는 상태가 되므로 오류로 지킨다(원래 단일 저장소의 규칙).
+pub(crate) fn ensure_master_key(directory: &Path, secret_file: &Path) -> Result<(), &'static str> {
+    let key_path = directory.join("master.key");
+    if key_path.exists() {
+        return Ok(());
+    }
+    if secret_file.exists() {
+        return Err("credential_store_error");
+    }
+    let mut key = [0u8; 32];
+    SystemRandom::new()
+        .fill(&mut key)
+        .map_err(|_| "credential_store_error")?;
+    let temp = write_private_temp(directory, &key)?;
+    // Publish a complete key without overwriting a concurrent creator.
+    let result = fs::hard_link(&temp, &key_path);
+    let _ = fs::remove_file(&temp);
+    if let Err(error) = result {
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err("credential_store_error");
+        }
+    }
+    Ok(())
+}
+
+/// 디렉터리의 master.key(32바이트). 풀 저장소(`pool.rs`)가 같은 키를
+/// 다른 AEAD 컨텍스트로 재사용한다.
+pub(crate) fn load_master_key(directory: &Path) -> Result<[u8; 32], &'static str> {
+    read_private(&directory.join("master.key"))?
+        .ok_or("credential_store_error")?
+        .try_into()
+        .map_err(|_| "credential_store_error")
+}
+
+/// 0600 temp 파일 쓰기 + rename 공개 직전까지(호출자가 rename한다).
+pub(crate) fn write_private_temp(directory: &Path, bytes: &[u8]) -> Result<PathBuf, &'static str> {
+    let path = directory.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+    }
+    result
+        .map(|()| path)
+        .map_err(|_: std::io::Error| "credential_store_error")
+}
+
+pub(crate) fn cipher(key: &[u8; 32]) -> Result<LessSafeKey, &'static str> {
     UnboundKey::new(&AES_256_GCM, key)
         .map(LessSafeKey::new)
         .map_err(|_| "credential_store_error")
 }
 
-fn read_private(path: &Path) -> Result<Option<Vec<u8>>, &'static str> {
+pub(crate) fn read_private(path: &Path) -> Result<Option<Vec<u8>>, &'static str> {
+    read_private_limited(path, LIMIT)
+}
+
+/// [`read_private`] with a caller-chosen byte cap(풀 저장소는 항목 수가 많아
+/// 더 큰 상한을 쓴다 — 09 §4).
+pub(crate) fn read_private_limited(
+    path: &Path,
+    limit: u64,
+) -> Result<Option<Vec<u8>>, &'static str> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("credential_store_error"),
     };
     let metadata = file.metadata().map_err(|_| "credential_store_error")?;
-    if !metadata.is_file() || metadata.len() > LIMIT {
+    if !metadata.is_file() || metadata.len() > limit {
         return Err("credential_store_error");
     }
     #[cfg(unix)]
@@ -187,10 +207,10 @@ fn read_private(path: &Path) -> Result<Option<Vec<u8>>, &'static str> {
         }
     }
     let mut bytes = Vec::new();
-    file.take(LIMIT + 1)
+    file.take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "credential_store_error")?;
-    if bytes.len() > LIMIT as usize {
+    if bytes.len() > limit as usize {
         return Err("credential_store_error");
     }
     Ok(Some(bytes))

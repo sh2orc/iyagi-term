@@ -1083,6 +1083,9 @@ mod tests {
     }
 
     #[test]
+    // KNOWN_BREAKS는 오늘 기준 비어 있어야 한다(const_is_empty 억제 — 아래
+    // 검문 assert는 항목이 추가되는 순간 실패해야 하는 상시 검문이다).
+    #[allow(clippy::const_is_empty)]
     fn version_lines_follow_major_order_and_known_breaks() {
         // A patch release of the same 0.x line inherits; a new major does not.
         assert!(on_line("0.155.0", "0.154.0", RuntimeKind::Codex));
@@ -1126,6 +1129,9 @@ mod tests {
             parse_semver("0.156.0").unwrap(),
             &breaks
         ));
+        // 상시 검문: KNOWN_BREAKS에 항목이 추가되면 이 테스트가 실패한다. clippy는
+        // const라 컴파일 시점에 항상 참임을 알지만(함수 단위 const_is_empty 억제),
+        // 그 판정 자체가 이 검문의 존재 이유다.
         assert!(KNOWN_BREAKS.is_empty(), "no shipped break today");
         assert_eq!(
             line_evidence_version(RuntimeKind::Codex, OS_LINUX, Some("0.155.0")),

@@ -32,6 +32,7 @@ import {
   LEGACY_AGENT_TINTS,
   type AgentTintKey,
 } from "../features/terminal/paneBackground";
+import type { GatewayPoolStrategy } from "../generated/GatewayPoolStrategy";
 
 export type ThemePreference = "system" | "dark" | "light";
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["system", "dark", "light"];
@@ -73,6 +74,9 @@ export const ZAI_MAIN_MODELS: readonly ZaiMainModel[] = ["glm-5.3[1m]", "glm-5.3
 /** haiku/백그라운드 슬롯은 데몬이 고정한다(`ZAI_CLAUDE_HAIKU_MODEL`) — 표시용 미러. */
 export const ZAI_HAIKU_MODEL: ZaiMainModel = "glm-5.3-flash[1m]";
 
+/** 게이트웨이 키 풀 회전 전략 — 생성 타입 `GatewayPoolStrategy`의 값 목록(sanitize용). */
+export const GATEWAY_POOL_STRATEGIES: readonly GatewayPoolStrategy[] = ["round_robin", "fill_first"];
+
 /** 04-ui.md §4 "zoom 9..24px" — 기본 글꼴 크기도 같은 범위를 쓴다. */
 export const MIN_BASE_FONT_SIZE = 9;
 export const MAX_BASE_FONT_SIZE = 24;
@@ -93,6 +97,10 @@ export interface PreferenceValues {
    *  킬 스위치를 제공한다. 데몬 정책은 세션 수명이라 앱이 붙을 때마다 다시
    *  적용한다(참 진실 원본은 이 설정). */
   gatewayObservability: boolean;
+  /** 게이트웨이 킬 스위치(모든 요청 403). 데몬 정책과 함께 연결마다 다시 적용한다. */
+  gatewayBlocked: boolean;
+  /** API 키 풀 회전 전략. 데몬 정책과 함께 연결마다 다시 적용한다. */
+  gatewayPoolStrategy: GatewayPoolStrategy;
   /** 새 터미널이 시작하는 글꼴 크기(pane zoom의 기준점이기도 하다). */
   baseFontSize: number;
   /** 창을 닫을 때 묻지 않고 터미널까지 종료(04 §2). */
@@ -158,6 +166,8 @@ export const DEFAULT_PREFERENCES: PreferenceValues = {
   claudeProvider: "anthropic",
   zaiMainModel: "glm-5.3[1m]",
   gatewayObservability: false,
+  gatewayBlocked: false,
+  gatewayPoolStrategy: "round_robin",
   baseFontSize: DEFAULT_FONT_SIZE,
   terminateOnClose: false,
   quitBehavior: "ask",
@@ -238,6 +248,11 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
       typeof value.gatewayObservability === "boolean"
         ? value.gatewayObservability
         : DEFAULT_PREFERENCES.gatewayObservability,
+    gatewayBlocked:
+      typeof value.gatewayBlocked === "boolean" ? value.gatewayBlocked : DEFAULT_PREFERENCES.gatewayBlocked,
+    gatewayPoolStrategy: GATEWAY_POOL_STRATEGIES.includes(value.gatewayPoolStrategy as GatewayPoolStrategy)
+      ? (value.gatewayPoolStrategy as GatewayPoolStrategy)
+      : DEFAULT_PREFERENCES.gatewayPoolStrategy,
     fontFamily: sanitizeFontFamily(value.fontFamily),
     cursorStyle: CURSOR_STYLES.includes(value.cursorStyle as string)
       ? (value.cursorStyle as PreferenceValues["cursorStyle"])
@@ -359,6 +374,9 @@ export interface PreferencesState extends PreferenceValues {
   /** Z.ai 라우팅 주 모델 — 목록 밖 값은 기본 모델로 되돌린다. */
   setZaiMainModel(model: ZaiMainModel): void;
   setGatewayObservability(enabled: boolean): void;
+  setGatewayBlocked(blocked: boolean): void;
+  /** 키 풀 회전 전략 — 모르는 값은 round_robin으로 되돌린다. */
+  setGatewayPoolStrategy(strategy: GatewayPoolStrategy): void;
   setBaseFontSize(size: number): void;
   setTerminateOnClose(value: boolean): void;
   setQuitBehavior(value: QuitBehavior): void;
@@ -427,6 +445,13 @@ export const usePreferences = create<PreferencesState>()(
       setZaiMainModel: (model) =>
         set({ zaiMainModel: ZAI_MAIN_MODELS.includes(model) ? model : DEFAULT_PREFERENCES.zaiMainModel }),
       setGatewayObservability: (gatewayObservability) => set({ gatewayObservability }),
+      setGatewayBlocked: (gatewayBlocked) => set({ gatewayBlocked }),
+      setGatewayPoolStrategy: (strategy) =>
+        set({
+          gatewayPoolStrategy: GATEWAY_POOL_STRATEGIES.includes(strategy)
+            ? strategy
+            : DEFAULT_PREFERENCES.gatewayPoolStrategy,
+        }),
       setBaseFontSize: (size) => set({ baseFontSize: clampBaseFontSize(size) }),
       setTerminateOnClose: (terminateOnClose) => set({ terminateOnClose }),
       setQuitBehavior: (quitBehavior) =>
@@ -469,6 +494,8 @@ export const usePreferences = create<PreferencesState>()(
         codexFullAutonomy: state.codexFullAutonomy,
         claudeProvider: state.claudeProvider,
         gatewayObservability: state.gatewayObservability,
+        gatewayBlocked: state.gatewayBlocked,
+        gatewayPoolStrategy: state.gatewayPoolStrategy,
         zaiMainModel: state.zaiMainModel,
         baseFontSize: state.baseFontSize,
         terminateOnClose: state.terminateOnClose,

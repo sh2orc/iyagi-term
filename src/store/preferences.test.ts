@@ -40,6 +40,8 @@ describe("sanitizePreferences", () => {
         claudeProvider: "zai-coding-plan",
         zaiMainModel: "glm-5.3-flash[1m]",
         gatewayObservability: true,
+        gatewayBlocked: true,
+        gatewayPoolStrategy: "fill_first",
         baseFontSize: 16,
         terminateOnClose: true,
         quitBehavior: "keep",
@@ -62,6 +64,8 @@ describe("sanitizePreferences", () => {
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
       gatewayObservability: true,
+      gatewayBlocked: true,
+      gatewayPoolStrategy: "fill_first",
       baseFontSize: 16,
       terminateOnClose: true,
       quitBehavior: "keep",
@@ -104,7 +108,14 @@ describe("sanitizePreferences", () => {
     expect(sanitizePreferences({}).quitBehavior).toBe("ask");
   });
 
-  it("treats a missing or non-object payload as defaults (첫 실행·손상 저장)", () => {
+  it("게이트웨이 정책: 킬 스위치는 boolean만, 회전 전략은 두 값만 받는다", () => {
+    expect(sanitizePreferences({ gatewayBlocked: "yes" }).gatewayBlocked).toBe(false);
+    expect(sanitizePreferences({ gatewayPoolStrategy: "fill_first" }).gatewayPoolStrategy).toBe("fill_first");
+    expect(sanitizePreferences({ gatewayPoolStrategy: "random" }).gatewayPoolStrategy).toBe("round_robin");
+    expect(sanitizePreferences({}).gatewayPoolStrategy).toBe("round_robin");
+  });
+
+    it("treats a missing or non-object payload as defaults (첫 실행·손상 저장)", () => {
     expect(sanitizePreferences(null)).toEqual(DEFAULT_PREFERENCES);
     expect(sanitizePreferences("nope")).toEqual(DEFAULT_PREFERENCES);
   });
@@ -136,6 +147,13 @@ describe("preferences store", () => {
     expect(usePreferences.getState().baseFontSize).toBe(MAX_BASE_FONT_SIZE);
     expect(isPreferenceChanged(usePreferences.getState(), "baseFontSize")).toBe(true);
     expect(isPreferenceChanged(usePreferences.getState(), "theme")).toBe(false);
+  });
+
+  it("회전 전략 setter는 모르는 값을 round_robin으로 되돌린다", () => {
+    usePreferences.getState().setGatewayPoolStrategy("fill_first");
+    expect(usePreferences.getState().gatewayPoolStrategy).toBe("fill_first");
+    usePreferences.getState().setGatewayPoolStrategy("random" as never);
+    expect(usePreferences.getState().gatewayPoolStrategy).toBe("round_robin");
   });
 
   it("resets one item without disturbing the others", () => {
@@ -177,6 +195,8 @@ describe("preferences store", () => {
     usePreferences.getState().setClaudeProvider("zai-coding-plan");
     usePreferences.getState().setZaiMainModel("glm-5.3-flash[1m]");
     usePreferences.getState().setGatewayObservability(true);
+    usePreferences.getState().setGatewayBlocked(true);
+    usePreferences.getState().setGatewayPoolStrategy("fill_first");
     usePreferences.getState().setShortcutOverride("paste", { code: "KeyG", ctrl: true, meta: false, shift: true });
     usePreferences.getState().setTabSwipe({ sensitivity: "high", wrap: true });
     expect(JSON.parse([...values.values()][0]).state).toEqual({
@@ -185,6 +205,8 @@ describe("preferences store", () => {
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
       gatewayObservability: true,
+      gatewayBlocked: true,
+      gatewayPoolStrategy: "fill_first",
       agentBackgrounds: true,
       agentBackgroundColors: {
         claude: "#e0521f",

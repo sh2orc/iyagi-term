@@ -310,6 +310,11 @@ export class SessionController {
   private readonly uuid: () => string;
   private readonly config: ControllerConfig;
   private restorePromise: Promise<void> | null = null;
+  /**
+   * start()가 보낸 게이트웨이 정책 재적용. 시작 복원은 pane을 붙이기 전에
+   * 이것을 기다린다 — 복원된 Z.ai pane이 게이트웨이를 거쳐 실행되게(데몬 정책은 데몬 수명).
+   */
+  private gatewayPolicyReady: Promise<void> | null = null;
   private eventSub: { dispose(): void } | null = null;
   /** focus 보고 구독 해제(zustand subscribe가 돌려주는 함수). */
   private focusSub: (() => void) | null = null;
@@ -415,7 +420,30 @@ export class SessionController {
         this.visibilitySub = () => document.removeEventListener("visibilitychange", onVisibility);
       }
     }
+    // 정책 적용을 먼저 보내고 복원을 시작한다 — 복원(여기든 Workbench든 먼저
+    // 부르는 쪽)은 스냅샷을 받은 뒤 pane을 다시 붙이거나 재실행하기 전에 이 적용을 기다린다.
+    this.gatewayPolicyReady = this.applyGatewayPolicy();
     void this.restoreWorkspace();
+  }
+
+  /**
+   * 저장된 게이트웨이 정책(관측 라우팅·킬 스위치·키 풀 전략)을 데몬에 다시
+   * 적용한다. 데몬 정책은 메모리에만 있어 데몬이 재시작하면 off/off/round_robin
+   * 으로 돌아가므로, 붙을 때(start)와 재접속·generation 변경 때마다 보낸다.
+   * 실패는 삼킨다 — 구 데몬(gateway.* 없음)은 모르는 메서드로 거절하고,
+   * 그 밖의 실패도 터미널 복원을 막을 이유가 없다(설정 카드가 불일치를 보인다).
+   */
+  private async applyGatewayPolicy(): Promise<void> {
+    const prefs = usePreferences.getState();
+    try {
+      await this.deps.client.gatewaySetPolicy({
+        enabled: prefs.gatewayObservability,
+        blocked: prefs.gatewayBlocked,
+        pool_strategy: prefs.gatewayPoolStrategy,
+      });
+    } catch {
+      // 의도적으로 조용히 넘긴다(위 설명).
+    }
   }
 
   /**
@@ -451,6 +479,10 @@ export class SessionController {
   private async restoreExistingSessions(): Promise<void> {
     const savedPanes = Object.values(useWorkbenchStore.getState().panes);
     const snapshot = await this.deps.client.systemSnapshot();
+    // start()가 먼저 보낸 게이트웨이 정책 적용을 기다린 뒤에 복원을 이어 간다 —
+    // 복원된 Z.ai pane의 재실행이 게이트웨이를 거치게(적용 실패는 이미 삼켰다).
+    // 스냅샷 조회는 정책 적용 뒤에 줄 세우지 않는다: 복원 기준 시점은 그대로다.
+    if (this.gatewayPolicyReady) await this.gatewayPolicyReady;
     if (this.disposed) return;
     useWorkbenchStore.getState().applySnapshot(snapshot);
     this.refreshPaneAgents();
@@ -962,6 +994,9 @@ export class SessionController {
         } else {
           this.transportGeneration = status.generation;
         }
+        // 데몬이 재시작했으면 정책이 기본값으로 돌아가 있다 — 다시 붙기 전에 적용한다.
+        await this.applyGatewayPolicy();
+        if (this.disposed) return;
         await this.recoverAttachedPanes();
       } else {
         this.transportGeneration = status.generation;

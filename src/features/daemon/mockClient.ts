@@ -806,7 +806,8 @@ export class MockDaemonClient implements DaemonClient {
       totals: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, requests: 0, failures: 0 },
       sessions: [],
       pool: [],
-      pool_strategy: "round_robin",
+      // 저장된 정책 그대로 — set_policy 직후 상태 조회가 같은 전략을 보고해야 한다.
+      pool_strategy: this.gatewayPolicy.pool_strategy,
     };
   }
 

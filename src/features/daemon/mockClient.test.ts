@@ -926,6 +926,20 @@ describe("MockDaemonClient session.relief", () => {
   });
 });
 
+describe("MockDaemonClient gateway policy", () => {
+  it("gateway.status는 set_policy로 저장한 정책(전략 포함)을 그대로 보고한다", async () => {
+    const { client } = newMock();
+    expect(await client.gatewayStatus()).toMatchObject({ enabled: false, blocked: false, pool_strategy: "round_robin" });
+
+    await client.gatewaySetPolicy({ enabled: true, blocked: null, pool_strategy: "fill_first" });
+    expect(await client.gatewayStatus()).toMatchObject({ enabled: true, blocked: false, pool_strategy: "fill_first" });
+
+    // 지정하지 않은 항목은 그대로 둔다.
+    await client.gatewaySetPolicy({ enabled: null, blocked: true, pool_strategy: null });
+    expect(await client.gatewayStatus()).toMatchObject({ enabled: true, blocked: true, pool_strategy: "fill_first" });
+  });
+});
+
 const ref = (id: string) => ({ id, sha256: "e".repeat(64), bytes: "8", media_type: "text/plain" });
 
 function fixtureTask(id: string, missionId: string, overrides: Partial<Task> = {}): Task {

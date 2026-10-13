@@ -5,6 +5,8 @@ import type { DaemonClient, DaemonEvent, DaemonEventListener } from "../daemon/c
 import { MockDaemonClient } from "../daemon/mockClient";
 import { t } from "../../i18n";
 import { useWorkbenchStore } from "../../store/workbenchStore";
+import { DEFAULT_PREFERENCES, usePreferences } from "../../store/preferences";
+import { RpcClientError } from "../daemon/client";
 import { SessionController } from "./sessionController";
 import { TerminalRegistry, type RegistryDom, type TerminalLike } from "./registry";
 
@@ -407,6 +409,81 @@ describe("SessionController transport recovery", () => {
       expect(reconnectTransport).toHaveBeenCalled();
       expect(useWorkbenchStore.getState().panes["leaf-s-1"].phase).toBe("failed");
       expect(useWorkbenchStore.getState().panes["leaf-s-2"].phase).toBe("exited");
+    } finally {
+      controller.dispose();
+    }
+  });
+});
+
+describe("SessionController gateway policy", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    usePreferences.setState({ ...DEFAULT_PREFERENCES });
+  });
+
+  /** 호출 순서를 기록하는 최소 클라이언트. gatewaySetPolicy 동작만 바꿔 끼운다. */
+  async function policyHarness(setPolicy: (params: unknown) => Promise<unknown>) {
+    const baseSnapshot = await new MockDaemonClient({ resourceIntervalMs: 0 }).systemSnapshot();
+    const calls: string[] = [];
+    const policies: unknown[] = [];
+    let generation = 0;
+    const client = {
+      events: { subscribe: () => ({ dispose: () => undefined }) },
+      systemSnapshot: async () => {
+        calls.push("snapshot");
+        return { ...baseSnapshot, workloads: [] };
+      },
+      interventionList: async () => [],
+      sessionFocus: async () => ({ focused_session_ids: [] }),
+      gatewaySetPolicy: (params: unknown) => {
+        calls.push("policy");
+        policies.push(params);
+        return setPolicy(params);
+      },
+      transportStatus: async () => ({ controlAlive: true, dataAlive: true, generation }),
+      reconnectTransport: async () => undefined,
+    } as unknown as DaemonClient;
+    const registry = new TerminalRegistry({
+      createTerminal: () => terminalLike(),
+      createDom: () => ({ className: "", parentElement: null, remove: () => undefined } satisfies RegistryDom),
+    });
+    useWorkbenchStore.setState({ tabs: [], activeTabId: null, focusedLeafId: null, panes: {}, revision: 0 });
+    const controller = new SessionController({ client, registry, platform: "darwin" });
+    return { controller, calls, policies, restartDaemon: () => { generation += 1; } };
+  }
+
+  it("붙을 때 저장된 정책 전체를 복원보다 먼저 적용하고, 데몬 재시작 뒤 다시 적용한다", async () => {
+    vi.useFakeTimers();
+    usePreferences.setState({ gatewayObservability: true, gatewayBlocked: true, gatewayPoolStrategy: "fill_first" });
+    const { controller, calls, policies, restartDaemon } = await policyHarness(async (params) => params);
+    try {
+      controller.start();
+      await controller.restoreWorkspace();
+      expect(calls).toEqual(["policy", "snapshot"]);
+      expect(policies[0]).toEqual({ enabled: true, blocked: true, pool_strategy: "fill_first" });
+
+      // 첫 와치독 턴은 generation 기준만 세운다 — 정책을 다시 보내지 않는다.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(calls.filter((call) => call === "policy")).toHaveLength(1);
+
+      // 데몬 재시작(generation 변경) → 정책이 기본값으로 돌아갔으니 다시 적용.
+      restartDaemon();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(calls.filter((call) => call === "policy")).toHaveLength(2);
+      expect(policies[1]).toEqual({ enabled: true, blocked: true, pool_strategy: "fill_first" });
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it("구 데몬이 METHOD_NOT_FOUND로 거절해도 복원은 그대로 진행한다", async () => {
+    const { controller, calls } = await policyHarness(async () => {
+      throw new RpcClientError("METHOD_NOT_FOUND" as never, "gateway.set_policy");
+    });
+    try {
+      controller.start();
+      await expect(controller.restoreWorkspace()).resolves.toBeUndefined();
+      expect(calls).toEqual(["policy", "snapshot"]);
     } finally {
       controller.dispose();
     }

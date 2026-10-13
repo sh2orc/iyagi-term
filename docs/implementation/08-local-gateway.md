@@ -24,9 +24,12 @@
   `src/generated/Gateway*.ts`로 생성된다.
 * **RPC** (`dispatch.rs`): `GATEWAY_STATUS`, `GATEWAY_SET_POLICY`. 구 데몬은
   이 메서드가 없다 — UI는 실패를 "지원 안 함" 안내로 흡수한다.
-* **UI** (`IntegrationPanel.tsx` → GatewayPanel): 토글(선호는
-  `preferences.gatewayObservability`에 저장, 마운트 시 데몬에 재적용),
-  사용량 요약(2초 폴), 킬 스위치 버튼.
+* **UI** (`IntegrationPanel.tsx` → GatewayPanel): 토글, 사용량 요약(2초 폴),
+  킬 스위치 버튼. 데몬 정책은 데몬 수명이라, 정책 전체(`enabled`·`blocked`·
+  `pool_strategy`)를 `preferences`(`gatewayObservability`·`gatewayBlocked`·
+  `gatewayPoolStrategy`)에 저장하고 `SessionController`가 **붙을 때마다**
+  (시작 시 작업 공간 복원 전, 데몬 재연결 시) 다시 적용한다 — 설정 화면을
+  열지 않아도 재시작 뒤 첫 pane부터 게이트웨이를 거친다.
 
 ## 3. 라우팅 결정 규칙
 

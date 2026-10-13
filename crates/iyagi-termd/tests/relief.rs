@@ -86,7 +86,9 @@ fn stays(control: &mut Client, workload_id: &Value, want: &str, window: Duration
 }
 
 /// 이 워크로드가 지금 관측하고 있는 프로세스들의 pid(직접 셸은 PTY 루트
-/// 트리, 관리 워크로드는 그룹 멤버).
+/// 트리, 관리 워크로드는 그룹 멤버). 유일한 호출자(assert_os_tier)가
+/// macOS/Windows 경로라 그 게이트를 따른다.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn observed_pids(control: &mut Client, workload_id: &Value) -> Vec<u32> {
     let page = control
         .request(

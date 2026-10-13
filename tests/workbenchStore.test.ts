@@ -389,6 +389,15 @@ describe("tab rename", () => {
     expect(useWorkbenchStore.getState().tabs[0].title).toBe("배포 로그");
   });
 
+  it("marks a hand-renamed tab so regrouping keeps its name", () => {
+    resetStore();
+    const store = useWorkbenchStore.getState();
+    store.addTab("tab-1", "탭 1");
+    expect(useWorkbenchStore.getState().tabs[0]).not.toHaveProperty("titleEdited");
+    store.renameTab("tab-1", "배포");
+    expect(useWorkbenchStore.getState().tabs[0]).toMatchObject({ title: "배포", titleEdited: true });
+  });
+
   it("rejects a blank name so a tab is never left unnamed", () => {
     resetStore();
     const store = useWorkbenchStore.getState();

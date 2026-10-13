@@ -2,16 +2,19 @@
  * 탭 재그룹핑 플래너(04-ui.md §2-5) — 순수 함수 계약.
  *
  * - 프로젝트 키는 pane의 cwd다(git 최상위 경로는 보지 않는다), 첫 등장 순서로 묶는다.
- * - 이미 한 프로젝트만 담은 탭은 배치가 이미 2행 격자 모양이면 같은 객체
- *   그대로(id·이름·비율 보존), 모양이 다르면 id·이름만 두고 트리를 다시
- *   짠다(`relayout: true`) — layoutShape로 비교한다(비율·split id는 무시).
- * - 바뀌는 그룹만 새 탭, 이름은 경로의 마지막 조각, 에이전트 pane이 앞.
+ * - 이미 한 프로젝트만 담은 탭은 배치가 이미 2행 격자 모양이고 이름도
+ *   프로젝트 이름이면 같은 객체 그대로(id·이름·비율 보존), 모양이 다르면
+ *   id만 두고 트리를 다시 짠다(`relayout: true`) — layoutShape로 비교한다
+ *   (비율·split id는 무시). 이름이 다르면 프로젝트 이름으로 바꾼다(`renamed`)
+ *   — 단, 사용자가 직접 바꾼 이름(`titleEdited`)은 그대로 둔다.
+ * - 바뀌는 그룹만 새 탭, 에이전트 pane이 앞.
+ * - 프로젝트 그룹 이름은 경로의 마지막 조각, 겹치면 `-2`, `-3`….
  * - 상한(8)을 넘는 그룹은 여러 탭으로 나눈다.
  * - 초점 leaf는 살아남고 활성 탭은 그 leaf가 들어간 탭이다.
  */
 
 import { describe, expect, it } from "vitest";
-import { applyRegroupPlan, paneProjectKey, planRegroup, projectTitle } from "../src/features/terminal/regroup";
+import { applyRegroupPlan, paneProjectKey, planRegroup, projectTitle, uniqueTitle } from "../src/features/terminal/regroup";
 import { gridLayout, layoutShape, leafCount, listLeaves, makeLeaf, split, type SplitNode } from "../src/features/terminal/splitTree";
 import type { PaneMeta, TabState } from "../src/store/workbenchStore";
 
@@ -79,8 +82,8 @@ describe("planRegroup", () => {
   it("leaves a tab alone when every pane in it already belongs to one project and the layout is already the grid", () => {
     const tabs: TabState[] = [
       // 이미 2행 격자 모양(gridOf) — 그래야 손대지 않는 "그대로" 경로를 탄다.
-      { kind: "terminal", id: "t1", title: "배포", root: gridOf(["a", "b"]) },
-      { kind: "terminal", id: "t2", title: "탭 2", root: rowOf(["c"]) },
+      { kind: "terminal", id: "t1", title: "x", root: gridOf(["a", "b"]) },
+      { kind: "terminal", id: "t2", title: "y", root: rowOf(["c"]) },
     ];
     const panes = {
       a: pane("a", { cwd: "/repo/x", project: "/repo/other" }), // project는 무시된다
@@ -90,7 +93,7 @@ describe("planRegroup", () => {
     const plan = planRegroup({ tabs, panes, activeTabId: "t1", focusedLeafId: "a" }, opts);
     expect(plan.changed).toBe(false);
     expect(plan.groups.map((g) => g.keepTabId)).toEqual(["t1", "t2"]);
-    expect(plan.groups.every((g) => g.relayout === false)).toBe(true);
+    expect(plan.groups.every((g) => g.relayout === false && g.renamed === false)).toBe(true);
     expect(plan.tabsBefore).toBe(2);
     expect(plan.tabsAfter).toBe(2);
   });
@@ -150,8 +153,8 @@ describe("planRegroup", () => {
     const panes = Object.fromEntries(ids.map((id) => [id, pane(id, { cwd: "/big" })]));
     const plan = planRegroup({ tabs, panes, activeTabId: "t1", focusedLeafId: null }, { ...opts, maxPerTab: 8 });
     expect(plan.groups.map((g) => [g.title, g.leafIds.length])).toEqual([
-      ["big 1", 8],
-      ["big 2", 2],
+      ["big", 8],
+      ["big-2", 2],
     ]);
   });
 
@@ -185,7 +188,7 @@ describe("applyRegroupPlan", () => {
     // 이미 2행 격자 모양이어야 손대지 않는다(relayout이면 새 객체가 된다).
     const keptRoot = gridOf(["k1", "k2"]);
     const tabs: TabState[] = [
-      { kind: "terminal", id: "kept", title: "내 이름", root: keptRoot },
+      { kind: "terminal", id: "kept", title: "k", root: keptRoot },
       { kind: "terminal", id: "t2", title: "탭 2", root: rowOf(["a", "b", "c"]) }, // x, y, x
       { kind: "terminal", id: "t3", title: "탭 3", root: rowOf(["d"]) }, // y
     ];
@@ -272,7 +275,7 @@ describe("applyRegroupPlan", () => {
   });
 });
 
-describe("relayout — 배치가 격자와 다르면 id·이름은 두고 트리만 다시 짠다", () => {
+describe("relayout — 배치가 격자와 다르면 id는 두고 트리만 다시 짠다", () => {
   it("relays out a whole-tab group whose current layout isn't the 2-row grid yet (1×4 → 2×2)", () => {
     const tabs: TabState[] = [{ kind: "terminal", id: "solo", title: "내 탭", root: rowOf(["a", "b", "c", "d"]) }];
     const panes = {
@@ -285,21 +288,21 @@ describe("relayout — 배치가 격자와 다르면 id·이름은 두고 트리
     const plan = planRegroup(input, opts);
     expect(plan.changed).toBe(true);
     expect(plan.groups).toHaveLength(1);
-    expect(plan.groups[0]).toMatchObject({ keepTabId: "solo", relayout: true, leafIds: ["a", "b", "c", "d"] });
+    expect(plan.groups[0]).toMatchObject({ keepTabId: "solo", relayout: true, renamed: true, leafIds: ["a", "b", "c", "d"] });
 
     const result = applyRegroupPlan(input, plan, makeId);
     expect(result).not.toBeNull();
     if (!result) return;
     expect(result.tabs).toHaveLength(1);
     expect(result.tabs[0].id).toBe("solo"); // id 그대로
-    expect(result.tabs[0].title).toBe("내 탭"); // 이름(사용자가 바꿨을 수도 있는 값) 그대로
+    expect(result.tabs[0].title).toBe("x"); // 이름은 프로젝트 이름으로
     const root = result.tabs[0].kind === "terminal" ? result.tabs[0].root : null;
     // 시각 순서(a,b,c,d) 그대로 2×2 격자로 — agentsFirst로 순서를 바꾸지 않는다.
     expect(layoutShape(root)).toBe('column(row("a","b"),row("c","d"))');
   });
 
   it("leaves a whole-tab group untouched when its layout already matches the 2-row grid", () => {
-    const tabs: TabState[] = [{ kind: "terminal", id: "solo", title: "내 탭", root: gridOf(["a", "b", "c", "d"]) }];
+    const tabs: TabState[] = [{ kind: "terminal", id: "solo", title: "x", root: gridOf(["a", "b", "c", "d"]) }];
     const panes = {
       a: pane("a", { cwd: "/repo/x" }),
       b: pane("b", { cwd: "/repo/x" }),
@@ -317,7 +320,7 @@ describe("relayout — 배치가 격자와 다르면 id·이름은 두고 트리
   });
 
   it("never relays out a single-pane tab (always shape-equal to itself)", () => {
-    const tabs: TabState[] = [{ kind: "terminal", id: "solo", title: "혼자", root: rowOf(["a"]) }];
+    const tabs: TabState[] = [{ kind: "terminal", id: "solo", title: "x", root: rowOf(["a"]) }];
     const panes = { a: pane("a", { cwd: "/repo/x" }) };
     const plan = planRegroup({ tabs, panes, activeTabId: "solo", focusedLeafId: "a" }, opts);
     expect(plan.changed).toBe(false);
@@ -339,5 +342,87 @@ describe("relayout — 배치가 격자와 다르면 id·이름은 두고 트리
     // 계획을 세운 뒤 "solo" 탭에서 d가 사라졌다(그사이 닫힘 등) — 부분 적용 없음.
     const stale = { ...input, tabs: [{ kind: "terminal" as const, id: "solo", title: "내 탭", root: rowOf(["a", "b", "c"]) }] };
     expect(applyRegroupPlan(stale, plan, makeId)).toBeNull();
+  });
+});
+
+describe("이름 — 프로젝트 이름, 겹치면 -2, -3…", () => {
+  it("uniqueTitle keeps a free name and otherwise picks the first free -N suffix", () => {
+    expect(uniqueTitle("app", [])).toBe("app");
+    expect(uniqueTitle("app", ["app"])).toBe("app-2");
+    expect(uniqueTitle("app", ["app", "app-2", "app-4"])).toBe("app-3");
+  });
+
+  it("renames a whole-tab group to its project name without touching the tree or id", () => {
+    const keptRoot = gridOf(["a", "b"]);
+    const tabs: TabState[] = [{ kind: "terminal", id: "solo", title: "탭 3", root: keptRoot }];
+    const panes = { a: pane("a", { cwd: "/repo/iyagi-term" }), b: pane("b", { cwd: "/repo/iyagi-term" }) };
+    const input = { tabs, panes, activeTabId: "solo", focusedLeafId: "a" };
+    const plan = planRegroup(input, opts);
+    expect(plan.changed).toBe(true);
+    expect(plan.groups[0]).toMatchObject({ keepTabId: "solo", relayout: false, renamed: true, title: "iyagi-term" });
+
+    const result = applyRegroupPlan(input, plan, makeId);
+    expect(result?.tabs[0]).toMatchObject({ id: "solo", title: "iyagi-term" });
+    expect(result?.tabs[0].kind === "terminal" ? result.tabs[0].root : null).toBe(keptRoot);
+  });
+
+  it("numbers different paths that share a last segment in first-seen order, and is stable on a second pass", () => {
+    const tabs: TabState[] = [
+      { kind: "terminal", id: "t1", title: "탭 1", root: rowOf(["a"]) },
+      { kind: "terminal", id: "t2", title: "탭 2", root: rowOf(["b"]) },
+      { kind: "terminal", id: "t3", title: "탭 3", root: rowOf(["c"]) },
+    ];
+    const panes = {
+      a: pane("a", { cwd: "/work/app" }),
+      b: pane("b", { cwd: "/side/app" }),
+      c: pane("c", { cwd: "/work/app" }),
+    };
+    const input = { tabs, panes, activeTabId: "t1", focusedLeafId: "a" };
+    const plan = planRegroup(input, opts);
+    expect(plan.groups.map((g) => [g.title, g.leafIds])).toEqual([
+      ["app", ["a", "c"]],
+      ["app-2", ["b"]],
+    ]);
+
+    const result = applyRegroupPlan(input, plan, makeId)!;
+    const again = planRegroup({ ...input, tabs: result.tabs }, opts);
+    expect(again.changed).toBe(false);
+  });
+
+  it("keeps a hand-renamed tab's name (and its tree when already a grid), and lets it claim its slot first", () => {
+    const tabs: TabState[] = [
+      { kind: "terminal", id: "t1", title: "탭 1", root: rowOf(["a"]) },
+      { kind: "terminal", id: "mine", title: "app", root: gridOf(["b", "c"]), titleEdited: true },
+    ];
+    const panes = {
+      a: pane("a", { cwd: "/side/app" }),
+      b: pane("b", { cwd: "/work/app" }),
+      c: pane("c", { cwd: "/work/app" }),
+    };
+    const input = { tabs, panes, activeTabId: "t1", focusedLeafId: "a" };
+    const plan = planRegroup(input, opts);
+    expect(plan.groups.map((g) => [g.title, g.keepTabId, g.renamed])).toEqual([
+      ["app-2", "t1", true],
+      ["app", "mine", false],
+    ]);
+    const result = applyRegroupPlan(input, plan, makeId)!;
+    expect(result.tabs[1]).toBe(tabs[1]);
+
+    // 직접 바꾼 이름이 프로젝트와 무관해도 그대로다 — 바뀔 것이 없다.
+    const solo: TabState[] = [{ kind: "terminal", id: "mine", title: "배포", root: gridOf(["b", "c"]), titleEdited: true }];
+    expect(planRegroup({ tabs: solo, panes, activeTabId: "mine", focusedLeafId: "b" }, opts).changed).toBe(false);
+  });
+
+  it("lets names that stay (empty/mission tabs) claim their slot first", () => {
+    const tabs: TabState[] = [
+      { kind: "terminal", id: "t1", title: "탭 1", root: rowOf(["a"]) },
+      { kind: "terminal", id: "empty", title: "app", root: null },
+    ];
+    const panes = { a: pane("a", { cwd: "/work/app" }) };
+    const plan = planRegroup({ tabs, panes, activeTabId: "t1", focusedLeafId: "a" }, opts);
+    expect(plan.groups.map((g) => [g.title, g.keepTabId, g.renamed])).toEqual([
+      ["app-2", "t1", true],
+      ["app", "empty", false],
+    ]);
   });
 });

@@ -10,12 +10,16 @@
  * 프로젝트 키는 pane의 cwd(셸의 현재 작업 디렉터리 — OSC 7로 보고된다;
  * claude/codex 같은 에이전트 pane이면 그 에이전트를 시작한 디렉터리)다.
  * 두 pane은 cwd가 같을 때만 같은 프로젝트다. 이미 한 프로젝트만 담고 있는
- * 탭은 id·이름을 그대로 둔다 — 배치가 이미 새 격자(gridLayout, 위아래
- * 두 줄) 모양이면 **같은 객체 그대로**(비율까지 보존, 다시 그리지 않음)
- * 남기고, 모양이 다르면(예: 한 줄로 늘어선 옛 배치) id·이름은 남긴 채
- * leaf의 현재 시각 순서로 트리만 새로 짠다("배치만 정리"). 섞이거나
- * 흩어진 그룹만 완전히 새 탭이 되고, 이름은 프로젝트 경로의 마지막
- * 조각이다.
+ * 탭은 id를 그대로 둔다 — 배치가 이미 새 격자(gridLayout, 위아래 두 줄)
+ * 모양이면 트리는 손대지 않고(비율까지 보존, 다시 그리지 않음), 모양이
+ * 다르면(예: 한 줄로 늘어선 옛 배치) leaf의 현재 시각 순서로 트리만 새로
+ * 짠다("배치 정리"). 섞이거나 흩어진 그룹만 완전히 새 탭이 된다.
+ *
+ * 프로젝트가 있는 그룹의 이름은 유지 탭이든 새 탭이든 프로젝트 경로의
+ * 마지막 조각이다. 이름이 겹치면(경로는 다른데 마지막 조각이 같거나, 상한을
+ * 넘어 여러 탭으로 나뉘거나) 둘째부터 `-2`, `-3`…을 붙인다. 사용자가 이름을
+ * 직접 바꾼 유지 탭(`titleEdited`)과 프로젝트를 모르는 유지 탭(빈 탭·mission
+ * 탭 등)의 이름은 그대로 두고 먼저 자리를 잡는다.
  *
  * mission/agent-view 탭(05-ui §2)에는 pane이 없다 — 빈 탭과 같이 자기
  * 자리에 그대로 남고, pane을 받거나 다른 탭과 묶이지 않는다.
@@ -34,24 +38,29 @@ export interface RegroupInput {
 export interface RegroupGroup {
   /** 프로젝트 키(경로). 프로젝트를 모르는 pane 묶음은 null. */
   key: string | null;
-  /** 결과 탭 이름. */
+  /** 결과 탭 이름(겹치면 `-2`, `-3`… — `uniqueTitle`). */
   title: string;
   /** 결과 탭에 들어갈 leaf(시각 순서). */
   leafIds: string[];
   /** 이 leaf들이 원래 있던 탭들. */
   fromTabIds: string[];
   /**
-   * 원래 탭 하나가 통째로 이 그룹이면 그 탭 id — id·이름은 그대로 두고,
-   * 배치가 이미 격자 모양이면 탭 객체까지 손대지 않는다(`relayout` 참고).
+   * 원래 탭 하나가 통째로 이 그룹이면 그 탭 id — id는 그대로 두고, 배치가
+   * 이미 격자 모양이고 이름도 같으면 탭 객체까지 손대지 않는다(`relayout`·`renamed` 참고).
    * 새로 만드는 탭이면 null. (빈 탭·mission 탭도 자기 자신만의 그룹으로 남는다.)
    */
   keepTabId: string | null;
   /**
    * `keepTabId`가 있는 그룹인데 배치가 새 2행 격자 모양(`gridLayout`)과
-   * 달라 다시 짜야 하는가. id·이름·leaf는 그대로, 트리만 새로 만든다.
+   * 달라 다시 짜야 하는가. id·leaf는 그대로, 트리만 새로 만든다.
    * 이미 격자 모양인 유지 그룹과 새로 만드는 탭은 항상 false다.
    */
   relayout: boolean;
+  /**
+   * `keepTabId`가 있는 그룹인데 이름이 프로젝트 이름(`title`)으로 바뀌는가.
+   * 새로 만드는 탭은 항상 false다.
+   */
+  renamed: boolean;
 }
 
 export interface RegroupPlan {
@@ -112,6 +121,19 @@ export function projectTitle(key: string): string {
   return last.length > 0 ? last : key;
 }
 
+/**
+ * `base`가 `taken`에 없으면 그대로, 있으면 `base-2`, `base-3`… 중 처음 비는 이름.
+ * 재그룹핑·새 탭으로 분리·새 그룹 만들기가 같은 규칙으로 이름을 짓는다.
+ */
+export function uniqueTitle(base: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+}
+
 /** 에이전트 pane을 앞에 두는 안정 정렬(같은 종류끼리의 순서는 유지). */
 function agentsFirst(leafIds: string[], panes: Record<string, PaneMeta>): string[] {
   const rank = (id: string): number => (panes[id]?.agent ? 0 : 1);
@@ -148,6 +170,8 @@ export function planRegroup(input: RegroupInput, options: RegroupOptions): Regro
   }
 
   const groups: RegroupGroup[] = [];
+  // groups와 같은 순서의 기본 이름 — null이면 지금 이름을 그대로 둔다(아래 이름 짓기).
+  const baseTitles: (string | null)[] = [];
   // gridLayout 비교용 더미 id — layoutShape은 split id·비율을 보지 않으므로
   // 아무 값이나 되고, 실제 트리에는 쓰이지 않는다(순수성 유지).
   let dummyCounter = 0;
@@ -161,8 +185,8 @@ export function planRegroup(input: RegroupInput, options: RegroupOptions): Regro
       listLeaves(terminalRoot(soleTab)).length === bucket.leafIds.length &&
       bucket.leafIds.length <= maxPerTab;
     if (wholeTab && soleTab !== null) {
-      // 배치가 이미 새 격자 모양이면(비율·split id는 무시) 손대지 않는다.
-      // 다르면 id·이름은 그대로, leaf의 지금 시각 순서로 트리만 새로 짠다
+      // 배치가 이미 새 격자 모양이면(비율·split id는 무시) 트리는 손대지 않는다.
+      // 다르면 id는 그대로, leaf의 지금 시각 순서로 트리만 새로 짠다
       // — agentsFirst로 순서를 바꾸지 않는다(사용자가 맞춰 둔 배치 존중).
       const currentRoot = terminalRoot(soleTab);
       const currentLeaves = listLeaves(currentRoot);
@@ -175,7 +199,11 @@ export function planRegroup(input: RegroupInput, options: RegroupOptions): Regro
         fromTabIds,
         keepTabId: soleTab.id,
         relayout,
+        renamed: false,
       });
+      // 직접 바꾼 이름은 덮어쓰지 않는다.
+      const edited = soleTab.kind === "terminal" && soleTab.titleEdited === true;
+      baseTitles.push(bucket.key === null || edited ? null : projectTitle(bucket.key));
       continue;
     }
     const ordered = agentsFirst(bucket.leafIds, input.panes);
@@ -185,18 +213,36 @@ export function planRegroup(input: RegroupInput, options: RegroupOptions): Regro
       const leafIds = ordered.slice(i * maxPerTab, (i + 1) * maxPerTab);
       groups.push({
         key: bucket.key,
-        title: chunks === 1 ? baseTitle : `${baseTitle} ${i + 1}`,
+        title: baseTitle,
         leafIds,
         fromTabIds: [...new Set(leafIds.map((id) => leafTab.get(id)!))],
         keepTabId: null,
         relayout: false,
+        renamed: false,
       });
+      baseTitles.push(baseTitle);
     }
   }
 
+  // 이름 짓기: 그대로 두는 이름이 먼저 자리를 잡고, 나머지는 그룹 순서대로
+  // 기본 이름을 받되 겹치면 `-2`, `-3`…. 순서가 첫 등장 순이라 다시 묶어도
+  // 같은 이름이 나온다(이미 묶인 상태에서는 renamed가 생기지 않는다).
+  const taken = new Set<string>();
+  groups.forEach((group, index) => {
+    if (baseTitles[index] === null) taken.add(group.title);
+  });
+  groups.forEach((group, index) => {
+    const base = baseTitles[index];
+    if (base === null) return;
+    const title = uniqueTitle(base, taken);
+    taken.add(title);
+    if (group.keepTabId !== null) group.renamed = group.title !== title;
+    group.title = title;
+  });
+
   return {
     groups,
-    changed: groups.some((g) => g.keepTabId === null || g.relayout),
+    changed: groups.some((g) => g.keepTabId === null || g.relayout || g.renamed),
     tabsBefore: input.tabs.length,
     tabsAfter: groups.length,
   };
@@ -210,8 +256,8 @@ export interface RegroupResult {
 
 /**
  * 계획을 새 탭 배열로 만든다. 유지 그룹은 기존 TabState 객체 그대로(단,
- * `relayout`이면 id·이름은 두고 leaf를 `group.leafIds` 순서로 다시 격자에
- * 짜 넣는다), 새 그룹은 leaf 노드를 옮겨 격자(gridLayout)로 배치한다.
+ * `renamed`면 이름을 바꾸고, `relayout`이면 id는 두고 leaf를 `group.leafIds`
+ * 순서로 다시 격자에 짜 넣는다), 새 그룹은 leaf 노드를 옮겨 격자(gridLayout)로 배치한다.
  * 초점 leaf는 그대로 두고 활성 탭은 그 leaf가 들어간 탭이다 — 사용자가
  * 보던 터미널이 계속 보인다.
  *
@@ -226,7 +272,7 @@ export function applyRegroupPlan(input: RegroupInput, plan: RegroupPlan, makeId:
       const kept = tabById.get(group.keepTabId);
       if (!kept) return null;
       if (!group.relayout) {
-        tabs.push(kept);
+        tabs.push(group.renamed ? { ...kept, title: group.title } : kept);
         continue;
       }
       // 배치만 다시 짠다 — 실제로는 항상 terminal 탭이다(relayout은
@@ -238,7 +284,7 @@ export function applyRegroupPlan(input: RegroupInput, plan: RegroupPlan, makeId:
         if (!found) return null;
         leaves.push(found);
       }
-      tabs.push({ ...kept, root: gridLayout(leaves, makeId) });
+      tabs.push({ ...kept, title: group.title, root: gridLayout(leaves, makeId) });
       continue;
     }
     const leaves: SplitNode[] = [];

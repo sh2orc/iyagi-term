@@ -56,8 +56,8 @@ function pane(leafId: string, title: string, agent?: string): PaneMeta {
 
 const plan: RegroupPlan = {
   groups: [
-    { key: "/work/iyagi", title: "iyagi", leafIds: ["leaf-1", "leaf-2"], fromTabIds: ["tab-1"], keepTabId: "tab-1", relayout: false },
-    { key: "/work/api", title: "api", leafIds: ["leaf-3"], fromTabIds: ["tab-1", "tab-2"], keepTabId: null, relayout: false },
+    { key: "/work/iyagi", title: "iyagi", leafIds: ["leaf-1", "leaf-2"], fromTabIds: ["tab-1"], keepTabId: "tab-1", relayout: false, renamed: false },
+    { key: "/work/api", title: "api", leafIds: ["leaf-3"], fromTabIds: ["tab-1", "tab-2"], keepTabId: null, relayout: false, renamed: false },
   ],
   changed: true,
   tabsBefore: 3,
@@ -66,7 +66,7 @@ const plan: RegroupPlan = {
 
 const relayoutPlan: RegroupPlan = {
   groups: [
-    { key: "/work/iyagi", title: "iyagi", leafIds: ["leaf-1", "leaf-2"], fromTabIds: ["tab-1"], keepTabId: "tab-1", relayout: true },
+    { key: "/work/iyagi", title: "iyagi", leafIds: ["leaf-1", "leaf-2"], fromTabIds: ["tab-1"], keepTabId: "tab-1", relayout: true, renamed: false },
   ],
   changed: true,
   tabsBefore: 1,
@@ -109,7 +109,18 @@ describe("RegroupDialog preview", () => {
     expect(html.indexOf("regroup-badge kept")).toBeLessThan(html.indexOf("regroup-badge new"));
   });
 
-  it("배치만 다시 짜는 탭(id·이름은 그대로)은 relayout 배지로 가른다", () => {
+  it("이름만 프로젝트 이름으로 바뀌는 탭은 renamed 배지로 가른다", () => {
+    const renamedPlan: RegroupPlan = {
+      ...relayoutPlan,
+      groups: relayoutPlan.groups.map((group) => ({ ...group, relayout: false, renamed: true })),
+    };
+    const html = render(renamedPlan);
+    expect(html).toContain('class="regroup-badge renamed"');
+    expect(html).toContain(t("regroup.renamed"));
+    expect(html).not.toContain('class="regroup-badge kept"');
+  });
+
+  it("배치를 다시 짜는 탭(id는 그대로)은 relayout 배지로 가른다", () => {
     const html = render(relayoutPlan);
     expect(html).toContain('class="regroup-badge relayout"');
     expect(html).toContain(t("regroup.relayout"));

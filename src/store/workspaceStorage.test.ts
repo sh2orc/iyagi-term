@@ -67,6 +67,12 @@ describe("saved workspace", () => {
     expect(restored.focusedLeafId).toBe("b");
     expect(restored.panes.a).toMatchObject({ sessionId: "session-a", workloadId: "workload-a", phase: "replaying", usage: null });
   });
+  it("keeps the 'renamed by hand' mark across a save, and writes nothing for tabs without it", () => {
+    const plain = workspace();
+    expect(encodeWorkspace(plain)).not.toContain("titleEdited");
+    const edited: SavedWorkspace = { ...plain, tabs: plain.tabs.map((tab) => ({ ...tab, titleEdited: true })) };
+    expect(decodeWorkspace(encodeWorkspace(edited))!.tabs[0]).toMatchObject({ title: "My project", titleEdited: true });
+  });
   it("prunes failed launches and collapses their split instead of restoring a new launch", () => {
     const before = workspace();
     before.panes.a.sessionId = null;

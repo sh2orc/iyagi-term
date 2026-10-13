@@ -144,9 +144,12 @@ export function sameRelief(a: PaneRelief, b: PaneRelief): boolean {
  * 탭 union(05-ui §2). mission/agent-view 탭에는 root가 없다 — `.root` 접근은
  * 반드시 `kind === "terminal"` guard 뒤에 온다. mission 탭에 가짜 PTY/leaf를
  * 만들지 않는다.
+ *
+ * terminal 탭의 `titleEdited`는 사용자가 이름을 직접 바꿨다는 표시다 —
+ * 재그룹핑은 이 탭의 이름을 프로젝트 이름으로 덮어쓰지 않는다.
  */
 export type TabState =
-  | { kind: "terminal"; id: string; title: string; root: SplitNode | null }
+  | { kind: "terminal"; id: string; title: string; root: SplitNode | null; titleEdited?: boolean }
   | { kind: "mission"; id: string; title: string; missionId: string }
   | { kind: "agent-view"; id: string; title: string; missionId: string; taskId: string };
 
@@ -573,7 +576,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       const next = title.trim();
       const tab = s.tabs.find((t) => t.id === tabId);
       if (next.length === 0 || !tab || tab.kind !== "terminal" || tab.title === next) return s;
-      return { tabs: s.tabs.map((t) => (t.id === tabId && t.kind === "terminal" ? { ...t, title: next } : t)) };
+      return {
+        tabs: s.tabs.map((t) => (t.id === tabId && t.kind === "terminal" ? { ...t, title: next, titleEdited: true } : t)),
+      };
     }),
 
   focusPane: (leafId) => set({ focusedLeafId: leafId }),

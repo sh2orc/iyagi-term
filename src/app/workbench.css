@@ -1431,9 +1431,14 @@ button.primary {
   color: var(--fg-muted);
 }
 
-/* 배치만 다시 짜는 탭(id·이름은 그대로) — accent(새 탭)·fg-muted(그대로)와 구별. */
+/* 배치를 다시 짜는 탭(id는 그대로) — accent(새 탭)·fg-muted(그대로)와 구별. */
 .regroup-badge.relayout {
   color: var(--warn);
+}
+
+/* 이름만 프로젝트 이름으로 바뀌는 탭(배치·id는 그대로). */
+.regroup-badge.renamed {
+  color: var(--fg);
 }
 
 .regroup-panes {

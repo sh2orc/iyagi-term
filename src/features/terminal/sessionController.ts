@@ -49,7 +49,7 @@ import {
   type PaneEdge,
   type SplitNode,
 } from "./splitTree";
-import { paneProjectKey, planRegroup, projectTitle, type RegroupPlan } from "./regroup";
+import { paneProjectKey, planRegroup, projectTitle, uniqueTitle, type RegroupPlan } from "./regroup";
 import type { LayoutDropAction, LayoutPlacement } from "./layoutDrag";
 import { isTerminalReport } from "./broadcast";
 import { paneLimitText, splitNoSpaceText } from "../monitor/statusStrings";
@@ -1601,7 +1601,7 @@ export class SessionController {
 
   /**
    * pane을 새 탭으로 떼어 낸다. 새 탭 이름은 그 pane의 프로젝트 키(cwd —
-   * pwd)의 마지막 조각 — 재그룹핑이 짓는 이름과 같은 규칙이다. 혼자 있는
+   * pwd)의 마지막 조각(겹치면 `-2`, `-3`…) — 재그룹핑이 짓는 이름과 같은 규칙이다. 혼자 있는
    * pane은 이미 탭이므로 문구만 띄운다. atIndex를 주면(끌어 놓기) 그 틈에 새 탭을 둔다.
    */
   detachPaneToNewTab(leafId: string, atIndex?: number): boolean {
@@ -1614,7 +1614,9 @@ export class SessionController {
       return false;
     }
     const key = paneProjectKey(pane);
-    const title = key ? projectTitle(key) : t("app.tabTitle", { index: store.tabs.length + 1 });
+    const title = key
+      ? uniqueTitle(projectTitle(key), store.tabs.map((candidate) => candidate.title))
+      : t("app.tabTitle", { index: store.tabs.length + 1 });
     const ok = store.detachPaneToNewTab(leafId, this.uuid(), title, atIndex);
     if (!ok) this.toast(t("terminal.move.failed"));
     return ok;
@@ -1800,8 +1802,10 @@ export class SessionController {
       {
         splitId: this.uuid(),
         tabId: this.uuid(),
-        // 새 그룹 이름은 새 탭으로 분리와 같은 규칙: 그 터미널 경로의 마지막 조각.
-        tabTitle: cwd ? projectTitle(cwd) : t("app.tabTitle", { index: store.tabs.length + 1 }),
+        // 새 그룹 이름은 새 탭으로 분리와 같은 규칙: 그 터미널 경로의 마지막 조각(겹치면 -2, -3…).
+        tabTitle: cwd
+          ? uniqueTitle(projectTitle(cwd), store.tabs.map((candidate) => candidate.title))
+          : t("app.tabTitle", { index: store.tabs.length + 1 }),
       },
     );
     if (!placedTab) {

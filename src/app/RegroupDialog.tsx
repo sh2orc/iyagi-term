@@ -2,8 +2,9 @@
  * "프로젝트별로 다시 묶기" 미리보기(04-ui.md §2-5).
  *
  * 배치를 통째로 바꾸는 동작이라 계획을 먼저 보여 준다: 결과 탭이 몇 개인지,
- * 각 탭이 완전히 그대로인지("그대로")·id/이름은 두고 격자만 다시 짜는지
- * ("배치만 정리")·새로 생기는지("새 탭"), 각 탭에 어떤 터미널이 들어가는지.
+ * 각 탭이 완전히 그대로인지("그대로")·격자를 다시 짜는지("배치 정리")·
+ * 이름만 프로젝트 이름으로 바뀌는지("이름 정리")·새로 생기는지("새 탭"),
+ * 각 탭에 어떤 터미널이 들어가는지.
  * 계획은 대화상자를 연 시점의 것이고, 그사이 배치가 바뀌면 적용이
  * 실패한다(컨트롤러가 사유를 토스트로 알린다).
  */
@@ -15,15 +16,20 @@ import { AgentIcon } from "../features/terminal/AgentIcon";
 import { terminalDisplayTitle } from "../features/terminal/shellEnvironment";
 import type { RegroupGroup, RegroupPlan } from "../features/terminal/regroup";
 
-/** 그룹 배지 3종: 새 탭 / 배치만 정리(relayout) / 그대로(완전히 손대지 않음). */
-function regroupBadgeClass(group: RegroupGroup): "new" | "relayout" | "kept" {
+/**
+ * 그룹 배지 4종: 새 탭 / 배치 정리(relayout — 이름이 같이 바뀔 수 있다) /
+ * 이름 정리(renamed) / 그대로(완전히 손대지 않음).
+ */
+function regroupBadgeClass(group: RegroupGroup): "new" | "relayout" | "renamed" | "kept" {
   if (group.keepTabId === null) return "new";
-  return group.relayout ? "relayout" : "kept";
+  if (group.relayout) return "relayout";
+  return group.renamed ? "renamed" : "kept";
 }
 
-function regroupBadgeKey(group: RegroupGroup): "regroup.new" | "regroup.relayout" | "regroup.kept" {
-  if (group.keepTabId === null) return "regroup.new";
-  return group.relayout ? "regroup.relayout" : "regroup.kept";
+function regroupBadgeKey(
+  group: RegroupGroup,
+): "regroup.new" | "regroup.relayout" | "regroup.renamed" | "regroup.kept" {
+  return `regroup.${regroupBadgeClass(group)}`;
 }
 
 export function RegroupDialog({ plan }: { plan: RegroupPlan }): JSX.Element {

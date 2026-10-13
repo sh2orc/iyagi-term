@@ -26,12 +26,13 @@ export interface SavedWorkspace {
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 4096;
 
 /**
- * 저장되는 탭 표현(05 §2): terminal은 id/title/root, mission은 id/missionId,
+ * 저장되는 탭 표현(05 §2): terminal은 id/title/root(직접 바꾼 이름이면
+ * titleEdited: true), mission은 id/missionId,
  * agent-view는 id/missionId/taskId만 남긴다. 실행 상태·대화 원문은 저장하지
  * 않는다 — kind는 항상 쓴다.
  */
 export type PersistedTab =
-  | { kind: "terminal"; id: string; title: string; root: SplitNode }
+  | { kind: "terminal"; id: string; title: string; root: SplitNode; titleEdited?: true }
   | { kind: "mission"; id: string; missionId: string }
   | { kind: "agent-view"; id: string; missionId: string; taskId: string };
 
@@ -63,7 +64,8 @@ export function encodeWorkspace(state: SavedWorkspace): string {
     if (tab.kind === "mission") return [{ kind: "mission", id: tab.id, missionId: tab.missionId }];
     if (tab.kind === "agent-view") return [{ kind: "agent-view", id: tab.id, missionId: tab.missionId, taskId: tab.taskId }];
     const root = tab.root ? prune(tab.root) : null;
-    return root ? [{ kind: "terminal", id: tab.id, title: tab.title, root }] : [];
+    if (!root) return [];
+    return [{ kind: "terminal", id: tab.id, title: tab.title, root, ...(tab.titleEdited ? { titleEdited: true as const } : {}) }];
   });
   const activeTab = state.tabs.find(tab => tab.id === state.activeTabId) ?? null;
   const focusedLeafId = activeTab?.kind === "terminal" ? state.focusedLeafId : null;
@@ -164,7 +166,7 @@ export function decodeWorkspace(raw: string | null): SavedWorkspace | null {
         const before = Object.keys(panes).length;
         const root = node(entry.root);
         if (Object.keys(panes).length - before > 8) throw new Error("too many panes");
-        tabs.push({ kind: "terminal", id: entry.id, title: entry.title, root });
+        tabs.push({ kind: "terminal", id: entry.id, title: entry.title, root, ...(entry.titleEdited === true ? { titleEdited: true } : {}) });
       } catch {
         // 격리(05 §2): 잘못된 탭 하나만 버리고 나머지는 복원한다.
         for (const key of Object.keys(panes)) if (!paneKeys.includes(key)) delete panes[key];

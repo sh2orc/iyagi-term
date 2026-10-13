@@ -21,6 +21,13 @@ describe("vendored WebGL addon (vendor/xterm-addon-webgl)", () => {
     expect(bundle).not.toContain("generateMipmap");
   });
 
+  it("carries the repo-only fix too — the link layer no longer acquires its own 2048-capped atlas", () => {
+    // 소스만 고치고 번들을 다시 묶지 않으면 이 수정만 빠진 채 배포된다(크기가 바뀔 때마다 아틀라스를
+    // 버리고 다시 그린다). 링크 레이어의 `_refreshCharAtlas(terminal, colorSet)`가 그 흔적이다.
+    expect(bundle).not.toContain("_refreshCharAtlas(terminal");
+    expect(bundle).not.toMatch(/acquireTextureAtlas\([^)]*,\s*2048\)/);
+  });
+
   it("is what the terminal setup loads (not the npm package)", () => {
     const setup = readFileSync(new URL("../src/features/terminal/xtermSetup.ts", import.meta.url), "utf8");
     expect(setup).toContain('from "../../vendor/xterm-addon-webgl/addon-webgl"');

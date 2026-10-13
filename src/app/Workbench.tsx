@@ -175,7 +175,7 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
           }),
           createFitAddon: createDefaultFitAddon,
           createResizeObserver: browserResizeObserverFactory,
-          // WebGL 렌더러(설정 `gpuRenderer`, 기본 켬): 보이는 pane에만 붙는다.
+          // WebGL 렌더러(설정 `gpuRenderer`, 기본 켬): 보이는 pane에 붙고, 숨은 pane은 최근 것만 유지한다.
           createRenderer: createWebglRenderer,
           rendererEnabled: usePreferences.getState().gpuRenderer,
           // WebKit(WKWebView)의 조합 이벤트 없는 IME 전달을 xterm에 맞게

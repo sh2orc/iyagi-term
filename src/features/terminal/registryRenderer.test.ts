@@ -7,7 +7,7 @@
  * 절대 건드리지 않는다).
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TerminalRegistry,
   type MountPoint,
@@ -231,5 +231,50 @@ describe("TerminalRegistry 렌더러 컨텍스트 상실(WebGL onDead)", () => {
     entry.mount(makeParent());
     expect(h.createdCount()).toBe(2);
     expect(h.registry.liveRendererCount).toBe(1);
+  });
+
+  describe("재시도 예산(2s → 8s → 30s)", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    /** 만들자마자 잃기를 세 번 — 재시도가 매번 새 렌더러를 만든다. */
+    function exhaust(h: ReturnType<typeof contextLossHarness>): void {
+      for (const delay of [2000, 8000, 30000]) {
+        h.loseContext();
+        vi.advanceTimersByTime(delay);
+      }
+    }
+
+    it("만들자마자 계속 잃으면 세 번에서 멈추고 DOM 렌더러에 머문다(다음 mount가 한 번 더 시도)", () => {
+      const h = contextLossHarness();
+      const entry = h.registry.acquire("v1");
+      entry.mount(makeParent());
+      exhaust(h);
+      expect(h.createdCount()).toBe(4);
+
+      // 재생성 성공이 예산을 되돌리면 여기서 "상실 → DOM → 재생성"이 끝없이 돈다.
+      h.loseContext();
+      vi.advanceTimersByTime(120_000);
+      expect(h.createdCount()).toBe(4);
+      expect(h.registry.liveRendererCount).toBe(0);
+
+      entry.unmount();
+      entry.mount(makeParent());
+      expect(h.createdCount()).toBe(5);
+    });
+
+    it("충분히(60초) 버틴 렌더러를 잃으면 새 사고로 보고 예산을 되돌린다", () => {
+      const h = contextLossHarness();
+      const entry = h.registry.acquire("v1");
+      entry.mount(makeParent());
+      exhaust(h);
+      expect(h.createdCount()).toBe(4);
+
+      vi.advanceTimersByTime(60_000);
+      h.loseContext();
+      vi.advanceTimersByTime(2000);
+      expect(h.createdCount()).toBe(5);
+      expect(h.registry.liveRendererCount).toBe(1);
+    });
   });
 });

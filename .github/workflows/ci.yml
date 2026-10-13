@@ -175,6 +175,12 @@ jobs:
       - uses: actions/checkout@v4
       - run: npm ci
       - run: npm run typecheck
+      # The app ships the committed bundle, not vendor/ source: editing the source
+      # without rebuilding silently drops the fix (2026-09-17 audit, vendored webgl).
+      - name: vendored WebGL addon bundle must match vendor/ source
+        run: |
+          npm run build:webgl-addon
+          git diff --exit-code -- src/vendor/xterm-addon-webgl
       - run: npm run test:unit
       - run: npm run build:frontend
 

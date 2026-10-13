@@ -53,7 +53,7 @@ WKWebView(Tauri)에서 한글·색이 많은 TUI 출력(Claude Code 등)을 오�
 ## 다시 묶기
 
 ```sh
-node scripts/build-webgl-addon.mjs
+node scripts/build-webgl-addon.mjs   # = npm run build:webgl-addon
 ```
 
 esbuild가 `src/WebglAddon.ts`를 진입점으로 묶는다. 애드온이 코어 내부 모듈(`browser/…`, `common/…`, `vs/…`)을
@@ -70,10 +70,13 @@ diff해 패치를 유지한다.
 
 ## 검증
 
-`docs/implementation/06-verification.md`의 WebGL 아틀라스 항목: 실제 xterm+이 애드온을 헤드리스 Chrome(ANGLE Metal)과
-WKWebView 시험대에서 돌려, 다른 pane이 아틀라스 페이지를 16장 넘게 채워 병합을 여러 번 일으키는 동안 병합 직후
-프레임의 정점이 아틀라스와 어긋나지 않고(패치 전: 한 화면의 920셀 중 886셀이 낡음), 화면 픽셀이 다시 그린 것과
-같음을 확인한다.
+- **번들이 소스와 같은지**: CI(frontend 잡)가 이 스크립트로 다시 묶어 커밋된 번들과 비교한다. 소스만 고치고
+  번들을 다시 묶지 않으면 실패한다. 위 "이 저장소 고유 수정"이 소스에만 들어가고 번들에서 빠진 채 배포된 적이
+  있다 — 그동안 창 크기를 바꿀 때마다 아틀라스를 버리고 다시 그렸다. `tests/vendoredWebglAddon.test.ts`는 각
+  수정의 흔적이 번들에 있는지 본다.
+- **아틀라스 병합**: 실제 xterm+이 애드온을 헤드리스 Chrome(ANGLE Metal)과 WKWebView 시험대에서 돌려, 다른
+  pane이 아틀라스 페이지를 16장 넘게 채워 병합을 여러 번 일으키는 동안 병합 직후 프레임의 정점이 아틀라스와
+  어긋나지 않고(패치 전: 한 화면의 920셀 중 886셀이 낡음), 화면 픽셀이 다시 그린 것과 같음을 확인했다.
 
 ## 라이선스
 

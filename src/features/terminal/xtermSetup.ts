@@ -9,9 +9,10 @@
  *   세션 컨트롤러에 보고한다(W1-3/4).
  * - URL 인식은 https/http만, 사용자 클릭으로 OS opener 사용.
  * - 검색은 현재 scrollback(addon-search).
- * - WebGL 렌더러(addon-webgl)는 보이는 pane에만 붙인다(createWebglRenderer):
- *   박스·블록 글자를 셀 전체에 그려 lineHeight 1.1의 행 틈에서도 TUI
- *   테두리가 이어진다. 없거나 컨텍스트를 잃으면 DOM 렌더러로 물러난다.
+ * - WebGL 렌더러(addon-webgl)는 pane이 보일 때 붙이고, 숨겨도 최근 것은
+ *   살려 둔다(createWebglRenderer, registry의 RENDERER_CONTEXT_CAP): 박스·블록
+ *   글자를 셀 전체에 그려 lineHeight 1.1의 행 틈에서도 TUI 테두리가 이어진다.
+ *   없거나 컨텍스트를 잃으면 DOM 렌더러로 물러난다.
  */
 
 import { Terminal } from "@xterm/xterm";
@@ -767,10 +768,10 @@ export function registerTerminalReporting(terminal: unknown, handlers: TerminalR
  *
  * WebGL2가 없으면 null(DOM 렌더러 유지). 컨텍스트를 잃으면(WebKit의 활성
  * 컨텍스트 상한·GPU 리셋) 애드온을 버려 그 pane만 DOM 렌더러로 돌아간다
- * — 이때 `hooks.onDead`로 레지스트리에 알려 다음 mount/syncRenderer가
+ * — 이때 `hooks.onDead`로 레지스트리에 알려 잠시 뒤(또는 다음 mount에)
  * WebGL을 다시 만들게 한다(래퍼가 살아 있는 채로 남으면 영영 DOM 렌더러에
- * 갇힌다). 레지스트리가 보이는 pane에만 붙이므로 동시 컨텍스트는 한 탭의
- * pane 수(≤ 8)로 유계다.
+ * 갇힌다). 레지스트리가 숨은 pane의 렌더러는 최근 것만 남기므로 동시
+ * 컨텍스트는 RENDERER_CONTEXT_CAP(12)으로 유계다.
  */
 export const createWebglRenderer: NonNullable<RegistryDeps["createRenderer"]> = (terminal, hooks) => {
   if (typeof document === "undefined" || typeof WebGL2RenderingContext === "undefined") return null;

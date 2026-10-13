@@ -39,6 +39,8 @@ if (vendorErrors.length > 0) {
 console.log(`typecheck ok (${vendorErrors.length} errors in vendor/)`);
 
 const result = await build({
+  // 번들의 `// node_modules/...` 경로 주석이 실행 위치와 무관하게 같아야 CI의 재빌드 비교가 성립한다.
+  absWorkingDir: ROOT,
   entryPoints: [ENTRY],
   bundle: true,
   format: "esm",

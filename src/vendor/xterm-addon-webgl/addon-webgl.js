@@ -5042,8 +5042,7 @@ var BaseRenderLayer = class extends Disposable {
     this._canvas.style.zIndex = zIndex.toString();
     this._initCanvas();
     this._container.appendChild(this._canvas);
-    this._register(this._themeService.onChangeColors((e) => {
-      this._refreshCharAtlas(terminal, e);
+    this._register(this._themeService.onChangeColors(() => {
       this.reset(terminal);
     }));
     this._register(toDisposable(() => {
@@ -5075,20 +5074,7 @@ var BaseRenderLayer = class extends Disposable {
     this._canvas = this._canvas.cloneNode();
     this._initCanvas();
     this._container.replaceChild(this._canvas, oldCanvas);
-    this._refreshCharAtlas(terminal, this._themeService.colors);
     this.handleGridChanged(terminal, 0, terminal.rows - 1);
-  }
-  /**
-   * Refreshes the char atlas, aquiring a new one if necessary.
-   * @param terminal The terminal.
-   * @param colorSet The color set to use for the char atlas.
-   */
-  _refreshCharAtlas(terminal, colorSet) {
-    if (this._deviceCharWidth <= 0 && this._deviceCharHeight <= 0) {
-      return;
-    }
-    this._charAtlas = acquireTextureAtlas(terminal, this._optionsService.rawOptions, colorSet, this._deviceCellWidth, this._deviceCellHeight, this._deviceCharWidth, this._deviceCharHeight, this._coreBrowserService.dpr, 2048);
-    this._charAtlas.warmUp();
   }
   resize(terminal, dim) {
     this._deviceCellWidth = dim.device.cell.width;
@@ -5104,7 +5090,6 @@ var BaseRenderLayer = class extends Disposable {
     if (!this._alpha) {
       this._clearAll();
     }
-    this._refreshCharAtlas(terminal, this._themeService.colors);
   }
   /**
    * Fills a 1px line (2px on HDPI) at the bottom of the cell. This uses the

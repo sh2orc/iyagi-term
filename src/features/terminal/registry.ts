@@ -35,6 +35,13 @@ const RENDERER_CONTEXT_CAP = 12;
  * 간격을 두고 세 번만 시도한다.
  */
 const RENDERER_RETRY_DELAYS_MS = [2000, 8000, 30000];
+/**
+ * 재시도 예산을 되돌리기 전에 렌더러가 버텨야 하는 시간. 만들 때마다 되돌리면
+ * 만들자마자 다시 잃는 환경(GPU 리셋 반복 등)에서 "상실 → DOM → 재생성"이 끝없이
+ * 돈다 — 전환마다 셀 폭이 바뀌어 PTY 크기 조정과 TUI 다시 그리기가 따라온다.
+ * 이만큼 버틴 렌더러가 사라질 때(상실·해제)만 예산을 되돌린다.
+ */
+const RENDERER_STABLE_MS = 60_000;
 
 /** Minimal terminal surface the registry/pipeline depend on. */
 export interface TerminalLike extends ViewportTerminal {
@@ -141,9 +148,9 @@ export interface RendererHooks {
   onDead?: () => void;
 }
 /**
- * mount마다 렌더러를 만든다(null이면 xterm 기본 DOM 렌더러 그대로). 보이는
- * pane만 GPU 컨텍스트를 쥐도록 unmount 때 해제하고 다음 mount 때 다시
- * 만든다 — 숨은 탭의 터미널은 살아 있지만 컨텍스트는 잡지 않는다.
+ * 보이는 pane에 렌더러를 만든다(null이면 xterm 기본 DOM 렌더러 그대로). 숨겨도
+ * (unmount) 해제하지 않고 재부착에 다시 쓰며, 살아 있는 수는
+ * RENDERER_CONTEXT_CAP으로 묶어 가장 오래 숨은 pane의 것부터 회수한다.
  */
 export type RendererFactory = (terminal: TerminalLike, hooks: RendererHooks) => RendererLike | null;
 export type ResizeObserverFactory = (callback: () => void) => ResizeObserverLike;
@@ -227,6 +234,8 @@ class RegistryEntryImpl implements RegistryEntry {
   /** 컨텍스트 상실 뒤 재생성 시도 타이머·횟수. */
   private rendererRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private rendererRetries = 0;
+  /** 지금 렌더러를 만든 시각(Date.now) — 잃었을 때 RENDERER_STABLE_MS를 버텼는지 본다. */
+  private rendererBornAt: number | null = null;
   /** registry가 스스로 렌더러를 해제하는 중 — 그 onDead는 상실이 아니다. */
   private droppingRenderer = false;
   /** 글꼴 변경 뒤 한 프레임 늦은 재측정(setFontSize) — 연타 때 하나만 남긴다. */
@@ -331,11 +340,12 @@ class RegistryEntryImpl implements RegistryEntry {
           // WebGL을 다시 만들 수 있게 한다. 즉시 재생성하지 않고(실패 루프 방지)
           // 잠시 뒤 다시 시도한다 — vendored 애드온이 DOM 렌더러로 되돌려 놓아
           // 화면은 유지되지만, 거기 오래 남으면 글자가 흔들린다.
+          this.settleRendererLifetime();
           this.renderer = null;
           if (!this.droppingRenderer) this.scheduleRendererRetry();
         },
       }) ?? null;
-      if (this.renderer) this.rendererRetries = 0;
+      this.rendererBornAt = this.renderer ? Date.now() : null;
     } catch {
       this.renderer = null;
     }
@@ -361,8 +371,20 @@ class RegistryEntryImpl implements RegistryEntry {
     this.rendererRetryTimer = null;
   }
 
+  /**
+   * 렌더러가 사라질 때(상실·해제) 수명을 정산한다. RENDERER_STABLE_MS를 버틴
+   * 렌더러였으면 GPU가 멀쩡하다는 증거이므로 재시도 예산을 되돌린다.
+   */
+  private settleRendererLifetime(): void {
+    if (this.rendererBornAt !== null && Date.now() - this.rendererBornAt >= RENDERER_STABLE_MS) {
+      this.rendererRetries = 0;
+    }
+    this.rendererBornAt = null;
+  }
+
   private dropRenderer(): void {
     this.clearRendererRetry();
+    this.settleRendererLifetime();
     const renderer = this.renderer;
     this.renderer = null;
     this.droppingRenderer = true;

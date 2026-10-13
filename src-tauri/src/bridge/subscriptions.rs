@@ -817,18 +817,15 @@ pub fn pool_list(data_dir: &Path) -> Result<Vec<PoolKeyView>, &'static str> {
 /// 풀 키 추가(라벨은 선택). 반환값은 갱신된 목록.
 pub fn pool_add(data_dir: &Path, label: &str, key: &str) -> Result<Vec<PoolKeyView>, &'static str> {
     validate_key(key)?;
-    let store = term_secrets::KeyPoolStore::new(data_dir);
-    store
-        .add("zai", label, key.trim())
-        .map_err(|_| "credential_store_error")?;
+    // 저장소 오류는 이미 비밀 없는 reason code다(`key_pool_full`·
+    // `api_key_invalid`·`credential_store_error`) — UI가 구분해 보여 준다.
+    term_secrets::KeyPoolStore::new(data_dir).add("zai", label, key.trim())?;
     pool_list(data_dir)
 }
 
 /// 풀 키 제거. 반환값은 갱신된 목록.
 pub fn pool_remove(data_dir: &Path, id: &str) -> Result<Vec<PoolKeyView>, &'static str> {
-    term_secrets::KeyPoolStore::new(data_dir)
-        .remove(id)
-        .map_err(|_| "credential_store_error")?;
+    term_secrets::KeyPoolStore::new(data_dir).remove(id)?;
     pool_list(data_dir)
 }
 

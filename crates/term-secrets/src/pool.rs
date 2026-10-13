@@ -2,13 +2,14 @@
 //!
 //! [`crate::LocalSecretStore`](단일 Z.ai 키)와 같은 마스터 키·같은 봉투
 //! 형식(`IYAGI-SECRET-1`)을 쓰고 AEAD 컨텍스트만 다르다. 앱(src-tauri
-//! 브리지)이 쓰고 데몬이 요청 시점마다 다시 읽는다 — 추가·삭제가 즉시
-//! 반영되고 비밀은 RPC를 통하지 않는다(파일이 진실 원본).
+//! 브리지)이 쓰고 데몬이 다시 읽는다(게이트웨이의 5초 TTL 캐시) — 비밀은
+//! RPC를 통하지 않는다(파일이 진실 원본).
 //!
 //! 디스크 평문(JSON):
 //! `{"version":1,"entries":[{"id","provider","label","secret","created_epoch_ms"}]}`
 //!
-//! 상한: 항목 32개, 키 8..1024바이트, 파일 4096바이트(기존 LIMIT 재사용).
+//! 상한: 항목 32개, 키 8..1024바이트, 봉투 포함 파일 16 KiB(단일 키의
+//! 4 KiB `LIMIT`과 별개). 어느 쪽이든 넘치면 `key_pool_full`.
 //! 쓰기는 temp+rename 원자적, 디렉터리 0700·파일 0600(기존 규칙 그대로).
 
 use std::fs;
@@ -48,7 +49,8 @@ struct PoolEntry {
     id: String,
     provider: String,
     label: String,
-    secret: String,
+    /// 목록·추가·삭제 경로에서 읽고 버리는 사본도 drop 시 지워진다.
+    secret: Zeroizing<String>,
     created_epoch_ms: u64,
 }
 
@@ -135,7 +137,7 @@ impl KeyPoolStore {
             id,
             provider: info.provider.clone(),
             label: info.label.clone(),
-            secret: secret.to_string(),
+            secret: Zeroizing::new(secret.to_string()),
             created_epoch_ms: info.created_epoch_ms,
         });
         self.write_entries_unlocked(&entries)?;
@@ -190,13 +192,19 @@ impl KeyPoolStore {
     }
 
     fn write_entries_unlocked(&self, entries: &[PoolEntry]) -> Result<(), &'static str> {
-        let payload = serde_json::to_vec(&PoolFileRef {
-            version: 1,
-            entries,
-        })
-        .map_err(|_| "credential_store_error")?;
-        if payload.len() > POOL_LIMIT as usize {
-            return Err("credential_store_error");
+        let payload = Zeroizing::new(
+            serde_json::to_vec(&PoolFileRef {
+                version: 1,
+                entries,
+            })
+            .map_err(|_| "credential_store_error")?,
+        );
+        // 상한은 읽기(`read_private_limited`)와 같은 기준 — 봉투(형식 표지 +
+        // nonce + 태그)까지 센다. 평문만 재면 쓰기는 되고 다시 못 읽는 파일이
+        // 생겨 추가·삭제까지 영구히 막힌다.
+        let envelope_len = FORMAT.len() + 12 + payload.len() + AES_256_GCM.tag_len();
+        if envelope_len > POOL_LIMIT as usize {
+            return Err("key_pool_full");
         }
         fs::create_dir_all(&self.directory).map_err(|_| "credential_store_error")?;
         #[cfg(unix)]
@@ -205,13 +213,13 @@ impl KeyPoolStore {
             fs::set_permissions(&self.directory, fs::Permissions::from_mode(0o700))
                 .map_err(|_| "credential_store_error")?;
         }
-        crate::ensure_master_key(&self.directory, &self.directory.join(POOL_FILE))?;
+        crate::ensure_master_key(&self.directory)?;
         let master = crate::load_master_key(&self.directory)?;
         let mut nonce = [0u8; 12];
         SystemRandom::new()
             .fill(&mut nonce)
             .map_err(|_| "credential_store_error")?;
-        let mut encrypted = payload;
+        let mut encrypted = payload.to_vec();
         cipher(&master)?
             .seal_in_place_append_tag(
                 Nonce::assume_unique_for_key(nonce),
@@ -246,7 +254,7 @@ fn entry_with_secret(entry: PoolEntry) -> (PoolKeyInfo, Zeroizing<String>) {
             label: entry.label,
             created_epoch_ms: entry.created_epoch_ms,
         },
-        Zeroizing::new(entry.secret),
+        entry.secret,
     )
 }
 
@@ -348,5 +356,25 @@ mod tests {
             store.add("zai", "one more", KEY_B).unwrap_err(),
             "key_pool_full"
         );
+    }
+
+    #[test]
+    fn oversized_store_is_refused_before_it_becomes_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = KeyPoolStore::new(dir.path());
+        // 1024바이트 키 32개는 16 KiB 봉투에 들어가지 않는다 — 넘치는 순간
+        // `key_pool_full`로 거부되고, 이미 쓴 저장소는 계속 읽힌다.
+        let mut added = 0;
+        let refused = loop {
+            match store.add("zai", "", &format!("{added:04}{}", "k".repeat(1020))) {
+                Ok(_) => added += 1,
+                Err(code) => break code,
+            }
+        };
+        assert_eq!(refused, "key_pool_full");
+        assert!(added > 0 && added < MAX_ENTRIES);
+        assert_eq!(store.list().unwrap().len(), added);
+        store.remove(&store.list().unwrap()[0].id).unwrap();
+        assert_eq!(store.list().unwrap().len(), added - 1);
     }
 }

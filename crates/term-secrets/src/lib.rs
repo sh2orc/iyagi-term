@@ -80,7 +80,7 @@ impl LocalSecretStore {
             fs::set_permissions(&self.directory, fs::Permissions::from_mode(0o700))
                 .map_err(|_| "credential_store_error")?;
         }
-        ensure_master_key(&self.directory, &self.directory.join("zai.enc"))?;
+        ensure_master_key(&self.directory)?;
         let key = load_master_key(&self.directory)?;
         let mut nonce = [0u8; 12];
         SystemRandom::new()
@@ -115,15 +115,23 @@ impl LocalSecretStore {
     }
 }
 
-/// master.key가 없으면 만든다. **이미 암호문(`secret_file`)이 있는데 키가
-/// 없는 상태에서는 새 키를 만들지 않는다** — 그렇게 만들면 옛 암호문을
-/// 영영 못 여는 상태가 되므로 오류로 지킨다(원래 단일 저장소의 규칙).
-pub(crate) fn ensure_master_key(directory: &Path, secret_file: &Path) -> Result<(), &'static str> {
+/// master.key로 암호화하는 저장소 파일(단일 키, 키 풀).
+const MASTER_KEY_USERS: [&str; 2] = ["zai.enc", "keys.enc"];
+
+/// master.key가 없으면 만든다. **이미 암호문([`MASTER_KEY_USERS`] 중
+/// 하나)이 있는데 키가 없는 상태에서는 새 키를 만들지 않는다** — 그렇게
+/// 만들면 옛 암호문을 영영 못 여는 상태가 되므로 오류로 지킨다.
+pub(crate) fn ensure_master_key(directory: &Path) -> Result<(), &'static str> {
     let key_path = directory.join("master.key");
     if key_path.exists() {
         return Ok(());
     }
-    if secret_file.exists() {
+    // 같은 master.key를 쓰는 저장소 어느 쪽이든 암호문이 남아 있으면 새 키를
+    // 만들지 않는다 — 만들면 그 암호문은 영구히 열 수 없게 된다.
+    if MASTER_KEY_USERS
+        .iter()
+        .any(|file| directory.join(file).exists())
+    {
         return Err("credential_store_error");
     }
     let mut key = [0u8; 32];

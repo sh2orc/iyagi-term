@@ -85,6 +85,15 @@ jobs:
           path: |
             .cargo/registry/
             target/
+      # iyagi-app is in --workspace, and its Tauri build script requires the
+      # triple-suffixed sidecar resource to exist even for fmt/clippy/test.
+      # bundle-linux stages the release one via npm; the debug daemon is
+      # enough here — the smoke step below builds it anyway.
+      - name: Stage the sidecar binary the Tauri build script requires
+        run: >
+          cargo build -p iyagi-termd --locked && mkdir -p src-tauri/binaries &&
+          cp target/debug/iyagi-termd
+          "src-tauri/binaries/iyagi-termd-$(rustc -vV | sed -n 's/^host: //p')"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -114,6 +123,15 @@ jobs:
     runs-on: [self-hosted, windows]
     steps:
       - uses: actions/checkout@v4
+      # Same sidecar requirement as linux-check (Tauri build script checks the
+      # resource path during clippy/test of the workspace).
+      - name: Stage the sidecar binary the Tauri build script requires
+        shell: pwsh
+        run: >
+          cargo build -p iyagi-termd --locked;
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null;
+          $triple = (rustc -vV | Where-Object { $_ -match '^host: ' }) -replace '^host: ', '';
+          Copy-Item target\debug\iyagi-termd.exe "src-tauri\binaries\iyagi-termd-$triple.exe"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -133,6 +151,13 @@ jobs:
     runs-on: [self-hosted, macos]
     steps:
       - uses: actions/checkout@v4
+      # Same sidecar requirement as linux-check (Tauri build script checks the
+      # resource path during clippy/test of the workspace).
+      - name: Stage the sidecar binary the Tauri build script requires
+        run: >
+          cargo build -p iyagi-termd --locked && mkdir -p src-tauri/binaries &&
+          cp target/debug/iyagi-termd
+          "src-tauri/binaries/iyagi-termd-$(rustc -vV | sed -n 's/^host: //p')"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked

@@ -2654,3 +2654,21 @@ body.layout-dragging.layout-drop-blocked * {
 .gateway-sessions code {
   font-size: 11px;
 }
+
+/* API 키 풀 목록(09): 행 = 라벨 · 상태 · 삭제 버튼. */
+.key-pool-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.key-pool-list .key-pool-remove {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 1px 8px;
+}
+
+.key-pool-label {
+  max-width: 120px;
+}

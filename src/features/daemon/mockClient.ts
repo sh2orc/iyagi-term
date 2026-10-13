@@ -343,7 +343,7 @@ export class MockDaemonClient implements DaemonClient {
   /** 데몬 전체의 완화 정책(08 §2) — 기본은 defaults.json과 같은 auto_yield. */
   private reliefPolicy: ReliefPolicy = { auto_yield: true };
   /** 관측 게이트웨이 모의 정책(브라우저 dev — 실제 프록시는 없다). */
-  private gatewayPolicy: GatewayPolicy = { enabled: false, blocked: false };
+  private gatewayPolicy: GatewayPolicy = { enabled: false, blocked: false, pool_strategy: "round_robin" };
   private guardPolicy: GuardPolicy = {
     auto_suspend: true,
     cpu_cores_limit: 6,
@@ -805,6 +805,8 @@ export class MockDaemonClient implements DaemonClient {
       blocked: this.gatewayPolicy.blocked,
       totals: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, requests: 0, failures: 0 },
       sessions: [],
+      pool: [],
+      pool_strategy: "round_robin",
     };
   }
 
@@ -812,6 +814,7 @@ export class MockDaemonClient implements DaemonClient {
     this.gatewayPolicy = {
       enabled: params.enabled ?? this.gatewayPolicy.enabled,
       blocked: params.blocked ?? this.gatewayPolicy.blocked,
+      pool_strategy: params.pool_strategy ?? this.gatewayPolicy.pool_strategy,
     };
     return { ...this.gatewayPolicy };
   }

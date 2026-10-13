@@ -24,6 +24,25 @@ export function removeZaiKey(): Promise<ApiKeyStatus> {
   return tauriIpcAdapter.invoke<ApiKeyStatus>("zai_api_key_remove");
 }
 
+/** 풀 키 요약(비밀 없음) — 09-key-pool-rotation. */
+export interface PoolKeyView {
+  id: string;
+  label: string;
+  created_epoch_ms: number;
+}
+
+export function listZaiKeyPool(): Promise<PoolKeyView[]> {
+  return tauriIpcAdapter.invoke<PoolKeyView[]>("zai_key_pool_list");
+}
+
+export function addZaiKeyPoolKey(label: string, apiKey: string): Promise<PoolKeyView[]> {
+  return tauriIpcAdapter.invoke<PoolKeyView[]>("zai_key_pool_add", { label, apiKey });
+}
+
+export function removeZaiKeyPoolKey(id: string): Promise<PoolKeyView[]> {
+  return tauriIpcAdapter.invoke<PoolKeyView[]>("zai_key_pool_remove", { id });
+}
+
 export function getClaudeUsageStatus(): Promise<ClaudeUsageStatus> {
   return tauriIpcAdapter.invoke<ClaudeUsageStatus>("claude_usage_status");
 }

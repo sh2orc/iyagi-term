@@ -417,6 +417,44 @@ pub async fn zai_api_key_remove(
 }
 
 #[tauri::command]
+pub async fn zai_key_pool_list(
+    state: State<'_, BridgeState>,
+) -> Result<Vec<crate::bridge::subscriptions::PoolKeyView>, RpcError> {
+    let data_dir = zai_secret_data_dir(&state)?;
+    tokio::task::spawn_blocking(move || crate::bridge::subscriptions::pool_list(&data_dir))
+        .await
+        .map_err(|_| invalid_argument("credential_store_error"))?
+        .map_err(invalid_argument)
+}
+
+#[tauri::command]
+pub async fn zai_key_pool_add(
+    state: State<'_, BridgeState>,
+    label: String,
+    api_key: String,
+) -> Result<Vec<crate::bridge::subscriptions::PoolKeyView>, RpcError> {
+    let data_dir = zai_secret_data_dir(&state)?;
+    tokio::task::spawn_blocking(move || {
+        crate::bridge::subscriptions::pool_add(&data_dir, &label, &api_key)
+    })
+    .await
+    .map_err(|_| invalid_argument("credential_store_error"))?
+    .map_err(invalid_argument)
+}
+
+#[tauri::command]
+pub async fn zai_key_pool_remove(
+    state: State<'_, BridgeState>,
+    id: String,
+) -> Result<Vec<crate::bridge::subscriptions::PoolKeyView>, RpcError> {
+    let data_dir = zai_secret_data_dir(&state)?;
+    tokio::task::spawn_blocking(move || crate::bridge::subscriptions::pool_remove(&data_dir, &id))
+        .await
+        .map_err(|_| invalid_argument("credential_store_error"))?
+        .map_err(invalid_argument)
+}
+
+#[tauri::command]
 pub fn claude_usage_status() -> Result<crate::bridge::claude_usage::Status, RpcError> {
     claude_usage_call(|path, data_dir, command| {
         let _ = data_dir;

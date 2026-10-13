@@ -789,6 +789,49 @@ pub fn key_status(data_dir: &Path) -> Result<KeyStatus, &'static str> {
         .map_err(|_| "credential_store_error")
 }
 
+/// 풀 키 요약(브리지 명령 응답용 — 비밀 없음). `term_secrets::PoolKeyInfo`와
+/// 같은 모양을 serialize한다(의존 방향: bridge → term-secrets 타입 재사용).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PoolKeyView {
+    pub id: String,
+    pub label: String,
+    pub created_epoch_ms: u64,
+}
+
+/// 등록된 풀 키 목록(등록순, 비밀 없음).
+pub fn pool_list(data_dir: &Path) -> Result<Vec<PoolKeyView>, &'static str> {
+    term_secrets::KeyPoolStore::new(data_dir)
+        .list()
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|info| PoolKeyView {
+                    id: info.id,
+                    label: info.label,
+                    created_epoch_ms: info.created_epoch_ms,
+                })
+                .collect()
+        })
+}
+
+/// 풀 키 추가(라벨은 선택). 반환값은 갱신된 목록.
+pub fn pool_add(data_dir: &Path, label: &str, key: &str) -> Result<Vec<PoolKeyView>, &'static str> {
+    validate_key(key)?;
+    let store = term_secrets::KeyPoolStore::new(data_dir);
+    store
+        .add("zai", label, key.trim())
+        .map_err(|_| "credential_store_error")?;
+    pool_list(data_dir)
+}
+
+/// 풀 키 제거. 반환값은 갱신된 목록.
+pub fn pool_remove(data_dir: &Path, id: &str) -> Result<Vec<PoolKeyView>, &'static str> {
+    term_secrets::KeyPoolStore::new(data_dir)
+        .remove(id)
+        .map_err(|_| "credential_store_error")?;
+    pool_list(data_dir)
+}
+
 fn validate_key(key: &str) -> Result<(), &'static str> {
     let trimmed = key.trim();
     if trimmed.len() < 8 || trimmed.len() > 1024 || trimmed.chars().any(char::is_control) {

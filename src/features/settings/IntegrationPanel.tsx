@@ -26,6 +26,13 @@ import type { ClaudeUsageStatus } from "../subscriptions/types";
 import { AutonomyToggle } from "../workloads/AutonomyToggle";
 import { ControllerContext } from "../../app/controllerContext";
 import type { GatewayStatus } from "../../generated/GatewayStatus";
+import type { GatewayPoolStrategy } from "../../generated/GatewayPoolStrategy";
+import {
+  addZaiKeyPoolKey,
+  listZaiKeyPool,
+  removeZaiKeyPoolKey,
+  type PoolKeyView,
+} from "../subscriptions/client";
 
 export function IntegrationPanel(): JSX.Element {
   const { t } = useI18n();
@@ -41,6 +48,7 @@ export function IntegrationPanel(): JSX.Element {
       <ClaudeUsagePanel />
       <ZaiPanel />
       <GatewayPanel />
+      <KeyPoolPanel />
       <HooksPanel
         cli="claude"
         settingId="claudeHooks"
@@ -473,7 +481,7 @@ function GatewayPanel(): JSX.Element {
   // 마운트 1회: 저장된 선호를 데몬에 다시 적용(데몬 재시작 후 복구).
   useEffect(() => {
     if (!available || !controller || unsupported || !enabled) return;
-    void controller.gatewaySetPolicy({ enabled: true, blocked: null }).catch(() => undefined);
+    void controller.gatewaySetPolicy({ enabled: true, blocked: null, pool_strategy: null }).catch(() => undefined);
     // 의도적으로 마운트 시 1회만(busk: enabled를 끄는 쪽은 아래 토글이 담당).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available, unsupported]);
@@ -483,7 +491,7 @@ function GatewayPanel(): JSX.Element {
     setError(null);
     if (!controller) return;
     try {
-      await controller.gatewaySetPolicy({ enabled: value, blocked: null });
+      await controller.gatewaySetPolicy({ enabled: value, blocked: null, pool_strategy: null });
       setEnabled(value);
       await refresh();
     } catch (value_) { setError(errorText(value_)); }
@@ -496,7 +504,7 @@ function GatewayPanel(): JSX.Element {
     setError(null);
     if (!controller) return;
     try {
-      await controller.gatewaySetPolicy({ enabled: null, blocked: !status.blocked });
+      await controller.gatewaySetPolicy({ enabled: null, blocked: !status.blocked, pool_strategy: null });
       await refresh();
     } catch (value) { setError(errorText(value)); }
     finally { setBusy(false); }
@@ -584,6 +592,180 @@ function GatewayPanel(): JSX.Element {
           ) : (
             <p role="status">{t("settings.usage.desktopOnly")}</p>
           )}
+        </>
+      )}
+      {error ? <p className="setting-error" role="alert">{t("settings.usage.error", { message: error })}</p> : null}
+    </section>
+  );
+}
+
+/**
+ * API 키 풀 카드(09): Z.ai 라우팅용 키를 여러 개 등록하고 게이트웨이가
+ * 세션 단위로 돌려 쓰게 한다. 비밀은 이 카드에서 브리지(앱 로컬 암호화
+ * 저장소)로만 흐르고, 상태(쿨다운·격리)는 게이트웨이가 보고하는 대로
+ * 읽기만 한다. 풀이 비어 있으면 기존 단일 키(Z.ai Coding Plan 카드)가
+ * 그대로 쓰인다.
+ */
+function KeyPoolPanel(): JSX.Element {
+  const { t } = useI18n();
+  const available = isTauri();
+  const controller = useContext(ControllerContext);
+  const [keys, setKeys] = useState<PoolKeyView[] | null>(null);
+  const [poolStates, setPoolStates] = useState<GatewayStatus["pool"]>([]);
+  const [strategy, setStrategy] = useState<GatewayPoolStrategy>("round_robin");
+  const [label, setLabel] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const keyId = useId();
+
+  const refresh = useCallback(async () => {
+    if (!available) return;
+    try {
+      setKeys(await listZaiKeyPool());
+    } catch (value) {
+      setError(errorText(value));
+    }
+  }, [available]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  // 키 목록은 로컬 저장소에서, 상태·전략은 게이트웨이에서(2초 폴).
+  useEffect(() => {
+    if (!available || !controller) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const status = await controller.gatewayStatus();
+        if (active) {
+          setPoolStates(status.pool);
+          setStrategy(status.pool_strategy);
+        }
+      } catch {
+        if (active) setPoolStates([]);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 2000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [available, controller]);
+
+  const add = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setKeys(await addZaiKeyPoolKey(label, apiKey));
+      setLabel("");
+      setApiKey("");
+    } catch (value) { setError(errorText(value)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try { setKeys(await removeZaiKeyPoolKey(id)); }
+    catch (value) { setError(errorText(value)); }
+    finally { setBusy(false); }
+  };
+
+  const changeStrategy = async (value: GatewayPoolStrategy) => {
+    if (!controller) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const policy = await controller.gatewaySetPolicy({
+        enabled: null,
+        blocked: null,
+        pool_strategy: value,
+      });
+      setStrategy(policy.pool_strategy);
+    } catch (value) { setError(errorText(value)); }
+    finally { setBusy(false); }
+  };
+
+  const stateOf = (id: string): string => {
+    const found = poolStates.find((key) => key.id === id);
+    if (!found) return t("settings.keyPool.stateUnknown");
+    switch (found.state) {
+      case "cooling": return t("settings.keyPool.stateCooling", { seconds: Math.ceil((found.cooldown_remaining_ms ?? 0) / 1000) });
+      case "quarantined": return t("settings.keyPool.stateQuarantined");
+      case "unused": return t("settings.keyPool.stateUnused");
+      default: return t("settings.keyPool.stateActive", { requests: found.requests });
+    }
+  };
+
+  return (
+    <section className="integration-block" data-setting-id="apiKeyPool">
+      <h2>{t("settings.item.apiKeyPool.label")}</h2>
+      <p>{t("settings.item.apiKeyPool.description")}</p>
+      {!available ? <p className="muted">{t("settings.usage.desktopOnly")}</p> : (
+        <>
+          {keys === null ? (
+            <p role="status">{t("settings.keyPool.checking")}</p>
+          ) : keys.length === 0 ? (
+            <p className="muted">{t("settings.keyPool.empty")}</p>
+          ) : (
+            <ul className="gateway-sessions key-pool-list">
+              {keys.map((key) => (
+                <li key={key.id}>
+                  <code>{key.label}</code>
+                  <span className="muted"> · {stateOf(key.id)}</span>
+                  <button
+                    type="button"
+                    className="key-pool-remove"
+                    disabled={busy}
+                    onClick={() => void remove(key.id)}
+                  >
+                    {t("settings.keyPool.remove")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="integration-actions">
+            <input
+              className="integration-key-field key-pool-label"
+              type="text"
+              value={label}
+              placeholder={t("settings.keyPool.labelPlaceholder")}
+              aria-label={t("settings.keyPool.labelField")}
+              onChange={(event) => setLabel(event.target.value)}
+            />
+            <input
+              className="integration-key-field"
+              type="password"
+              value={apiKey}
+              autoComplete="off"
+              spellCheck={false}
+              aria-label={t("settings.keyPool.apiKey")}
+              placeholder={t("settings.keyPool.placeholder")}
+              onChange={(event) => setApiKey(event.target.value)}
+            />
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || apiKey.trim().length < 8}
+              onClick={() => void add()}
+            >
+              {t("settings.keyPool.add")}
+            </button>
+          </div>
+          <label className="zai-route-model" htmlFor={keyId}>
+            <span>{t("settings.keyPool.strategy")}</span>
+            <select
+              id={keyId}
+              className="setting-select"
+              value={strategy}
+              disabled={busy}
+              onChange={(event) => void changeStrategy(event.target.value as GatewayPoolStrategy)}
+            >
+              <option value="round_robin">{t("settings.keyPool.strategy.roundRobin")}</option>
+              <option value="fill_first">{t("settings.keyPool.strategy.fillFirst")}</option>
+            </select>
+          </label>
+          <p className="muted">{t("settings.keyPool.strategy.note")}</p>
+          <p className="muted">{t("settings.keyPool.security")}</p>
         </>
       )}
       {error ? <p className="setting-error" role="alert">{t("settings.usage.error", { message: error })}</p> : null}

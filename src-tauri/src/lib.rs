@@ -13,7 +13,7 @@ use bridge::commands::{
     codex_hooks_remove, codex_hooks_status, shell_profiles_apply, shell_profiles_remove,
     shell_profiles_status, subscription_usage_refresh, system_git_branch, system_list_clis,
     system_list_shells, system_locate_program, system_query_version, zai_api_key_remove,
-    zai_api_key_set, zai_api_key_status,
+    zai_api_key_set, zai_api_key_status, zai_key_pool_add, zai_key_pool_list, zai_key_pool_remove,
 };
 use bridge::ime::{ime_state, ime_toggle};
 use bridge::paste_image::paste_save_image;
@@ -167,6 +167,9 @@ pub fn run() {
             zai_api_key_status,
             zai_api_key_set,
             zai_api_key_remove,
+            zai_key_pool_list,
+            zai_key_pool_add,
+            zai_key_pool_remove,
             shell_profiles_status,
             shell_profiles_apply,
             shell_profiles_remove,

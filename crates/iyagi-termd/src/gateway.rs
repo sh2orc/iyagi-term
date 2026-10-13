@@ -73,8 +73,19 @@ const FORWARD_REQUEST_HEADERS: [&str; 6] = [
     "x-app",
 ];
 
-/// 업스트림 응답 헤더 중 클라이언트로 되돌려 주는 것.
-const FORWARD_RESPONSE_HEADERS: [&str; 2] = ["content-type", "request-id"];
+/// 업스트림 응답 헤더 중 클라이언트로 되돌려 주는 것. 재시도 힌트는
+/// 429/529를 그대로 넘길 때 CLI가 자기 backoff 대신 제공자 값을 쓰게 한다.
+const FORWARD_RESPONSE_HEADERS: [&str; 5] = [
+    "content-type",
+    "request-id",
+    "retry-after",
+    "retry-after-ms",
+    "x-should-retry",
+];
+
+/// 업스트림 연결 수립 상한. 응답 대기·본문은 끊지 않는다(긴 생성은 정상이고
+/// CLI가 `API_TIMEOUT_MS`로 스스로 끊는다) — 연결조차 안 되는 경우만 자른다.
+const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 장부에 남기는 세션(게이트웨이 토큰) 상한. 초과하면 가장 오래 쉰 세션부터
 /// 버린다 — 종료 훅(`forget_workload`)이 정리를 담당하지만, 비정상 종료로
@@ -158,6 +169,7 @@ impl Gateway {
     pub fn new(secrets_root: PathBuf) -> Gateway {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(UPSTREAM_CONNECT_TIMEOUT)
             .build()
             .unwrap_or_default();
         Gateway {
@@ -252,8 +264,11 @@ impl Gateway {
         let now = epoch_ms();
         // 세션 발급 시점에 풀 키를 묶는다(진행 중 세션은 이 키를 유지한다).
         let key_id = {
+            let snapshot = self.pool_snapshot_ids();
             let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
-            pool.sync(&self.pool_snapshot_ids());
+            if let Some(snapshot) = snapshot {
+                pool.sync(&snapshot);
+            }
             pool.bind_new(now)
         };
         {
@@ -362,8 +377,11 @@ impl Gateway {
             .collect();
         list.sort_by(|a, b| a.workload_id.as_str().cmp(b.workload_id.as_str()));
         let (pool, pool_strategy) = {
+            let snapshot = self.pool_snapshot_ids();
             let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
-            pool.sync(&self.pool_snapshot_ids());
+            if let Some(snapshot) = snapshot {
+                pool.sync(&snapshot);
+            }
             let view = pool.view(epoch_ms());
             let strategy = pool.strategy();
             (view, strategy)
@@ -413,46 +431,65 @@ impl Gateway {
     }
 
     /// 풀 저장소 스냅숏(id·라벨 쌍) — 회전 엔진 `sync`용. 비밀은 버린다.
-    fn pool_snapshot_ids(&self) -> Vec<(String, String)> {
-        self.pool_entries_locked()
-            .into_iter()
-            .map(|entry| (entry.id, entry.label))
-            .collect()
+    /// 저장소를 읽지 못했으면 `None` — 호출자는 `sync`를 건너뛴다(빈 풀로
+    /// 맞추면 격리·쿨다운 기록이 지워져 다음 정상 읽기에서 다시 맞는다).
+    fn pool_snapshot_ids(&self) -> Option<Vec<(String, String)>> {
+        Some(
+            self.pool_entries_locked()?
+                .into_iter()
+                .map(|entry| (entry.id, entry.label))
+                .collect(),
+        )
     }
 
-    /// TTL 이내의 캐시 또는 다시 읽은 풀 항목. 읽기 실패는 빈 풀로 취급한다
-    /// (단일 키 폴백이 이어받는다).
-    fn pool_entries_locked(&self) -> Vec<PoolCacheEntry> {
+    /// TTL 이내의 캐시 또는 다시 읽은 풀 항목. 읽기에 실패하면 마지막으로
+    /// 읽은 스냅숏을 그대로 쓰고(다음 호출이 다시 읽는다), 그것도 없으면
+    /// `None`(단일 키 폴백이 이어받는다).
+    fn pool_entries_locked(&self) -> Option<Vec<PoolCacheEntry>> {
         let now = epoch_ms();
         let mut cache = self.pool_cache.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(cached) = cache.as_ref() {
             if now.saturating_sub(cached.loaded_epoch_ms) < POOL_CACHE_TTL_MS {
-                return cached.entries.clone();
+                return Some(cached.entries.clone());
             }
         }
-        let entries: Vec<PoolCacheEntry> = KeyPoolStore::new(&self.secrets_root)
-            .read_all_zeroizing()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(info, secret)| PoolCacheEntry {
-                id: info.id,
-                label: info.label,
-                secret,
-            })
-            .collect();
-        *cache = Some(CachedPool {
-            entries: entries.clone(),
-            loaded_epoch_ms: now,
-        });
-        entries
+        match KeyPoolStore::new(&self.secrets_root).read_all_zeroizing() {
+            Ok(read) => {
+                let entries: Vec<PoolCacheEntry> = read
+                    .into_iter()
+                    .map(|(info, secret)| PoolCacheEntry {
+                        id: info.id,
+                        label: info.label,
+                        secret,
+                    })
+                    .collect();
+                *cache = Some(CachedPool {
+                    entries: entries.clone(),
+                    loaded_epoch_ms: now,
+                });
+                Some(entries)
+            }
+            Err(_) => {
+                tracing::warn!("gateway key pool store unreadable; keeping last snapshot");
+                cache.as_ref().map(|cached| cached.entries.clone())
+            }
+        }
+    }
+
+    /// 풀에 등록된 키가 하나라도 있는가(런치 시 단일 키 없이도 라우팅할 수
+    /// 있는지 판단한다 — 쓸 수 있는 상태인지는 요청 시점에 따진다).
+    pub fn has_pool_keys(&self) -> bool {
+        self.pool_entries_locked()
+            .is_some_and(|entries| !entries.is_empty())
     }
 
     /// 이 요청에 쓸 업스트림 키. 세션이 묶은 키를 존중하되(친화성) 쓸 수
-    /// 없으면 갈아타고, 풀이 비었으면 단일 키로 폴백한다.
-    /// 반환: (키 id — 단일 키면 None, 비밀).
-    fn select_key(&self, bound: Option<&str>) -> Option<(Option<String>, Zeroizing<String>)> {
+    /// 없으면 갈아타고, 풀에 쓸 키가 없으면 단일 키로 폴백한다. `exclude`는
+    /// 사전 스트림 페일오버에서 방금 실패한 키다.
+    fn select_key(&self, bound: Option<&str>, exclude: Option<&str>) -> KeySelection {
         let now = epoch_ms();
-        let entries = self.pool_entries_locked();
+        let entries = self.pool_entries_locked().unwrap_or_default();
+        let mut exhausted = None;
         if !entries.is_empty() {
             let snapshot: Vec<(String, String)> = entries
                 .iter()
@@ -460,14 +497,33 @@ impl Gateway {
                 .collect();
             let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
             pool.sync(&snapshot);
-            if let Some(id) = pool.rebind(bound, now) {
+            if let Some(id) = pool.rebind(bound, exclude, now) {
                 if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
-                    return Some((Some(id), entry.secret.clone()));
+                    return KeySelection::Key {
+                        id: Some(id),
+                        secret: entry.secret.clone(),
+                    };
                 }
             }
             // 풀은 있는데 전원 사용 불가 — 단일 키라도 있으면 진행한다.
+            exhausted = Some(pool.earliest_cooldown_remaining_ms(now));
         }
-        self.single_key().map(|secret| (None, secret))
+        match (self.single_key(), exhausted) {
+            (Some(secret), _) => KeySelection::Key { id: None, secret },
+            (None, Some(retry_after_ms)) => KeySelection::Exhausted { retry_after_ms },
+            (None, None) => KeySelection::Missing,
+        }
+    }
+
+    /// `failed` 대신 보낼 곳이 있는가 — 다른 풀 키나 단일 키. 없으면
+    /// 페일오버하지 않고 받은 응답을 그대로 넘긴다(원래 429/401이 설정
+    /// 오류 502로 바뀌지 않게).
+    fn has_failover_key(&self, failed: &str) -> bool {
+        self.pool
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .has_available_except(failed, epoch_ms())
+            || self.single_key().is_some()
     }
 
     /// 세션에 묶인 풀 키 id(회전 결과를 다시 묶는 데 쓴다).
@@ -477,7 +533,7 @@ impl Gateway {
             .and_then(|entry| entry.key_id.clone())
     }
 
-    /// 요청이 특정 풀 키로 나갔음을 기록한다(친화성 갱신 + 회전 커서).
+    /// 요청이 특정 풀 키로 나갔음을 기록한다(키별 요청 수·마지막 사용 시각).
     fn note_key_attempt(&self, key_id: Option<&str>) {
         if let Some(id) = key_id {
             self.pool
@@ -500,6 +556,7 @@ impl Gateway {
         let Some(id) = key_id else { return };
         let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
         match outcome {
+            KeyOutcome::Neutral => {}
             KeyOutcome::Success => pool.record_success(id),
             KeyOutcome::RateLimited { retry_after_ms } => {
                 pool.record_rate_limited(id, retry_after_ms, now_ms)
@@ -565,7 +622,10 @@ pub async fn serve(gateway: Arc<Gateway>, mut shutdown: tokio::sync::watch::Rece
                     });
                 }
                 Err(error) => {
+                    // fd 고갈(EMFILE) 등은 즉시 다시 실패한다 — 바쁜 루프가
+                    // 되지 않게 잠깐 쉰다.
                     tracing::debug!(%error, "gateway accept failed");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             },
         }
@@ -638,6 +698,13 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
         return;
     }
 
+    // 경로: 업스트림 base URL 뒤에 그대로 붙으므로 `..` 세그먼트로 base
+    // 경로 밖(같은 호스트의 다른 API)에 실제 키를 들고 나가지 못하게 한다.
+    if !upstream_path_is_safe(&target) {
+        let _ = write_error(&mut writer, 400, "request path is not allowed").await;
+        return;
+    }
+
     // 본문: Content-Length 필수(청크 요청은 411 — Claude Code는 고정 길이
     // JSON만 보낸다).
     let body = match read_body(&mut reader, &headers, &buf[head_len..]).await {
@@ -649,15 +716,26 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
     };
 
     // 업스트림 키 선택(풀 우선, 단일 키 폴백 — 09 §3.3) + 사전 스트림
-    // 1회 페일오버. 시도는 최대 2회: 사전 스트림 401/403/429/402나 전송
-    // 실패면 결과를 회전 엔진에 기록하고 다음 키로 **한 번** 다시 보낸다.
-    // SSE가 흐르기 시작한 뒤의 오류는 재시도하지 않는다(헤더가 나갔다).
+    // 1회 페일오버. 시도는 최대 2회: 사전 스트림 401/429/402나 연결 수립
+    // 실패이고 보낼 다른 키가 있으면, 결과를 회전 엔진에 기록하고 실패한
+    // 키를 빼고 **한 번** 다시 보낸다. 5xx는 기록만 한다(요청이 처리됐을
+    // 수 있다). SSE가 흐르기 시작한 뒤의 오류는 재시도하지 않는다.
+    let body = bytes::Bytes::from(body);
     let session_bound = gateway.session_key(&token);
-    let mut response: Option<reqwest::Response> = None;
+    let mut failed: Option<String> = None;
+    let mut response: Option<(reqwest::Response, Option<String>)> = None;
     for attempt in 0..2 {
-        let Some((key_id, key)) = gateway.select_key(session_bound.as_deref()) else {
-            let _ = write_error(&mut writer, 502, "upstream credential is not configured").await;
-            return;
+        let (key_id, key) = match gateway.select_key(session_bound.as_deref(), failed.as_deref()) {
+            KeySelection::Key { id, secret } => (id, secret),
+            KeySelection::Exhausted { retry_after_ms } => {
+                let _ = write_pool_exhausted(&mut writer, retry_after_ms).await;
+                return;
+            }
+            KeySelection::Missing => {
+                let _ =
+                    write_error(&mut writer, 502, "upstream credential is not configured").await;
+                return;
+            }
         };
         let url = format!("{}{}", gateway.upstream_base, target);
         let mut request = gateway.client.request(method.clone(), &url);
@@ -673,37 +751,37 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
             .header("authorization", format!("Bearer {}", key.as_str()))
             .header("x-api-key", key.as_str())
             .body(body.clone());
+        let can_fail_over = |key_id: &Option<String>| {
+            attempt == 0
+                && key_id
+                    .as_deref()
+                    .is_some_and(|id| gateway.has_failover_key(id))
+        };
         match request.send().await {
             Ok(upstream) => {
                 let status = upstream.status().as_u16();
-                // 키는 쓰였다 — 시도로 기록(친화성·커서 갱신).
+                // 키는 쓰였다 — 장부(요청 수)와 세션 친화성 갱신.
                 gateway.note_key_attempt(key_id.as_deref());
                 gateway.rebind_session_key(&token, key_id.as_deref());
-                let outcome = match status {
-                    401 | 403 => Some(KeyOutcome::Auth),
-                    429 | 402 => Some(KeyOutcome::RateLimited {
-                        retry_after_ms: retry_after_ms(&upstream),
-                    }),
-                    _ => None,
-                };
-                if let Some(outcome) = outcome {
-                    gateway.record_key_outcome(key_id.as_deref(), outcome, epoch_ms());
-                    if attempt == 0 && key_id.is_some() {
-                        // 사전 스트림 1회 페일오버: 방금 실패한 키는 이미
-                        // 쿨다운/격리라 재선택에서 저절로 빠진다.
-                        tracing::info!(path = %target, status, "gateway pre-stream failure; failing over");
-                        continue;
-                    }
-                } else {
-                    gateway.record_key_outcome(key_id.as_deref(), KeyOutcome::Success, epoch_ms());
+                let outcome = key_outcome(status, &upstream);
+                gateway.record_key_outcome(key_id.as_deref(), outcome, epoch_ms());
+                let retryable =
+                    matches!(outcome, KeyOutcome::Auth | KeyOutcome::RateLimited { .. });
+                if retryable && can_fail_over(&key_id) {
+                    tracing::info!(path = %target, status, "gateway pre-stream failure; failing over");
+                    failed = key_id;
+                    continue;
                 }
-                response = Some(upstream);
+                response = Some((upstream, key_id));
                 break;
             }
             Err(error) => {
                 tracing::warn!(path = %target, %error, "gateway upstream request failed");
                 gateway.record_key_outcome(key_id.as_deref(), KeyOutcome::Transport, epoch_ms());
-                if attempt == 0 && key_id.is_some() {
+                // 연결 수립 실패만 다시 보낸다 — 그 밖의 오류는 본문이 이미
+                // 업스트림에 닿았을 수 있다(두 번 실행·과금 위험).
+                if error.is_connect() && can_fail_over(&key_id) {
+                    failed = key_id;
                     continue;
                 }
                 let _ = write_error(&mut writer, 502, "upstream request failed").await;
@@ -711,7 +789,7 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
             }
         }
     }
-    let Some(response) = response else {
+    let Some((response, used_key)) = response else {
         let _ = write_error(&mut writer, 502, "upstream request failed").await;
         return;
     };
@@ -749,18 +827,31 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
                 Ok(bytes) => {
                     scan.feed(&bytes);
                     if write_chunk(&mut writer, &bytes).await.is_err() {
+                        // 클라이언트가 떠났다 — 키 탓이 아니다.
                         transport_ok = false;
                         break;
                     }
                 }
                 Err(_) => {
+                    // 업스트림이 중간에 끊겼다. 종결 청크를 쓰지 않고 닫아
+                    // 클라이언트가 잘린 본문을 완결된 응답으로 믿지 않게
+                    // 한다(네트워크 오류로 보고 스스로 재시도한다).
                     transport_ok = false;
+                    gateway.record_key_outcome(
+                        used_key.as_deref(),
+                        KeyOutcome::Transport,
+                        epoch_ms(),
+                    );
                     break;
                 }
             }
         }
-        let _ = writer.write_all(b"0\r\n\r\n").await;
-        let _ = writer.flush().await;
+        if transport_ok {
+            let _ = writer.write_all(b"0\r\n\r\n").await;
+            let _ = writer.flush().await;
+        } else {
+            let _ = writer.shutdown().await;
+        }
         if counts_usage {
             gateway.record(
                 &token,
@@ -771,17 +862,37 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
         }
     } else {
         let mut payload: Vec<u8> = Vec::new();
-        let mut transport_ok = true;
         let mut stream = response.bytes_stream();
+        let mut relay_error = None;
         while let Some(chunk) = stream.next().await {
             match chunk {
-                Ok(bytes) => {
-                    if payload.len() + bytes.len() <= MAX_RESPONSE_BUFFER {
-                        payload.extend_from_slice(&bytes);
-                    }
+                Ok(bytes) if payload.len() + bytes.len() <= MAX_RESPONSE_BUFFER => {
+                    payload.extend_from_slice(&bytes);
                 }
-                Err(_) => transport_ok = false,
+                Ok(_) => {
+                    relay_error = Some("upstream response exceeded the gateway buffer");
+                    break;
+                }
+                Err(_) => {
+                    gateway.record_key_outcome(
+                        used_key.as_deref(),
+                        KeyOutcome::Transport,
+                        epoch_ms(),
+                    );
+                    relay_error = Some("upstream response was interrupted");
+                    break;
+                }
             }
+        }
+        // 잘린 본문을 원래 상태 코드로 넘기지 않는다(중간이 빠진 JSON이
+        // 맞는 content-length를 달고 나가면 클라이언트는 성공으로 믿는다).
+        if let Some(message) = relay_error {
+            tracing::warn!(path = %target, message, "gateway could not relay upstream body");
+            let _ = write_error(&mut writer, 502, message).await;
+            if counts_usage {
+                gateway.record(&token, &GatewayUsage::default(), None, false);
+            }
+            return;
         }
         let mut usage = GatewayUsage::default();
         let mut model = None;
@@ -821,12 +932,7 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
             .await
             .is_ok();
         if counts_usage {
-            gateway.record(
-                &token,
-                &usage,
-                model.as_deref(),
-                wrote && transport_ok && status < 400,
-            );
+            gateway.record(&token, &usage, model.as_deref(), wrote && status < 400);
         }
     }
 }
@@ -923,10 +1029,21 @@ async fn write_error(
     status: u16,
     message: &str,
 ) -> std::io::Result<()> {
+    write_error_with(writer, status, message, &[]).await
+}
+
+/// [`write_error`] + 추가 헤더(예: `retry-after`).
+async fn write_error_with(
+    writer: &mut OwnedWriteHalf,
+    status: u16,
+    message: &str,
+    extra: &ResponseHeaders<'_>,
+) -> std::io::Result<()> {
     let kind = match status {
         401 => "authentication_error",
         403 => "permission_error",
         413 | 431 => "request_too_large",
+        429 => "rate_limit_error",
         _ => "api_error",
     };
     let body = serde_json::json!({
@@ -934,16 +1051,13 @@ async fn write_error(
         "error": {"type": kind, "message": message}
     })
     .to_string();
-    write_response(
-        writer,
-        status,
-        &[
-            ("content-type", "application/json"),
-            ("content-length", &body.len().to_string()),
-        ],
-        body.as_bytes(),
-    )
-    .await
+    let length = body.len().to_string();
+    let mut headers: Vec<(&str, &str)> = vec![
+        ("content-type", "application/json"),
+        ("content-length", &length),
+    ];
+    headers.extend_from_slice(extra);
+    write_response(writer, status, &headers, body.as_bytes()).await
 }
 
 /// 응답 헤더 묶음(이름-값 순서쌍).
@@ -994,12 +1108,31 @@ async fn write_chunk(writer: &mut OwnedWriteHalf, bytes: &[u8]) -> std::io::Resu
 }
 
 /// 사전 스트림 단계의 키 결과(09 §3.3 표).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeyOutcome {
     Success,
-    RateLimited { retry_after_ms: Option<u64> },
+    RateLimited {
+        retry_after_ms: Option<u64>,
+    },
     Auth,
     Transport,
+    /// 키와 무관한 결과(403·그 밖의 4xx — 요청 자체의 문제). 기록하지 않는다.
+    Neutral,
+}
+
+/// 업스트림 상태 → 키 결과. 403은 격리하지 않는다: 키가 아니라 요청(허용
+/// 안 된 모델·정책)의 문제인 경우가 많아, 요청 한 건이 풀 전체를 영구
+/// 격리시킬 수 있다.
+fn key_outcome(status: u16, response: &reqwest::Response) -> KeyOutcome {
+    match status {
+        200..=299 => KeyOutcome::Success,
+        401 => KeyOutcome::Auth,
+        429 | 402 => KeyOutcome::RateLimited {
+            retry_after_ms: retry_after_ms(response),
+        },
+        500..=599 => KeyOutcome::Transport,
+        _ => KeyOutcome::Neutral,
+    }
 }
 
 /// `Retry-After`(초 단위 정수만)를 밀리초로. HTTP-DATE 형식은 무시한다.
@@ -1009,7 +1142,58 @@ fn retry_after_ms(response: &reqwest::Response) -> Option<u64> {
         .get("retry-after")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(|seconds| seconds * 1000)
+        .map(|seconds| seconds.saturating_mul(1000))
+}
+
+/// 업스트림 경로로 넘겨도 되는가: `/`로 시작하고 `.`/`..` 세그먼트(퍼센트
+/// 인코딩 포함)가 없어야 한다. 질의 문자열은 검사하지 않는다.
+fn upstream_path_is_safe(target: &str) -> bool {
+    let path = target.split('?').next().unwrap_or_default();
+    path.starts_with('/')
+        && path.split('/').all(|segment| {
+            let decoded = segment.to_ascii_lowercase().replace("%2e", ".");
+            decoded != "." && decoded != ".."
+        })
+}
+
+/// 요청에 쓸 업스트림 키 선택 결과.
+enum KeySelection {
+    /// 풀 키(`id`) 또는 단일 키(`id = None`).
+    Key {
+        id: Option<String>,
+        secret: Zeroizing<String>,
+    },
+    /// 풀은 있지만 전원 쿨다운·격리이고 단일 키도 없다. 쿨다운이면 가장
+    /// 빨리 풀리는 시각까지 남은 시간.
+    Exhausted { retry_after_ms: Option<u64> },
+    /// 어떤 자격 증명도 없다.
+    Missing,
+}
+
+/// 풀 전원 사용 불가. 쿨다운이면 429 + `Retry-After`(CLI가 그만큼 기다렸다
+/// 다시 보낸다), 전원 격리면 401 — "설정 안 됨" 502로 뭉개지 않는다.
+async fn write_pool_exhausted(
+    writer: &mut OwnedWriteHalf,
+    retry_after_ms: Option<u64>,
+) -> std::io::Result<()> {
+    match retry_after_ms {
+        Some(ms) => {
+            let seconds = ms.div_ceil(1000).max(1).to_string();
+            write_error_with(
+                writer,
+                429,
+                "all API keys in the pool are cooling down",
+                &[("retry-after", &seconds)],
+            )
+            .await
+        }
+        None => write_error(
+            writer,
+            401,
+            "all API keys in the pool were rejected by the provider; re-register them in Settings",
+        )
+        .await,
+    }
 }
 
 fn reason_phrase(status: u16) -> &'static str {
@@ -1163,6 +1347,7 @@ mod tests {
     use super::*;
     use std::io::{Read, Write as _};
     use std::net::TcpListener as StdListener;
+    use term_contracts::gateway::{PoolKeyStatus, PoolKeyViewState};
 
     const REAL_KEY: &str = "real-zai-key-0123456789abcdef";
 
@@ -1177,6 +1362,96 @@ mod tests {
 
     fn ids() -> (WorkloadId, SessionId) {
         (WorkloadId::generate(), SessionId::generate())
+    }
+
+    /// 아무도 듣지 않는 업스트림(연결 거부). 닿으면 502가 된다.
+    const CLOSED_UPSTREAM: &str = "http://127.0.0.1:1";
+
+    /// 연결마다 준비된 응답을 하나씩 돌려주는 업스트림. 응답을 다 쓰면
+    /// 리스너를 닫는다 — 그 뒤의 연결은 거부(게이트웨이 쪽 502)로 드러난다.
+    /// 반환: (주소, 받은 요청 헤드 목록을 돌려주는 스레드).
+    fn scripted_upstream(
+        responses: Vec<&'static str>,
+    ) -> (SocketAddr, std::thread::JoinHandle<Vec<String>>) {
+        let upstream = StdListener::bind("127.0.0.1:0").unwrap();
+        let addr = upstream.local_addr().unwrap();
+        let thread = std::thread::spawn(move || {
+            let mut heads = Vec::new();
+            for response in responses {
+                let (mut sock, _) = upstream.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let n = sock.read(&mut buf).unwrap();
+                heads.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+                sock.write_all(response.as_bytes()).unwrap();
+            }
+            heads
+        });
+        (addr, thread)
+    }
+
+    /// 풀 키만 등록된(단일 키 없음) 게이트웨이를 띄운다. 반환: (게이트웨이,
+    /// 포트, 서버 태스크, 임시 디렉터리).
+    async fn pool_gateway(
+        upstream: String,
+        keys: &[(&str, &str)],
+        strategy: GatewayPoolStrategy,
+    ) -> (
+        Arc<Gateway>,
+        u16,
+        tokio::task::JoinHandle<()>,
+        tempfile::TempDir,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = KeyPoolStore::new(dir.path());
+        for (label, key) in keys {
+            store.add("zai", label, key).unwrap();
+        }
+        let mut raw = Gateway::new(dir.path().to_path_buf());
+        raw.upstream_base = upstream;
+        let gateway = Arc::new(raw);
+        gateway.set_policy(Some(true), None, Some(strategy));
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = server.local_addr().unwrap().port();
+        gateway.set_listening(port);
+        let gw_server = Arc::clone(&gateway);
+        let task = tokio::spawn(async move {
+            loop {
+                let (stream, _) = server.accept().await.unwrap();
+                let gw = Arc::clone(&gw_server);
+                tokio::spawn(async move {
+                    handle_conn(gw, stream).await;
+                });
+            }
+        });
+        (gateway, port, task, dir)
+    }
+
+    /// 게이트웨이에 요청 한 건을 보내고 원시 응답을 통째로 읽는다.
+    async fn roundtrip(port: u16, token: &str, path: &str) -> String {
+        use tokio::io::AsyncWriteExt as _;
+        let body = r#"{"model":"glm-5.3[1m]"}"#;
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        sock.write_all(request.as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut sock, &mut response)
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&response).into_owned()
+    }
+
+    fn pool_state(gateway: &Gateway, label: &str) -> PoolKeyStatus {
+        gateway
+            .status()
+            .pool
+            .into_iter()
+            .find(|key| key.label == label)
+            .unwrap()
     }
 
     #[test]
@@ -1542,7 +1817,10 @@ mod tests {
             .unwrap();
         rt.block_on(async move {
             let dir = tempfile::tempdir().unwrap();
-            let gateway = Arc::new(gateway_with_key(dir.path()));
+            let mut raw = gateway_with_key(dir.path());
+            // 닫힌 포트 — 업스트림에 닿으면 401이 아니라 502가 된다.
+            raw.upstream_base = CLOSED_UPSTREAM.to_string();
+            let gateway = Arc::new(raw);
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let port = listener.local_addr().unwrap().port();
             gateway.set_listening(port);
@@ -1583,7 +1861,10 @@ mod tests {
             .unwrap();
         rt.block_on(async move {
             let dir = tempfile::tempdir().unwrap();
-            let gateway = Arc::new(gateway_with_key(dir.path()));
+            let mut raw = gateway_with_key(dir.path());
+            // 닫힌 포트 — 업스트림에 닿으면 403이 아니라 502가 된다.
+            raw.upstream_base = CLOSED_UPSTREAM.to_string();
+            let gateway = Arc::new(raw);
             gateway.set_policy(None, Some(true), None);
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -1616,6 +1897,182 @@ mod tests {
             let text = String::from_utf8_lossy(&response);
             assert!(text.starts_with("HTTP/1.1 403"), "{text}");
             assert!(text.contains("permission_error"));
+            task.abort();
+        });
+    }
+
+    /// 대체 키가 없으면 페일오버하지 않고 원래 429(+재시도 힌트)를 넘긴다.
+    /// 그 뒤 쿨다운 동안은 업스트림에 가지 않고 429 + Retry-After를 만든다
+    /// ("자격 증명 없음" 502로 뭉개지 않는다).
+    #[test]
+    fn lone_pool_key_passes_429_through_then_reports_cooldown() {
+        let (addr, upstream) = scripted_upstream(vec![
+            "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 30\r\ncontent-length: 2\r\n\r\n{}",
+        ]);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let (gateway, port, task, _dir) = pool_gateway(
+                format!("http://{addr}"),
+                &[("only", "pool-key-only-0001")],
+                GatewayPoolStrategy::RoundRobin,
+            )
+            .await;
+            let (workload, session) = ids();
+            let route = gateway.issue_route(&workload, &session).unwrap();
+            let first = roundtrip(port, &route.token, "/v1/messages").await;
+            assert!(first.starts_with("HTTP/1.1 429"), "{first}");
+            assert!(
+                first.contains("retry-after: 30"),
+                "재시도 힌트 전달: {first}"
+            );
+            let second = roundtrip(port, &route.token, "/v1/messages").await;
+            assert!(second.starts_with("HTTP/1.1 429"), "{second}");
+            assert!(second.contains("cooling down"), "{second}");
+            assert!(second.contains("rate_limit_error"), "{second}");
+            let retry: u64 = second
+                .lines()
+                .find_map(|line| line.strip_prefix("retry-after: "))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            assert!((1..=30).contains(&retry), "{retry}");
+            task.abort();
+        });
+        assert_eq!(upstream.join().unwrap().len(), 1);
+    }
+
+    /// 403은 요청의 문제일 수 있다 — 격리도 페일오버도 하지 않고 그대로.
+    #[test]
+    fn forbidden_passes_through_without_quarantine() {
+        let (addr, upstream) = scripted_upstream(vec![
+            "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}",
+        ]);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let (gateway, port, task, _dir) = pool_gateway(
+                format!("http://{addr}"),
+                &[("a", "pool-key-aaaa1111"), ("b", "pool-key-bbbb2222")],
+                GatewayPoolStrategy::FillFirst,
+            )
+            .await;
+            let (workload, session) = ids();
+            let route = gateway.issue_route(&workload, &session).unwrap();
+            let text = roundtrip(port, &route.token, "/v1/messages").await;
+            assert!(text.starts_with("HTTP/1.1 403"), "{text}");
+            assert_eq!(pool_state(&gateway, "a").state, PoolKeyViewState::Active);
+            assert_eq!(pool_state(&gateway, "b").state, PoolKeyViewState::Unused);
+            task.abort();
+        });
+        assert_eq!(upstream.join().unwrap().len(), 1, "페일오버 없음");
+    }
+
+    /// 5xx는 다시 보내지 않고(처리됐을 수 있다) 전송 실패로 센다 — 3회
+    /// 연속이면 소프트 쿨다운으로 다음 요청은 다른 키로 간다.
+    #[test]
+    fn server_errors_escalate_to_soft_cooldown_without_failover() {
+        const ERR: &str = "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}";
+        const OK: &str =
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}";
+        let (addr, upstream) = scripted_upstream(vec![ERR, ERR, ERR, OK]);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let (gateway, port, task, _dir) = pool_gateway(
+                format!("http://{addr}"),
+                &[("a", "pool-key-aaaa1111"), ("b", "pool-key-bbbb2222")],
+                GatewayPoolStrategy::FillFirst,
+            )
+            .await;
+            let (workload, session) = ids();
+            let route = gateway.issue_route(&workload, &session).unwrap();
+            for _ in 0..3 {
+                let text = roundtrip(port, &route.token, "/v1/messages").await;
+                assert!(text.starts_with("HTTP/1.1 503"), "{text}");
+            }
+            assert_eq!(pool_state(&gateway, "a").state, PoolKeyViewState::Cooling);
+            let text = roundtrip(port, &route.token, "/v1/messages").await;
+            assert!(text.starts_with("HTTP/1.1 200"), "{text}");
+            task.abort();
+        });
+        let heads = upstream.join().unwrap();
+        assert_eq!(heads.len(), 4);
+        assert!(heads[..3]
+            .iter()
+            .all(|h| h.contains("Bearer pool-key-aaaa1111")));
+        assert!(
+            heads[3].contains("Bearer pool-key-bbbb2222"),
+            "{}",
+            heads[3]
+        );
+    }
+
+    /// 업스트림 SSE가 중간에 끊기면 종결 청크 없이 닫는다(클라이언트가
+    /// 잘린 응답을 완결로 믿지 않게) — 장부엔 실패로 남는다.
+    #[test]
+    fn upstream_cut_mid_stream_is_not_terminated_cleanly() {
+        let (addr, upstream) = scripted_upstream(vec![concat!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+            "16\r\nevent: message_start\n\n\r\n",
+            "40\r\ndata: {\"type\":"
+        )]);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let (gateway, port, task, _dir) = pool_gateway(
+                format!("http://{addr}"),
+                &[("a", "pool-key-aaaa1111")],
+                GatewayPoolStrategy::RoundRobin,
+            )
+            .await;
+            let (workload, session) = ids();
+            let route = gateway.issue_route(&workload, &session).unwrap();
+            let text = roundtrip(port, &route.token, "/v1/messages").await;
+            assert!(text.starts_with("HTTP/1.1 200"), "{text}");
+            assert!(text.contains("message_start"), "{text}");
+            assert!(
+                !text.ends_with("0\r\n\r\n"),
+                "종결 청크가 없어야 한다: {text:?}"
+            );
+            assert_eq!(gateway.status().totals.failures, 1);
+            task.abort();
+        });
+        upstream.join().unwrap();
+    }
+
+    /// `..` 세그먼트로 base 경로 밖을 가리키는 요청은 업스트림에 가지 않는다.
+    #[test]
+    fn dot_segment_paths_are_refused() {
+        assert!(upstream_path_is_safe("/v1/messages?beta=true"));
+        assert!(upstream_path_is_safe("/v1/messages/count_tokens"));
+        assert!(!upstream_path_is_safe("/v1/../../paas/v4"));
+        assert!(!upstream_path_is_safe("/v1/%2E%2e/x"));
+        assert!(!upstream_path_is_safe("v1/messages"));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let (gateway, port, task, _dir) = pool_gateway(
+                CLOSED_UPSTREAM.to_string(),
+                &[("a", "pool-key-aaaa1111")],
+                GatewayPoolStrategy::RoundRobin,
+            )
+            .await;
+            let (workload, session) = ids();
+            let route = gateway.issue_route(&workload, &session).unwrap();
+            let text = roundtrip(port, &route.token, "/v1/../../x").await;
+            assert!(text.starts_with("HTTP/1.1 400"), "{text}");
             task.abort();
         });
     }

@@ -2229,6 +2229,7 @@ name = "iyagi-termd"
 version = "0.1.2"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "clap",
  "futures-util",
  "httpdate",

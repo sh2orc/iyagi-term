@@ -149,7 +149,9 @@ pub fn launch(state: Arc<DaemonState>, request: LaunchRequest) -> Result<LaunchO
     // Z.ai 라우팅 해석(`claude_provider`). 실패는 workload 행이 생기기 전에
     // reason code로 끝나고, 요청은 절대 바꾸지 않는다 — fingerprint·DB·
     // title에 토큰이 들어갈 길이 없다. 토큰은 아래 env 맵으로만 흐른다.
-    let claude_provider = crate::claude_provider::resolve(state.paths.root(), &request)?;
+    let gateway_pool = state.gateway.is_routable() && state.gateway.has_pool_keys();
+    let claude_provider =
+        crate::claude_provider::resolve(state.paths.root(), &request, gateway_pool)?;
 
     match request.mode {
         LaunchMode::Shell => launch_shell(&state, &request, canonical_cwd, claude_provider),
@@ -241,9 +243,16 @@ fn launch_shell(
     // 환경에 아예 실리지 않는다). `register_workload`가 redactor를 복사해
     // 가기 전에 감싸야 엔트리의 redactor도 게이트웨이 토큰을 지운다.
     if let Some(routed) = &mut claude_provider {
-        state.gateway.rewire(routed, &workload_id, &session_id);
+        if !state.gateway.rewire(routed, &workload_id, &session_id) {
+            routed.require_token()?;
+        }
     }
-    record_intent(state, request, &request.policy, &workload_id, &session_id)?;
+    // 여기부터 실패하면 감싸면서 발급한 게이트웨이 세션도 거둔다(종료 훅
+    // `note_workload_terminal`까지 가지 않는 경로다).
+    if let Err(error) = record_intent(state, request, &request.policy, &workload_id, &session_id) {
+        state.gateway.forget_workload(&workload_id);
+        return Err(error);
+    }
     let entry = register_workload(
         state,
         request,
@@ -255,10 +264,14 @@ fn launch_shell(
     );
 
     // STARTING commit, then direct PTY spawn (no gate/group).
-    state
+    if let Err(error) = state
         .storage
         .mark_starting(&workload_id)
-        .map_err(storage_error)?;
+        .map_err(storage_error)
+    {
+        state.gateway.forget_workload(&workload_id);
+        return Err(error);
+    }
     set_entry_state(state, &workload_id, WorkloadState::Starting);
     state.workload_state_changed(&workload_id);
 

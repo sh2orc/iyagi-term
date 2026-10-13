@@ -234,6 +234,18 @@ impl ResolvedClaudeProvider {
         env.insert(TOKEN_ENV.to_string(), (*self.token).clone());
     }
 
+    /// 셸 모드 spawn 직전 검사: 풀 전용 해석([`resolve`]의 `gateway_pool`)이
+    /// 게이트웨이로 감싸지지 못해 토큰이 비어 있으면 키 없음으로 거부한다.
+    pub fn require_token(&self) -> Result<(), RpcError> {
+        if self.token.is_empty() {
+            return Err(rejected(
+                REASON_KEY_MISSING,
+                "Z.ai Coding Plan API key is not configured",
+            ));
+        }
+        Ok(())
+    }
+
     /// 관리 모드: 토큰을 **뺀** provider 변수만 얹는다. descriptor는 대기열에
     /// 남을 수 있으므로 토큰은 시작 시점에 [`StartToken::read`]로 다시 읽어
     /// gate 프레임에만 넣는다.
@@ -257,9 +269,16 @@ impl fmt::Debug for ResolvedClaudeProvider {
 ///
 /// 순서: 프로그램 판정(env 런처를 벗긴 뒤 Claude Code여야 한다) → env
 /// 충돌 → 키 읽기. 키는 앞의 두 검사를 통과했을 때만 디스크에서 읽는다.
+///
+/// `gateway_pool`: 관측 게이트웨이가 열려 있고 키 풀에 키가 있다(09 §4).
+/// 이때 단일 키가 없어도 해석은 성공하고 토큰은 비어 있다 — 셸 모드는
+/// 게이트웨이 토큰으로 감싸지 못하면 `zai_key_missing`으로 거부하고
+/// ([`ResolvedClaudeProvider::require_token`]), 관리 모드는 시작 시점에
+/// 다시 판정한다.
 pub fn resolve(
     root: &Path,
     request: &LaunchRequest,
+    gateway_pool: bool,
 ) -> Result<Option<ResolvedClaudeProvider>, RpcError> {
     let Some(provider) = request.claude_provider.as_ref() else {
         return Ok(None);
@@ -293,7 +312,16 @@ pub fn resolve(
     // (3) 키: 런치 시점에 있어야 한다(실패는 workload 행이 생기기 전에
     // 끝난다). 셸 모드는 이 토큰을 그대로 쓰고, 관리 모드는 시작 시점에
     // 다시 읽는다.
-    let StartToken { token, redactor } = StartToken::read(root)?;
+    let StartToken { token, redactor } = match StartToken::read(root) {
+        Ok(start) => start,
+        Err(error) if gateway_pool && reason_code(&error) == Some(REASON_KEY_MISSING) => {
+            StartToken {
+                token: Zeroizing::new(String::new()),
+                redactor: Arc::new(SecretRedactor::new(std::iter::empty::<String>())),
+            }
+        }
+        Err(error) => return Err(error),
+    };
 
     tracing::debug!(main_model = %main_model, "claude_provider resolved: Z.ai Coding Plan routing");
     Ok(Some(ResolvedClaudeProvider {
@@ -367,7 +395,7 @@ mod tests {
         // 저장소 디렉터리가 아예 없어도 None이다.
         let dir = tempfile::tempdir().unwrap();
         let req = request("/usr/bin/zsh", &["-l"], None);
-        assert!(resolve(&dir.path().join("missing"), &req)
+        assert!(resolve(&dir.path().join("missing"), &req, false)
             .unwrap()
             .is_none());
     }
@@ -376,7 +404,7 @@ mod tests {
     fn routed_launch_without_a_key_is_rejected_with_zai_key_missing() {
         let dir = tempfile::tempdir().unwrap();
         let req = request("/x/claude", &[], zai("glm-5.3[1m]"));
-        let err = resolve(dir.path(), &req).unwrap_err();
+        let err = resolve(dir.path(), &req, false).unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidArgument);
         assert_eq!(reason_code(&err), Some(REASON_KEY_MISSING));
         assert!(!err.message.contains(KEY));
@@ -388,13 +416,30 @@ mod tests {
     }
 
     #[test]
+    fn gateway_pool_launch_resolves_without_a_single_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let req = request("/x/claude", &[], zai("glm-5.3[1m]"));
+        // 게이트웨이 + 키 풀: 단일 키 없이도 해석된다(토큰은 비어 있다).
+        let resolved = resolve(dir.path(), &req, true).unwrap().expect("routed");
+        assert!(resolved.token.is_empty());
+        // 감싸지 못한 셸 런치는 spawn 전에 키 없음으로 거부된다.
+        let err = resolved.require_token().unwrap_err();
+        assert_eq!(reason_code(&err), Some(REASON_KEY_MISSING));
+        // 단일 키가 있으면 평소처럼 그 키를 읽는다.
+        store_with_key(dir.path());
+        let resolved = resolve(dir.path(), &req, true).unwrap().expect("routed");
+        assert_eq!(resolved.token.as_str(), KEY);
+        assert!(resolved.require_token().is_ok());
+    }
+
+    #[test]
     fn unreadable_store_is_reported_without_os_detail() {
         let dir = tempfile::tempdir().unwrap();
         store_with_key(dir.path());
         // 암호문은 남고 마스터 키가 사라진 저장소: 읽기 오류.
         std::fs::remove_file(dir.path().join("secrets/master.key")).unwrap();
         let req = request("/x/claude", &[], zai("glm-5.3[1m]"));
-        let err = resolve(dir.path(), &req).unwrap_err();
+        let err = resolve(dir.path(), &req, false).unwrap_err();
         assert_eq!(reason_code(&err), Some(REASON_KEY_UNREADABLE));
         assert!(
             !err.message.contains("secrets/"),
@@ -417,7 +462,7 @@ mod tests {
             ("/x/claude.md", vec![]),
         ] {
             let req = request(program, &argv, zai("glm-5.3[1m]"));
-            let err = resolve(dir.path(), &req).unwrap_err();
+            let err = resolve(dir.path(), &req, false).unwrap_err();
             assert_eq!(
                 reason_code(&err),
                 Some(REASON_PROGRAM_MISMATCH),
@@ -447,7 +492,7 @@ mod tests {
             ],
             zai("glm-5.3-flash[1m]"),
         );
-        let resolved = resolve(dir.path(), &req).unwrap().expect("routed");
+        let resolved = resolve(dir.path(), &req, false).unwrap().expect("routed");
         assert_eq!(
             resolved.provider,
             ClaudeProvider::ZaiCodingPlan {
@@ -471,7 +516,7 @@ mod tests {
             r"C:\Program Files\Claude\CLAUDE.EXE",
         ] {
             let req = request(program, &["--continue"], zai("glm-5.3[1m]"));
-            let resolved = resolve(dir.path(), &req).unwrap();
+            let resolved = resolve(dir.path(), &req, false).unwrap();
             assert!(resolved.is_some(), "{program}");
         }
     }
@@ -484,7 +529,7 @@ mod tests {
             let mut req = request("/x/claude", &[], zai("glm-5.3[1m]"));
             req.env_overrides
                 .insert(name.to_string(), "user-value".to_string());
-            let err = resolve(dir.path(), &req).unwrap_err();
+            let err = resolve(dir.path(), &req, false).unwrap_err();
             assert_eq!(reason_code(&err), Some(REASON_ENV_CONFLICT), "{name}");
             assert!(err.message.contains(name));
             assert!(
@@ -495,7 +540,7 @@ mod tests {
         let mut req = request("/x/claude", &[], zai("glm-5.3[1m]"));
         req.env_overrides
             .insert("CLAUDE_CONFIG_DIR".to_string(), ".claude-work".to_string());
-        assert!(resolve(dir.path(), &req).unwrap().is_some());
+        assert!(resolve(dir.path(), &req, false).unwrap().is_some());
     }
 
     #[test]
@@ -503,7 +548,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         store_with_key(dir.path());
         let req = request("/x/claude", &[], zai("glm-5.3[1m]"));
-        let resolved = resolve(dir.path(), &req).unwrap().expect("routed");
+        let resolved = resolve(dir.path(), &req, false).unwrap().expect("routed");
 
         // 비밀이 아닌 변수만 `env`에 있다; 토큰은 `token`이 따로 든다.
         let expected: BTreeMap<&str, &str> = [
@@ -667,7 +712,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         store_with_key(dir.path());
         let req = request("/x/claude", &[], zai("glm-5.3[1m]"));
-        let resolved = resolve(dir.path(), &req).unwrap().expect("routed");
+        let resolved = resolve(dir.path(), &req, false).unwrap().expect("routed");
 
         let mut line = format!("ANTHROPIC_AUTH_TOKEN={KEY} ok");
         crate::exec::output::Redactor::redact(&*resolved.redactor, &mut line);

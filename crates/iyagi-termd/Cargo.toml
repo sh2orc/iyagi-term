@@ -39,6 +39,8 @@ reqwest = { version = "0.12.28", default-features = false, features = ["blocking
 # 게이트웨이 스트리밍 프록시의 `bytes_stream()` 소비(reqwest stream 기능의
 # 의존성을 직접 노출한다).
 futures-util = { version = "0.3", default-features = false }
+# 게이트웨이 요청 본문 — 페일오버 재시도가 본문을 복사하지 않고 공유한다.
+bytes = "1"
 keyring = "4.2.0"
 zeroize = { version = "1.8", features = ["serde"] }
 httpdate = "1.0.3"

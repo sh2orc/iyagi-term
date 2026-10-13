@@ -115,7 +115,7 @@ describe("sanitizePreferences", () => {
     expect(sanitizePreferences({}).gatewayPoolStrategy).toBe("round_robin");
   });
 
-    it("treats a missing or non-object payload as defaults (첫 실행·손상 저장)", () => {
+  it("treats a missing or non-object payload as defaults (첫 실행·손상 저장)", () => {
     expect(sanitizePreferences(null)).toEqual(DEFAULT_PREFERENCES);
     expect(sanitizePreferences("nope")).toEqual(DEFAULT_PREFERENCES);
   });

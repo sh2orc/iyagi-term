@@ -21,6 +21,7 @@ pub mod guard;
 pub mod helper;
 pub mod hook;
 pub mod ipc;
+pub mod key_pool;
 pub mod lifecycle;
 pub mod mission;
 pub mod model_watch;

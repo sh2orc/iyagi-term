@@ -1,0 +1,140 @@
+# 09 — API 키 풀과 회전 엔진 (Key Pool & Rotation Engine)
+
+> 상태: Phase 1 채택(2026-10). opencodex(lidge-jun)의 계정 풀링 설계를
+> 벤치마크하되, **합법적인 API 키 회전**만 Phase 1 범위로 삼는다. 이 문서는
+> 3단계 로드맵 전체의 채택 기록이자 Phase 1의 설계다.
+
+## 0. 로드맵 (채택됨)
+
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| **Phase 1** | API 키 풀 + 회전 엔진 — 같은 회전 엔진(친화성·쿨다운·페일오버)을 API 키에 적용. ToS 리스크 낮음(업계 표준 관행) | **이 문서, 착수** |
+| **Phase 2** | Codex 경유 관측 — `/v1/responses` 인바운드 + 스폰 시점 `-c` 오버라이드. 단일 계정 쿼터 텔레메트리부터 | 설계 시 |
+| **Phase 3** | 다중 구독 계정 풀 — 기술적으론 Phase 2 + 계정 선택기. **UAYOR 경고 게이트 뒤 opt-in, 마케팅 프론트엔딩 아님** | 제품 결정 유지 |
+
+3단계 전체에 적용되는 원칙(§5 참조): 업스트림 형태 가정은 한 모듈에 격리,
+기본 설치는 제로 능동 행동(수동 텔레메트리만), 우리는 CLI를 spawn하므로
+**사용자의 설정 파일을 절대 수정하지 않는다**(opencodex의
+config.toml 주입·저널·shim 전체를 건너뛴다).
+
+## 1. 동기
+
+게이트웨이(08)는 지금 업스트림 자격증명을 단 하나(단일 Z.ai 키)만 안다.
+분당 한도·장애가 있으면 그 키가 유일한 실패점이다. 여러 API 키를 등록하고
+**세션 단위로 묶어(affinity) 돌려 쓰며(rotate) 실패한 키를 잠시 빼고(cooldown)
+같은 요청을 다음 키로 한 번 재시도하는(failover)** 것은 LiteLLM·one-api가
+공공연히 하는 표준 관행이다. 이 회전 엔진과 자격증명 저장소 뼈대를
+Phase 1에서 리스크 없이 완성하면, Phase 2·3(쿼터 윈도·구독 계정)는 그 위에
+"점수 함수와 신호 원천"만 바꿔 얹는다.
+
+## 2. 구성 (Phase 1)
+
+* **저장소** (`term-secrets`): `KeyPoolStore` — 기존 `zai.enc` 단일 키와 같은
+  암호화 형식(master.key + AES-256-GCM)으로 `secrets/keys.enc`에 여러 키.
+  앱(src-tauri 브리지)이 쓰고 데몬이 요청 시점마다 다시 읽는다(추가·삭제
+  즉시 반영). **비밀은 RPC를 통하지 않는다** — 파일이 진실 원본이다.
+* **엔진** (`iyagi-termd/src/key_pool.rs`): 순수 로직, 시계 주입 가능.
+* **통합** (`gateway.rs`): 세션 발급 시 키 바인딩, 사전 스트림(pre-stream)
+  429/401/403에서 결과 기록 + 1회 페일오버.
+* **정책** (`gateway.set_policy` 확장): `pool_strategy` =
+  `round_robin` | `fill_first`.
+* **UI**: 설정 › 통합 › "API 키 풀" 카드 — 키 추가/삭제/상태, 전략 선택.
+
+## 3. 엔진 설계
+
+### 3.1 상태 (키당)
+
+```text
+PoolKeyState {
+  id, label,
+  cooldown_until_ms: Option<u64>,   // 429 등: 이 시각까지 선택 제외
+  quarantined: bool,                // 401/403: 사람이 재등록할 때까지 제외
+  consecutive_failures: u32,
+  requests: u64, failures: u64,     // 이 키가 답한 요청 수(장부)
+  last_used_ms: Option<u64>,
+}
+```
+
+### 3.2 선택 전략
+
+두 전략 모두 **새 세션 발급 시에만** 키를 고른다(`bind_new`). 진행 중 세션은
+묶인 키를 계속 쓴다 — 대화 중간에 키가 바뀌면 (a) 프롬프트 캐시가 차가워지고
+(b) 제공자별 요금·로그가 갈라진다. opencodex가 친화성 키를 codex-rs의
+`prompt_cache_key`(`session-id`)와 일치시키는 이유와 같은 원리다.
+
+* **round_robin**(기본): 순서대로 순환. 커서는 성공한 발급에만 전진.
+* **fill_first**: 순서상 첫 사용 가능 키에 붙어 버티다 임계(연속 실패·쿨다운)에
+  걸리면 다음으로. "메인 키 보호" 관성과 반대 방향 — 지정한 우선순위대로
+  소진시키는 전략.
+
+선택 시 쿨다운·격리된 키는 건너뛴다. 전부 사용 불가면 `None` → 세션은 발급
+거부(라우팅 감싸기 없음)가 아니라 **기존 단일 키 경로로 폴백**한다.
+
+### 3.3 결과 기록 (opencodex의 상태머신을 API 키 축으로 축소)
+
+| 업스트림 결과 | 기록 | 효과 |
+|---|---|---|
+| 2xx 스트림 완결 | `record_success` | 연속 실패 0, `requests+1` |
+| **429 / 402** (사전 스트림) | `record_rate_limited(retry_after)` | 쿨다운 = `Retry-After`(있으면 그대로, **상한 24h**) else 60s 기본. 같은 요청 1회 페일오버 |
+| **401 / 403** (사전 스트림) | `record_auth_failure` | 격리(사람의 재등록 필요). 같은 요청 1회 페일오버 |
+| 5xx / 전송 오류 | `record_transport_failure` | 연속 실패 3회부터 쿨다운 30s(소프트 회피) |
+
+**사전 스트림 1회 페일오버**: 업스트림 상태 줄을 받은 뒤·클라이언트로 아직
+아무것도 안 쓴 시점에만, 다음 사용 가능 키로 **정확히 한 번** 재시도한다.
+SSE가 이미 흐르기 시작한 뒤의 오류는 재시도하지 않는다(헤더가 나갔으므로).
+쿨다운 해제는 시각 경과(프로브 없음 — API 키는 구독 창과 달리 유기적 2xx로
+증명할 필요가 없다. 이것이 Phase 3과의 핵심 차이다).
+
+### 3.4 상태 표면
+
+`gateway.status`에 `pool: [{id, label, state, cooldown_remaining_ms,
+requests, failures, last_used_epoch_ms}]` + `pool_strategy`가 실린다.
+`state` = `active | cooling | quarantined | unused`. 비밀(키 값)은 어디에도
+나오지 않는다 — 08 §5 불변 그대로.
+
+## 4. 저장소 형식 (`keys.enc`)
+
+같은 `master.key`, 같은 봉투(`IYAGI-SECRET-1`), 다른 AD 컨텍스트
+(`iyagi:provider-key-pool:v1`). 평문 JSON:
+
+```json
+{"version":1,"entries":[
+  {"id":"<uuid>","provider":"zai","label":"개인","secret":"...","created_epoch_ms":0}
+]}
+```
+
+* 상한: 항목 32개, 키 길이 8..1024, 파일 16 KiB(단일 키 봉투의 4 KiB 상한과 별개).
+* 쓰기는 temp+rename 원자적, 디렉터리 0700·파일 0600(기존 규칙).
+* 앱의 브리지 명령: `zai_key_pool_list / zai_key_pool_add / zai_key_pool_remove`.
+* **마이그레이션 없음**: 기존 단일 키(`zai.enc`)는 풀이 비어 있으면
+  "기본 키"로 계속 동작한다(가상 항목 `default`). 풀에 키가 있으면 풀이
+  이긴다. UI에서 이 관계를 문구로 설명한다.
+
+## 5. 위험·정책 게이트 (전 단계 공통, Phase 3 특히)
+
+1. **격리**: OAuth 클라이언트 ID, `x-codex-*` 헤더, WHAM URL, 오류 코드
+   목록, 창 기간 상수, 모델명 — 전부 향후 `upstream_contracts` 모듈 한 곳에.
+   Phase 1은 이 게이트의 틀만 만든다(상수 위치를 고정).
+2. **기본은 수동**: 우리 게이트웨이는 흘러가는 응답에서 읽기만 한다.
+   warmup·백그라운드 토큰 갱신 같은 능동 행동은 존재하지 않는다(Phase 3에서도
+   기본 off 유지).
+3. **ToS 경계**: Phase 1은 API 키 회전(표준 관행). 구독 계정 풀링(한도 회피
+   해석 가능)은 Phase 3에서만, 명시적 경고 뒤 opt-in. 저장소·UI 문구는
+   "본인 소유의 API 키"로 한정해 서술한다.
+
+## 6. 비목표 (Phase 1)
+
+* 가중치·우선순위 티어(opencodex의 tier/pin) — 요청이 생기면.
+* 사용량 백분율 점수 전략(`quota`) — API 키엔 그 신호가 없다. Phase 2·3의 것.
+* 구독 계정·OAuth — Phase 3.
+* Codex/OpenCode 경유 — Phase 2.
+* 크레딧·USD 환산 — 미션 Usage 체계와 통합 설계 필요.
+
+## 7. 시험
+
+* `term-secrets`: 풀 봉투 왕복·상한·권한·원자성(기존 단일 키 시험과 같은 축).
+* `key_pool.rs`(순수 로직, 가짜 시계): 전략별 선택·친화성 유지·쿨다운
+  만료·격리·연속 실패 에스컬레이션·전원 불가 폴백.
+* `gateway.rs` e2e: 키 두 개를 등록하고 목업 업스트림이 첫 키의 Bearer엔
+  429, 둘째 키엔 200을 주면 — 클라이언트는 200을 받고, 첫 키는 쿨다운,
+  둘째 키의 장부에 요청이 남는다(사전 스트림 페일오버 증명).

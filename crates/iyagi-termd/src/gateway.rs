@@ -49,8 +49,11 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpListener;
 use zeroize::Zeroizing;
 
-use term_contracts::gateway::{GatewayPolicy, GatewayStatus, GatewayUsage, GATEWAY_TOKEN_PREFIX};
+use term_contracts::gateway::{
+    GatewayPolicy, GatewayPoolStrategy, GatewayStatus, GatewayUsage, GATEWAY_TOKEN_PREFIX,
+};
 use term_contracts::ids::{SessionId, WorkloadId};
+use term_secrets::KeyPoolStore;
 
 use crate::connections::{SecretRedactor, CLAUDE_ZAI_BASE_URL};
 
@@ -109,7 +112,28 @@ pub struct Gateway {
     /// 업스트림 호출용 비동기 클라이언트(스트리밍, 타임아웃 없음 —
     /// CLI가 `API_TIMEOUT_MS`로 스스로 끊는다).
     client: reqwest::Client,
+    /// API 키 회전 엔진(09 §3). 상태(쿨다운·격리·커서)는 여기 산다.
+    pool: std::sync::Mutex<crate::key_pool::KeyPool>,
+    /// 풀 저장소 스냅숏 캐시(비밀 포함 — 로그 금지). 5초 TTL로 다시 읽는다.
+    pool_cache: std::sync::Mutex<Option<CachedPool>>,
 }
+
+/// 풀 저장소 스냅숏 캐시. 비밀이 든 벡터를 들고 있으므로 drop 시 지워진다.
+struct CachedPool {
+    entries: Vec<PoolCacheEntry>,
+    loaded_epoch_ms: u64,
+}
+
+/// 캐시 항목: id·라벨(상태 표면용) + 비밀(사본도 `Zeroizing` 드롭으로 지워진다).
+#[derive(Clone)]
+struct PoolCacheEntry {
+    id: String,
+    label: String,
+    secret: Zeroizing<String>,
+}
+
+/// 풀 스냅숏 캐시 TTL — 앱에서 키를 추가·삭제해도 이 안에는 반영된다.
+const POOL_CACHE_TTL_MS: u64 = 5_000;
 
 /// 장부의 세션 항목. 토큰 문자열은 맵 키로만 존재한다.
 struct GwSession {
@@ -118,6 +142,8 @@ struct GwSession {
     usage: GatewayUsage,
     /// 이 세션이 마지막으로 쓴 모델(응답에서 관측, 전시 전용).
     model: Option<String>,
+    /// 묶인 풀 키 id(친화성, 09 §3.2). 풀 경로가 아니면 None.
+    key_id: Option<String>,
     started_epoch_ms: u64,
     last_seen_epoch_ms: u64,
 }
@@ -143,6 +169,10 @@ impl Gateway {
             secrets_root,
             upstream_base: CLAUDE_ZAI_BASE_URL.to_string(),
             client,
+            pool: std::sync::Mutex::new(crate::key_pool::KeyPool::new(
+                GatewayPoolStrategy::RoundRobin,
+            )),
+            pool_cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -161,12 +191,23 @@ impl Gateway {
         self.is_enabled() && self.port.load(Ordering::Acquire) != 0
     }
 
-    pub fn set_policy(&self, enabled: Option<bool>, blocked: Option<bool>) -> GatewayPolicy {
+    pub fn set_policy(
+        &self,
+        enabled: Option<bool>,
+        blocked: Option<bool>,
+        pool_strategy: Option<GatewayPoolStrategy>,
+    ) -> GatewayPolicy {
         if let Some(enabled) = enabled {
             self.enabled.store(enabled, Ordering::Release);
         }
         if let Some(blocked) = blocked {
             self.blocked.store(blocked, Ordering::Release);
+        }
+        if let Some(strategy) = pool_strategy {
+            self.pool
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .set_strategy(strategy);
         }
         self.policy()
     }
@@ -175,6 +216,11 @@ impl Gateway {
         GatewayPolicy {
             enabled: self.is_enabled(),
             blocked: self.is_blocked(),
+            pool_strategy: self
+                .pool
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .strategy(),
         }
     }
 
@@ -204,6 +250,12 @@ impl Gateway {
         }
         let token = format!("{GATEWAY_TOKEN_PREFIX}{}", random_token());
         let now = epoch_ms();
+        // 세션 발급 시점에 풀 키를 묶는다(진행 중 세션은 이 키를 유지한다).
+        let key_id = {
+            let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
+            pool.sync(&self.pool_snapshot_ids());
+            pool.bind_new(now)
+        };
         {
             let mut sessions = self.lock_sessions();
             sessions.retain(|_, entry| entry.workload_id != *workload_id);
@@ -214,6 +266,7 @@ impl Gateway {
                     session_id: session_id.clone(),
                     usage: GatewayUsage::default(),
                     model: None,
+                    key_id,
                     started_epoch_ms: now,
                     last_seen_epoch_ms: now,
                 },
@@ -308,6 +361,13 @@ impl Gateway {
             })
             .collect();
         list.sort_by(|a, b| a.workload_id.as_str().cmp(b.workload_id.as_str()));
+        let (pool, pool_strategy) = {
+            let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
+            pool.sync(&self.pool_snapshot_ids());
+            let view = pool.view(epoch_ms());
+            let strategy = pool.strategy();
+            (view, strategy)
+        };
         GatewayStatus {
             enabled: self.is_enabled(),
             listening: self.port() != 0,
@@ -319,6 +379,8 @@ impl Gateway {
                 .unwrap_or_else(|p| p.into_inner())
                 .clone(),
             sessions: list,
+            pool,
+            pool_strategy,
         }
     }
 
@@ -342,11 +404,108 @@ impl Gateway {
         })
     }
 
-    /// 실제 Z.ai 키를 요청 시점에 읽는다. 없으면 `None` → 502.
-    fn upstream_key(&self) -> Option<Zeroizing<String>> {
+    /// 실제 Z.ai 키를 요청 시점에 읽는다(풀이 없을 때의 폴백 경로).
+    fn single_key(&self) -> Option<Zeroizing<String>> {
         match term_secrets::LocalSecretStore::new(&self.secrets_root).read_zeroizing() {
             Ok(Some(key)) if !key.is_empty() => Some(key),
             _ => None,
+        }
+    }
+
+    /// 풀 저장소 스냅숏(id·라벨 쌍) — 회전 엔진 `sync`용. 비밀은 버린다.
+    fn pool_snapshot_ids(&self) -> Vec<(String, String)> {
+        self.pool_entries_locked()
+            .into_iter()
+            .map(|entry| (entry.id, entry.label))
+            .collect()
+    }
+
+    /// TTL 이내의 캐시 또는 다시 읽은 풀 항목. 읽기 실패는 빈 풀로 취급한다
+    /// (단일 키 폴백이 이어받는다).
+    fn pool_entries_locked(&self) -> Vec<PoolCacheEntry> {
+        let now = epoch_ms();
+        let mut cache = self.pool_cache.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(cached) = cache.as_ref() {
+            if now.saturating_sub(cached.loaded_epoch_ms) < POOL_CACHE_TTL_MS {
+                return cached.entries.clone();
+            }
+        }
+        let entries: Vec<PoolCacheEntry> = KeyPoolStore::new(&self.secrets_root)
+            .read_all_zeroizing()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(info, secret)| PoolCacheEntry {
+                id: info.id,
+                label: info.label,
+                secret,
+            })
+            .collect();
+        *cache = Some(CachedPool {
+            entries: entries.clone(),
+            loaded_epoch_ms: now,
+        });
+        entries
+    }
+
+    /// 이 요청에 쓸 업스트림 키. 세션이 묶은 키를 존중하되(친화성) 쓸 수
+    /// 없으면 갈아타고, 풀이 비었으면 단일 키로 폴백한다.
+    /// 반환: (키 id — 단일 키면 None, 비밀).
+    fn select_key(&self, bound: Option<&str>) -> Option<(Option<String>, Zeroizing<String>)> {
+        let now = epoch_ms();
+        let entries = self.pool_entries_locked();
+        if !entries.is_empty() {
+            let snapshot: Vec<(String, String)> = entries
+                .iter()
+                .map(|entry| (entry.id.clone(), entry.label.clone()))
+                .collect();
+            let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
+            pool.sync(&snapshot);
+            if let Some(id) = pool.rebind(bound, now) {
+                if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
+                    return Some((Some(id), entry.secret.clone()));
+                }
+            }
+            // 풀은 있는데 전원 사용 불가 — 단일 키라도 있으면 진행한다.
+        }
+        self.single_key().map(|secret| (None, secret))
+    }
+
+    /// 세션에 묶인 풀 키 id(회전 결과를 다시 묶는 데 쓴다).
+    fn session_key(&self, token: &str) -> Option<String> {
+        self.lock_sessions()
+            .get(token)
+            .and_then(|entry| entry.key_id.clone())
+    }
+
+    /// 요청이 특정 풀 키로 나갔음을 기록한다(친화성 갱신 + 회전 커서).
+    fn note_key_attempt(&self, key_id: Option<&str>) {
+        if let Some(id) = key_id {
+            self.pool
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .record_attempt(id, epoch_ms());
+            // 세션의 묶음도 따라간다(페일오버로 바뀐 경우).
+        }
+    }
+
+    /// 페일오버로 키가 바뀌었으면 세션 묶음을 갈아탠다.
+    fn rebind_session_key(&self, token: &str, key_id: Option<&str>) {
+        if let Some(entry) = self.lock_sessions().get_mut(token) {
+            entry.key_id = key_id.map(str::to_string);
+        }
+    }
+
+    /// 사전 스트림 실패 결과를 회전 엔진에 기록한다.
+    fn record_key_outcome(&self, key_id: Option<&str>, outcome: KeyOutcome, now_ms: u64) {
+        let Some(id) = key_id else { return };
+        let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
+        match outcome {
+            KeyOutcome::Success => pool.record_success(id),
+            KeyOutcome::RateLimited { retry_after_ms } => {
+                pool.record_rate_limited(id, retry_after_ms, now_ms)
+            }
+            KeyOutcome::Auth => pool.record_auth_failure(id),
+            KeyOutcome::Transport => pool.record_transport_failure(id, now_ms),
         }
     }
 
@@ -489,34 +648,72 @@ async fn handle_conn(gateway: Arc<Gateway>, stream: tokio::net::TcpStream) {
         }
     };
 
-    // 실제 키를 지금 읽는다(회전 즉시 반영).
-    let Some(key) = gateway.upstream_key() else {
-        let _ = write_error(&mut writer, 502, "upstream credential is not configured").await;
-        return;
-    };
-
-    // 업스트림 요청 조립: 허용 목록 헤더 + 실제 키.
-    let url = format!("{}{}", gateway.upstream_base, target);
-    let mut request = gateway.client.request(method, &url);
-    for name in FORWARD_REQUEST_HEADERS {
-        for (_, value) in headers.iter().filter(|(key, _)| key == name) {
-            request = request.header(name, value.clone());
-        }
-    }
-    if !headers.iter().any(|(key, _)| key == "content-type") {
-        request = request.header("content-type", "application/json");
-    }
-    let request = request
-        .header("authorization", format!("Bearer {}", key.as_str()))
-        .header("x-api-key", key.as_str())
-        .body(body);
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(error) => {
-            tracing::warn!(path = %target, %error, "gateway upstream request failed");
-            let _ = write_error(&mut writer, 502, "upstream request failed").await;
+    // 업스트림 키 선택(풀 우선, 단일 키 폴백 — 09 §3.3) + 사전 스트림
+    // 1회 페일오버. 시도는 최대 2회: 사전 스트림 401/403/429/402나 전송
+    // 실패면 결과를 회전 엔진에 기록하고 다음 키로 **한 번** 다시 보낸다.
+    // SSE가 흐르기 시작한 뒤의 오류는 재시도하지 않는다(헤더가 나갔다).
+    let session_bound = gateway.session_key(&token);
+    let mut response: Option<reqwest::Response> = None;
+    for attempt in 0..2 {
+        let Some((key_id, key)) = gateway.select_key(session_bound.as_deref()) else {
+            let _ = write_error(&mut writer, 502, "upstream credential is not configured").await;
             return;
+        };
+        let url = format!("{}{}", gateway.upstream_base, target);
+        let mut request = gateway.client.request(method.clone(), &url);
+        for name in FORWARD_REQUEST_HEADERS {
+            for (_, value) in headers.iter().filter(|(key, _)| key == name) {
+                request = request.header(name, value.clone());
+            }
         }
+        if !headers.iter().any(|(key, _)| key == "content-type") {
+            request = request.header("content-type", "application/json");
+        }
+        let request = request
+            .header("authorization", format!("Bearer {}", key.as_str()))
+            .header("x-api-key", key.as_str())
+            .body(body.clone());
+        match request.send().await {
+            Ok(upstream) => {
+                let status = upstream.status().as_u16();
+                // 키는 쓰였다 — 시도로 기록(친화성·커서 갱신).
+                gateway.note_key_attempt(key_id.as_deref());
+                gateway.rebind_session_key(&token, key_id.as_deref());
+                let outcome = match status {
+                    401 | 403 => Some(KeyOutcome::Auth),
+                    429 | 402 => Some(KeyOutcome::RateLimited {
+                        retry_after_ms: retry_after_ms(&upstream),
+                    }),
+                    _ => None,
+                };
+                if let Some(outcome) = outcome {
+                    gateway.record_key_outcome(key_id.as_deref(), outcome, epoch_ms());
+                    if attempt == 0 && key_id.is_some() {
+                        // 사전 스트림 1회 페일오버: 방금 실패한 키는 이미
+                        // 쿨다운/격리라 재선택에서 저절로 빠진다.
+                        tracing::info!(path = %target, status, "gateway pre-stream failure; failing over");
+                        continue;
+                    }
+                } else {
+                    gateway.record_key_outcome(key_id.as_deref(), KeyOutcome::Success, epoch_ms());
+                }
+                response = Some(upstream);
+                break;
+            }
+            Err(error) => {
+                tracing::warn!(path = %target, %error, "gateway upstream request failed");
+                gateway.record_key_outcome(key_id.as_deref(), KeyOutcome::Transport, epoch_ms());
+                if attempt == 0 && key_id.is_some() {
+                    continue;
+                }
+                let _ = write_error(&mut writer, 502, "upstream request failed").await;
+                return;
+            }
+        }
+    }
+    let Some(response) = response else {
+        let _ = write_error(&mut writer, 502, "upstream request failed").await;
+        return;
     };
 
     let status = response.status().as_u16();
@@ -796,6 +993,25 @@ async fn write_chunk(writer: &mut OwnedWriteHalf, bytes: &[u8]) -> std::io::Resu
     writer.write_all(b"\r\n").await
 }
 
+/// 사전 스트림 단계의 키 결과(09 §3.3 표).
+#[derive(Debug, Clone, Copy)]
+enum KeyOutcome {
+    Success,
+    RateLimited { retry_after_ms: Option<u64> },
+    Auth,
+    Transport,
+}
+
+/// `Retry-After`(초 단위 정수만)를 밀리초로. HTTP-DATE 형식은 무시한다.
+fn retry_after_ms(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds * 1000)
+}
+
 fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
@@ -1049,9 +1265,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let gateway = Gateway::new(dir.path().to_path_buf());
         assert!(!gateway.is_routable());
-        let policy = gateway.set_policy(Some(true), None);
+        let policy = gateway.set_policy(Some(true), None, None);
         assert!(policy.enabled && !policy.blocked);
-        let policy = gateway.set_policy(None, Some(true));
+        let policy = gateway.set_policy(None, Some(true), None);
         assert!(policy.enabled && policy.blocked);
     }
 
@@ -1209,6 +1425,114 @@ mod tests {
         upstream_thread.join().unwrap();
     }
 
+    /// 사전 스트림 1회 페일오버(09 §3.3): 첫 키가 429를 주면 같은 요청을
+    /// 다음 키로 다시 보내고, 클라이언트는 200을 받는다. 첫 키는 쿨다운,
+    /// 둘째 키의 장부에 요청이 남는다.
+    #[test]
+    fn pre_stream_failover_rotates_to_next_key() {
+        const KEY_A: &str = "pool-key-aaaa1111";
+        const KEY_B: &str = "pool-key-bbbb2222";
+
+        let upstream = StdListener::bind("127.0.0.1:0").unwrap();
+        let upstream_addr = upstream.local_addr().unwrap();
+        let upstream_thread = std::thread::spawn(move || {
+            // 첫 연결: 키 A → 429(짧은 Retry-After).
+            {
+                let (mut sock, _) = upstream.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let n = sock.read(&mut buf).unwrap();
+                let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+                assert!(head.contains("Bearer pool-key-aaaa1111"), "{head}");
+                sock.write_all(b"HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 2\r\nconnection: close\r\ncontent-length: 0\r\n\r\n").unwrap();
+            }
+            // 둘째 연결: 키 B → 200 SSE(사용량 포함).
+            {
+                let (mut sock, _) = upstream.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let n = sock.read(&mut buf).unwrap();
+                let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+                assert!(head.contains("Bearer pool-key-bbbb2222"), "{head}");
+                let sse = concat!(
+                    "event: message_start\n",
+                    "data: {\"type\":\"message_start\",\"message\":{\"model\":\"glm-5.3[1m]\",\"usage\":{\"input_tokens\":7}}}\n\n",
+                    "event: message_delta\n",
+                    "data: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":3}}\n\n",
+                );
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
+                    sse.len(),
+                    sse
+                );
+                sock.write_all(response.as_bytes()).unwrap();
+            }
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let dir = tempfile::tempdir().unwrap();
+            // 풀에 키 두 개(단일 키 저장소는 비워 둔다 — 풀 경로 강제).
+            let pool_store = KeyPoolStore::new(dir.path());
+            pool_store.add("zai", "first", KEY_A).unwrap();
+            pool_store.add("zai", "second", KEY_B).unwrap();
+            let mut raw = Gateway::new(dir.path().to_path_buf());
+            raw.upstream_base = format!("http://{upstream_addr}/");
+            let gateway = Arc::new(raw);
+            let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = server.local_addr().unwrap().port();
+            gateway.set_listening(port);
+            gateway.enabled.store(true, Ordering::Release);
+            let gw_server = Arc::clone(&gateway);
+            let task = tokio::spawn(async move {
+                loop {
+                    let (stream, _) = server.accept().await.unwrap();
+                    let gw = Arc::clone(&gw_server);
+                    tokio::spawn(async move {
+                        handle_conn(gw, stream).await;
+                    });
+                }
+            });
+
+            let (workload, session) = ids();
+            let route = gateway.issue_route(&workload, &session).unwrap();
+            let body = serde_json::json!({"model": "glm-5.3[1m]", "stream": true}).to_string();
+            let request = format!(
+                "POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                route.token.as_str(),
+                body.len(),
+                body
+            );
+            let mut sock = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
+            use tokio::io::AsyncWriteExt as _;
+            sock.write_all(request.as_bytes()).await.unwrap();
+            let mut response = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut sock, &mut response)
+                .await
+                .unwrap();
+            let text = String::from_utf8_lossy(&response);
+            assert!(text.starts_with("HTTP/1.1 200"), "페일오버 후 200: {text}");
+            assert!(text.contains("message_start"));
+            task.abort();
+
+            let status = gateway.status();
+            // 클라이언트가 본 요청은 하나(429는 밖으로 새지 않았다).
+            assert_eq!(status.totals.requests, 1);
+            assert_eq!(status.totals.input_tokens, 7);
+            assert_eq!(status.pool.len(), 2);
+            let first = status.pool.iter().find(|k| k.label == "first").unwrap();
+            let second = status.pool.iter().find(|k| k.label == "second").unwrap();
+            assert_eq!(first.state, term_contracts::gateway::PoolKeyViewState::Cooling);
+            assert!(first.cooldown_remaining_ms.unwrap() > 0);
+            assert_eq!(second.state, term_contracts::gateway::PoolKeyViewState::Active);
+            assert_eq!(second.requests, 1);
+        });
+        upstream_thread.join().unwrap();
+    }
+
     /// 인증 실패(모르는 토큰) → 401 Anthropic 오류 모양, 장부 무변화.
     #[test]
     fn unknown_token_gets_401_and_never_reaches_upstream() {
@@ -1260,7 +1584,7 @@ mod tests {
         rt.block_on(async move {
             let dir = tempfile::tempdir().unwrap();
             let gateway = Arc::new(gateway_with_key(dir.path()));
-            gateway.set_policy(None, Some(true));
+            gateway.set_policy(None, Some(true), None);
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let port = listener.local_addr().unwrap().port();
             gateway.set_listening(port);

@@ -1937,7 +1937,9 @@ fn gateway_set_policy(
     let params: term_contracts::gateway::GatewayPolicyParams =
         serde_json::from_value(params.clone())
             .map_err(|e| RpcError::new(ErrorCode::InvalidArgument, e.to_string()))?;
-    let policy = state.gateway.set_policy(params.enabled, params.blocked);
+    let policy = state
+        .gateway
+        .set_policy(params.enabled, params.blocked, params.pool_strategy);
     serde_json::to_value(policy)
         .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, e.to_string()))
 }

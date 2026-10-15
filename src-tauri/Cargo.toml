@@ -38,6 +38,17 @@ libc = { workspace = true }
 # CoreFoundation 값으로 다루고, Windows는 IMM32/키 합성을 쓴다(컴파일만 검증).
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+# 길게 누른 문자 키 반복(lib.rs disable_press_and_hold): NSUserDefaults 등록 기본값.
+# tauri(wry·tao)가 이미 끌어오는 버전이라 새 크레이트는 늘지 않는다.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSDictionary",
+    "NSObject",
+    "NSString",
+    "NSUserDefaults",
+    "NSValue",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

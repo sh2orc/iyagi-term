@@ -90,6 +90,23 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// macOS의 "길게 눌러 악센트 입력"(press-and-hold)을 이 앱에서 끈다. 터미널 입력은
+/// WKWebView의 숨은 textarea(xterm)를 거치므로, 켜져 있으면 문자 키를 누르고 있어도
+/// 반복되지 않고 악센트 선택만 기다린다(vim hjkl 연속 이동 불가, 방향키는 반복된다).
+/// 등록 기본값이라 디스크에 남지 않고, 사용자가 명시한 값(`defaults write
+/// ai.iyagi.term ApplePressAndHoldEnabled …` 또는 `-g`)이 있으면 그쪽이 이긴다.
+#[cfg(target_os = "macos")]
+fn disable_press_and_hold() {
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{ns_string, NSDictionary, NSNumber, NSUserDefaults};
+
+    let off = NSNumber::new_bool(false);
+    let value: &AnyObject = &off;
+    let defaults = NSDictionary::from_slices(&[ns_string!("ApplePressAndHoldEnabled")], &[value]);
+    // SAFETY: 키는 NSString, 값은 property list 타입(NSNumber)이다.
+    unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
+}
+
 /// 이 데이터 디렉터리의 첫 앱이면 그 잠금을 돌려준다. 다른 앱이 이미 떠 있으면
 /// 그 앱을 앞으로 불러내고 `Err(())` — 이 실행은 뜨지 않는다. 판정 자체를 하지
 /// 못하면(데이터 디렉터리를 모름·권한) 막지 않고 띄운다(`Ok(None)`).
@@ -127,6 +144,9 @@ pub fn run() {
     let Ok(instance) = claim_single_instance() else {
         return;
     };
+    // 첫 키 입력 전에 등록해야 한다 — 창·웹뷰를 만들기 전.
+    #[cfg(target_os = "macos")]
+    disable_press_and_hold();
     // Refresh the per-user daemon copy that the baked paths (ccd/ccg, CLI
     // hooks) point at — heals a moved/renamed checkout just by launching the
     // app, and is a no-op when nothing changed (stamp check).

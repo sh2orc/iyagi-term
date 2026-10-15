@@ -50,7 +50,7 @@ ZIP (created with `ditto -c -k --keepParent`). After an `Accepted` result, run
 `xcrun stapler staple <app-or-dmg>`; when distributing a ZIP, recreate it from the stapled
 app. Keep certificates, private keys and credentials outside this repository.
 
-## Trust posture (as of 0.1.3)
+## Trust posture (as of 0.1.4)
 
 macOS installers are signed with a Developer ID, built with hardened runtime and notarized,
 with the notarization ticket stapled to the DMG, so they open without Gatekeeper warnings.

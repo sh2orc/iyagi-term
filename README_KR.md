@@ -26,9 +26,10 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.3](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.3)** (2026-10-13) — Z.ai로
-라우팅된 Claude Code 터미널의 토큰 사용량 관측과 킬 스위치, API 키 풀 회전, 중국어·일본어 입력
-소스용 `Shift+Space`, 더 안정적인 WebGL 렌더러. [새로운 점](#013의-새로운-점)을 참고하세요.
+**최신: [0.1.4](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.4)** (2026-10-16) — 유지보수
+릴리스: macOS에서 문자 키를 누르고 있으면 반복 입력되어 vim의 `h`/`j`/`k`/`l`로 계속 이동합니다.
+0.1.3에서는 Z.ai로 라우팅된 Claude Code 터미널의 토큰 사용량 관측과 킬 스위치, API 키 풀 회전,
+중국어·일본어 입력 소스용 `Shift+Space`가 들어왔습니다. [새로운 점](#014의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -38,12 +39,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.3_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.3/IYAGI.Term_0.1.3_aarch64.dmg) | 17 MB | `fd80ffcf14cd470b919e26cc42fe5f3f321dedf155b01eb5d873ae193da6d8f3` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.4_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.4/IYAGI.Term_0.1.4_aarch64.dmg) | 17 MB | `ea644c56831fb3f6d99fc77d3b33af1fefecba3f9e3312692870a5878b93c4b1` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.3_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.4_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -76,6 +77,12 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.4의 새로운 점
+
+- **macOS에서 길게 누른 키 반복.** 문자 키를 누르고 있으면(vim의 `h`/`j`/`k`/`l` 등) 한 번만
+  움직이고 멈추던 문제를 고쳤습니다. 이제 방향키처럼 계속 반복됩니다. 전체 노트:
+  [RELEASE.md](RELEASE.md).
 
 ## 0.1.3의 새로운 점
 
@@ -349,7 +356,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.3**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.4**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

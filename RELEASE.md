@@ -5,6 +5,32 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.4 — 2026-10-16
+
+A maintenance release: held letter keys repeat on macOS.
+
+### Input
+
+- **Held letter keys repeat on macOS.** Holding a letter key moved the cursor once and stopped —
+  `h`/`j`/`k`/`l` in vim, for example — while the arrow keys kept repeating. Terminal input goes
+  through the web view's hidden text field, so macOS treated a held letter as the start of its
+  press-and-hold accent menu instead of repeating it. The app now turns press and hold off for
+  itself at launch, so held keys repeat at the system key-repeat rate. Nothing is written to your
+  preferences, and an explicit `ApplePressAndHoldEnabled` setting — for the app
+  (`defaults write ai.iyagi.term …`) or global — still takes precedence.
+
+### Upgrading from 0.1.3
+
+The daemon is unchanged apart from its version number. Settings › General will say a newer
+daemon is installed; restarting it is optional. Restarting ends open terminals; agent
+conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.4_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.4/IYAGI.Term_0.1.4_aarch64.dmg) | `ea644c56831fb3f6d99fc77d3b33af1fefecba3f9e3312692870a5878b93c4b1` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.3 — 2026-10-13
 
 Model traffic becomes a governed resource: a token usage observatory with a kill switch and an

@@ -12,6 +12,7 @@ term-contracts = { workspace = true }
 term-client = { workspace = true }
 term-secrets = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

@@ -350,7 +350,7 @@ pub fn remove_managed(settings: &mut Value, spec: &HooksSpec) -> usize {
     removed
 }
 
-pub(super) fn read_settings(path: &Path) -> Result<Option<Value>, HooksError> {
+pub fn read_settings(path: &Path) -> Result<Option<Value>, HooksError> {
     match std::fs::read_to_string(path) {
         Ok(text) => {
             let trimmed = text.trim();
@@ -387,7 +387,7 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
 ///   umask 기본 모드로 존재하는 찰나도 없게) 내용 기록 → `sync_all()` →
 ///   (Unix) 원본 권한 보존 → `rename`. 중간에 실패하면 임시 파일을 지운다.
 /// - 전 과정을 프로세스 전역 뮤텍스로 직렬화한다.
-pub(crate) fn write_settings_file(path: &Path, content: &str) -> Result<(), HooksError> {
+pub fn write_settings_file(path: &Path, content: &str) -> Result<(), HooksError> {
     let _serialized = WRITE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -454,7 +454,7 @@ fn create_fresh_tmp(tmp: &Path) -> std::io::Result<std::fs::File> {
     }
 }
 
-pub(super) fn pretty(settings: &Value) -> String {
+pub fn pretty(settings: &Value) -> String {
     let mut out = serde_json::to_string_pretty(settings).expect("settings serialize");
     out.push('\n');
     out

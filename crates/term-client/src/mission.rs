@@ -21,13 +21,12 @@ use term_contracts::mission::rpc::{
     methods, ArtifactBeginParams, ArtifactBeginResult, ArtifactCommitParams, ArtifactReadParams,
     ArtifactReadResult, ArtifactWriteParams, ArtifactWriteResult, BindingListResult,
     BindingProbeParams, BindingProbeResult, BindingSaveParams, MissionAcceptParams,
-    MissionControlAction, MissionControlParams, MissionCreateParams, MissionDecisionAnswerParams,
-    MissionListParams, MissionListResult, MissionMessageParams, RepositoryInspectParams,
-    RepositoryInspectResult, TaskControlAction, MissionTaskControlParams,
-    MissionActivityParams, MissionActivityResult, TemplateListParams,
-    TemplateListResult, TemplateSaveParams, VerificationListParams, VerificationListResult,
-    VerificationSaveParams, WorkspaceCleanupParams, WorkspaceCleanupResult, WorkspaceUsageParams,
-    WorkspaceUsageResult,
+    MissionActivityParams, MissionActivityResult, MissionControlAction, MissionControlParams,
+    MissionCreateParams, MissionDecisionAnswerParams, MissionListParams, MissionListResult,
+    MissionMessageParams, MissionTaskControlParams, RepositoryInspectParams,
+    RepositoryInspectResult, TaskControlAction, TemplateListParams, TemplateListResult,
+    TemplateSaveParams, VerificationListParams, VerificationListResult, VerificationSaveParams,
+    WorkspaceCleanupParams, WorkspaceCleanupResult, WorkspaceUsageParams, WorkspaceUsageResult,
 };
 use term_contracts::mission::types::{ArtifactRef, Id, Mission};
 
@@ -356,15 +355,12 @@ impl crate::client::Client {
             .map_err(|e| {
                 BridgeError::invalid_argument(format!("mission snapshot decode failed: {e}"))
             })?;
-        Ok(page
-            .entities
-            .into_iter()
-            .find_map(|entity| match entity {
-                Entity::Candidate(candidate) if candidate.id.as_str() == candidate_id => {
-                    Some(*candidate)
-                }
-                _ => None,
-            }))
+        Ok(page.entities.into_iter().find_map(|entity| match entity {
+            Entity::Candidate(candidate) if candidate.id.as_str() == candidate_id => {
+                Some(*candidate)
+            }
+            _ => None,
+        }))
     }
 
     /// `mission.snapshot`에서 대화 메시지를 뽑아 본문까지 읽는다(LeadConversation
@@ -451,20 +447,19 @@ impl crate::client::Client {
         let mission = mission_id.parse().map_err(|_| {
             BridgeError::invalid_argument("mission_id must be the mission Id string")
         })?;
-        let run = run_id.parse().map_err(|_| {
-            BridgeError::invalid_argument("run_id must be the run Id string")
-        })?;
-        let params = serde_json::to_value(
-            term_contracts::mission::rpc::MissionRunAttestExitedParams {
+        let run = run_id
+            .parse()
+            .map_err(|_| BridgeError::invalid_argument("run_id must be the run Id string"))?;
+        let params =
+            serde_json::to_value(term_contracts::mission::rpc::MissionRunAttestExitedParams {
                 request_id: Id::generate(),
                 mission_id: mission,
                 expected_revision: term_contracts::U64String::new(expected_revision)
                     .expect("revision fits the contract range"),
                 run_id: run,
                 attestation: PROCESS_ABSENT_ATTESTATION.to_string(),
-            },
-        )
-        .expect("run attest params serialize");
+            })
+            .expect("run attest params serialize");
         self.control
             .call("mrae", methods::MISSION_RUN_ATTEST_EXITED, params)
             .await
@@ -483,9 +478,9 @@ impl crate::client::Client {
             mission_id: mission_id.parse().map_err(|_| {
                 BridgeError::invalid_argument("mission_id must be the mission Id string")
             })?,
-            run_id: run_id.parse().map_err(|_| {
-                BridgeError::invalid_argument("run_id must be the run Id string")
-            })?,
+            run_id: run_id
+                .parse()
+                .map_err(|_| BridgeError::invalid_argument("run_id must be the run Id string"))?,
             after_offset: term_contracts::U64String::new(after_offset)
                 .expect("activity offset fits the contract range"),
             max_bytes,
@@ -507,8 +502,8 @@ impl crate::client::Client {
         policy: term_contracts::mission::types::Policy,
         role_bindings: Vec<term_contracts::mission::types::RoleBinding>,
     ) -> Result<serde_json::Value, BridgeError> {
-        let params = serde_json::to_value(
-            term_contracts::mission::rpc::MissionPolicyUpdateParams {
+        let params =
+            serde_json::to_value(term_contracts::mission::rpc::MissionPolicyUpdateParams {
                 request_id: Id::generate(),
                 mission_id: mission_id.parse().map_err(|_| {
                     BridgeError::invalid_argument("mission_id must be the mission Id string")
@@ -517,9 +512,8 @@ impl crate::client::Client {
                     .expect("revision fits the contract range"),
                 policy,
                 role_bindings,
-            },
-        )
-        .expect("mission policy params serialize");
+            })
+            .expect("mission policy params serialize");
         self.control
             .call("mpol", methods::MISSION_POLICY_UPDATE, params)
             .await
@@ -539,9 +533,9 @@ impl crate::client::Client {
         let mission = mission_id.parse().map_err(|_| {
             BridgeError::invalid_argument("mission_id must be the mission Id string")
         })?;
-        let task = task_id.parse().map_err(|_| {
-            BridgeError::invalid_argument("task_id must be the task Id string")
-        })?;
+        let task = task_id
+            .parse()
+            .map_err(|_| BridgeError::invalid_argument("task_id must be the task Id string"))?;
         let binding = match binding_id {
             Some(raw) => Some(raw.parse().map_err(|_| {
                 BridgeError::invalid_argument("binding_id must be the binding Id string")
@@ -588,8 +582,8 @@ impl crate::client::Client {
                 "text/plain; charset=utf-8",
             )
             .await?;
-        let params = serde_json::to_value(
-            term_contracts::mission::rpc::MissionFindingResolveParams {
+        let params =
+            serde_json::to_value(term_contracts::mission::rpc::MissionFindingResolveParams {
                 request_id: Id::generate(),
                 mission_id: mission,
                 expected_revision: term_contracts::U64String::new(expected_revision)
@@ -597,9 +591,8 @@ impl crate::client::Client {
                 finding_id: finding,
                 resolution: term_contracts::mission::rpc::FindingResolutionAction::Dismissed,
                 reason_ref,
-            },
-        )
-        .expect("finding resolve params serialize");
+            })
+            .expect("finding resolve params serialize");
         self.control
             .call("mfrs", methods::MISSION_FINDING_RESOLVE, params)
             .await

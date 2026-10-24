@@ -89,6 +89,10 @@ import type { SessionReliefResult } from "../../generated/SessionReliefResult";
 import type { ReliefPolicy } from "../../generated/ReliefPolicy";
 import type { GuardState } from "../../generated/GuardState";
 import type { GuardPolicy } from "../../generated/GuardPolicy";
+import type { GuardReason } from "../../generated/GuardReason";
+import type { AgentStatus } from "../../generated/AgentStatus";
+import type { WorkloadUsageBrief } from "../../generated/WorkloadUsageBrief";
+import { guardPolicyProblem, hostDerivedGuardPolicy } from "../workloads/resourcePolicy";
 import type { WorkloadSuspendParams } from "../../generated/WorkloadSuspendParams";
 import type { WorkloadGuardResult } from "../../generated/WorkloadGuardResult";
 import type { ReliefPolicyParams } from "../../generated/ReliefPolicyParams";
@@ -256,6 +260,10 @@ interface MockWorkload {
   guard: GuardState;
   /** 자동 완화 제외 표시(08 §0-3). */
   protected: boolean;
+  /** 감지된 에이전트(데몬 agent_watch 흉내 — 시험이 reportAgent로 넣는다). */
+  agent?: AgentStatus | null;
+  /** 보이는·보호 세션이 메모리 압력의 주범일 때 정지 대신 거는 경고(08 §5). */
+  guardWarning?: GuardReason | null;
 }
 
 /** O1 mission fake store(O04) — 현재 projection entity + 커밋된 이벤트. */
@@ -350,14 +358,14 @@ export class MockDaemonClient implements DaemonClient {
   private reliefPolicy: ReliefPolicy = { auto_yield: true };
   /** 관측 게이트웨이 모의 정책(브라우저 dev — 실제 프록시는 없다). */
   private gatewayPolicy: GatewayPolicy = { enabled: false, blocked: false, pool_strategy: "round_robin" };
-  private guardPolicy: GuardPolicy = {
-    auto_suspend: true,
-    cpu_cores_limit: 6,
-    rss_limit_bytes: "4294967296",
-    sustain_ms: "20000",
-    rss_sustain_ms: "5000",
-    auto_resume: false,
-  };
+  /**
+   * 호스트 기본 가드 정책 — 실제 데몬처럼 mock 호스트(논리 코어 12, RAM 32 GiB)에서
+   * 유도한다(cpu = max(2, 코어/2), rss = RAM/4를 2–8 GiB로). 데몬 재시작 흉내는 없다.
+   */
+  private readonly guardPolicyDefault: GuardPolicy = hostDerivedGuardPolicy(12, 32 * 1024 ** 3);
+  private guardPolicy: GuardPolicy = { ...this.guardPolicyDefault };
+  /** 이 창이 마지막으로 알린 "보이는 세션"(08 §1 visible_session_ids). */
+  private visibleSessionIds: string[] = [];
   private revision = 1;
   private resourceTimer: ReturnType<typeof setInterval> | null = null;
   private resourceTick = 0;
@@ -396,6 +404,7 @@ export class MockDaemonClient implements DaemonClient {
       focused_session_ids: this.focusedSessionIds(),
       relief_policy: { ...this.reliefPolicy },
       guard_policy: { ...this.guardPolicy },
+      guard_policy_default: { ...this.guardPolicyDefault },
     };
   }
 
@@ -733,6 +742,11 @@ export class MockDaemonClient implements DaemonClient {
    */
   async sessionFocus(params: SessionFocusParams): Promise<SessionFocusResult> {
     const sessionId = params.session_id ?? null;
+    // 보이는 세션 목록은 면제 판단에만 쓰인다 — 모르는·끝난 세션은 조용히 뺀다.
+    this.visibleSessionIds = (params.visible_session_ids ?? []).filter((id) => {
+      const session = this.sessions.get(id);
+      return session !== undefined && !session.exited;
+    });
     if (sessionId === null) {
       this.focusedSessionId = null;
       return { focused_session_ids: this.focusedSessionIds() };
@@ -744,6 +758,11 @@ export class MockDaemonClient implements DaemonClient {
     }
     this.focusedSessionId = session.id;
     return { focused_session_ids: this.focusedSessionIds() };
+  }
+
+  /** 시험 헬퍼: 마지막 session.focus가 알린 보이는 세션(검증을 거친 값). */
+  reportedVisibleSessionIds(): string[] {
+    return [...this.visibleSessionIds];
   }
 
   /** 끝난 세션은 집계에서 빠진다(데몬이 애초에 받아 주지 않는 값이다). */
@@ -853,11 +872,68 @@ export class MockDaemonClient implements DaemonClient {
     return { guard: { ...w.guard } };
   }
 
-  /** 자원 가드 정책 변경(08 §5). */
+  /**
+   * 자원 가드 정책 변경(08 §5). 데몬처럼 정책 전체를 받고 범위를 검사한다:
+   * cpu 1..=1024코어, rss 256 MiB..=1 TiB, 두 지속 시간 1..=600초. 벗어나면
+   * INVALID_ARGUMENT — 바뀌지 않으면 revision도 그대로다.
+   */
   async guardSetPolicy(params: { policy: GuardPolicy }): Promise<GuardPolicy> {
-    this.guardPolicy = { ...params.policy };
-    this.revision++;
+    const policy = params?.policy;
+    if (typeof policy !== "object" || policy === null) {
+      throw new RpcClientError("INVALID_ARGUMENT", "policy가 없습니다.");
+    }
+    const problem = guardPolicyProblem(policy);
+    if (problem) {
+      throw new RpcClientError("INVALID_ARGUMENT", `${problem.field} 값이 허용 범위를 벗어났습니다.`);
+    }
+    const next: GuardPolicy = {
+      auto_suspend: policy.auto_suspend,
+      cpu_cores_limit: policy.cpu_cores_limit,
+      rss_limit_bytes: policy.rss_limit_bytes,
+      sustain_ms: policy.sustain_ms,
+      rss_sustain_ms: policy.rss_sustain_ms,
+      auto_resume: policy.auto_resume,
+    };
+    const changed = (Object.keys(next) as Array<keyof GuardPolicy>).some((key) => next[key] !== this.guardPolicy[key]);
+    this.guardPolicy = next;
+    if (changed) this.revision++;
     return { ...this.guardPolicy };
+  }
+
+  /**
+   * 시험 헬퍼: 가드가 스스로 정지시킨 것처럼(manual=false) 바꾼다. `silent`면 구
+   * 데몬처럼 workload.changed 없이 revision만 올린다(스냅샷 다시 받기 안전망 검증).
+   */
+  autoSuspend(workloadId: string, reason: GuardReason = "memory_limit", options: { silent?: boolean } = {}): void {
+    const w = this.requireWorkload(workloadId);
+    w.guard = { kind: "SUSPENDED", since_ms: String(this.opts.monotonicNow()), reason, manual: false, partial: false };
+    this.revision++;
+    if (!options.silent) this.emit({ kind: "workload.changed", payload: this.workloadSummary(w) });
+    this.scheduleFlush();
+  }
+
+  /** 시험 헬퍼: 보이는·보호 세션의 메모리 주범 경고(08 §5 guard_warning)를 켜고 끈다. */
+  setGuardWarning(workloadId: string, reason: GuardReason | null): void {
+    const w = this.requireWorkload(workloadId);
+    w.guardWarning = reason;
+    this.revision++;
+    this.emit({ kind: "workload.changed", payload: this.workloadSummary(w) });
+    this.scheduleFlush();
+  }
+
+  /** 시험 헬퍼: agent_watch가 에이전트를 감지(또는 놓침)한 것처럼 workload.changed를 보낸다. */
+  reportAgent(workloadId: string, agent: AgentStatus | null): void {
+    const w = this.requireWorkload(workloadId);
+    w.agent = agent;
+    this.revision++;
+    this.emit({ kind: "workload.changed", payload: this.workloadSummary(w) });
+    this.scheduleFlush();
+  }
+
+  /** 시험 헬퍼: 지금 host sample의 메모리 압력을 바꾼다. */
+  seedMemoryPressure(level: PressureLevel): void {
+    if (!this.hostSample) this.hostSample = this.nextHostSample();
+    this.hostSample = { ...this.hostSample, pressure: level };
   }
 
   /** 마지막 host sample의 CPU 압력(아직 샘플이 없으면 NORMAL). */
@@ -2178,9 +2254,28 @@ export class MockDaemonClient implements DaemonClient {
     return [...this.workloads.values()].map((w) => this.workloadSummary(w));
   }
 
+  /**
+   * 텔레메트리 틱 흉내: 데몬과 같은 `{revision, host, pressure, cpu_pressure, usage}`.
+   * usage는 살아 있는 워크로드마다 pane·탭 배지가 쓰는 두 값(cpu·rss)만 싣는다.
+   */
   emitResourceSnapshot(): void {
     this.hostSample = this.nextHostSample();
-    this.emit({ kind: "resource.snapshot", payload: this.hostSample });
+    const usage: WorkloadUsageBrief[] = [];
+    for (const w of this.workloads.values()) {
+      if (!this.isLive(w.state)) continue;
+      const full = mockUsage(w.id, this.revision);
+      if (full) usage.push({ workload_id: w.id, cpu_cores: full.cpu_cores, resident_bytes: full.resident_bytes });
+    }
+    this.emit({
+      kind: "resource.snapshot",
+      payload: {
+        revision: this.revision,
+        host: this.hostSample,
+        pressure: this.hostSample.pressure,
+        cpu_pressure: this.hostSample.cpu_pressure,
+        usage,
+      },
+    });
     this.scheduleFlush();
   }
 
@@ -2314,9 +2409,10 @@ export class MockDaemonClient implements DaemonClient {
       queue_reason: w.state === "QUEUED" ? ((w.queueReason ?? "WAIT_TELEMETRY") as WorkloadSummary["queue_reason"]) : null,
       connection: session && session.views.size > 0 ? "attached" : "detached",
       usage: this.isLive(w.state) ? mockUsage(w.id, this.revision) : null,
+      agent: w.agent ? { ...w.agent } : null,
       relief: { ...w.relief },
       guard: { ...w.guard },
-      guard_warning: null,
+      guard_warning: w.guardWarning ?? null,
       protected: w.protected,
     };
   }

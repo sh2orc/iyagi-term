@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  RENDERER_HIDDEN_TTL_MS,
   TerminalRegistry,
   type MountPoint,
   type RegistryDom,
@@ -276,5 +277,161 @@ describe("TerminalRegistry 렌더러 컨텍스트 상실(WebGL onDead)", () => {
       expect(h.createdCount()).toBe(5);
       expect(h.registry.liveRendererCount).toBe(1);
     });
+  });
+});
+
+describe("TerminalRegistry 렌더러 예산 — 메모리 압력", () => {
+  function budgetRegistry() {
+    const renderers = trackingRenderers();
+    const registry = new TerminalRegistry({
+      createTerminal: fakeTerminal,
+      createDom: makeDom,
+      createRenderer: renderers.factory,
+    });
+    return { registry, renderers };
+  }
+
+  it("WARNING 이상이면 숨은 pane의 렌더러를 곧바로 회수하고, 보이는 pane은 지킨다", () => {
+    const { registry, renderers } = budgetRegistry();
+    // 보이는 pane(렌더러 0)과 숨은 pane 둘(1·2) — 상한(12)보다 훨씬 적다.
+    registry.acquire("vis").mount(makeParent());
+    for (const id of ["hid-1", "hid-2"]) {
+      const entry = registry.acquire(id);
+      entry.mount(makeParent());
+      entry.unmount();
+    }
+    expect(registry.liveRendererCount).toBe(3);
+
+    registry.setMemoryPressure("WARNING");
+    expect(renderers.disposedIds).toEqual([1, 2]);
+    expect(registry.liveRendererCount).toBe(1); // 보이는 pane의 것만 남는다
+
+    // 같은 판정(WARNING → CRITICAL 모두 빠듯함)의 반복 호출은 아무것도 하지 않는다.
+    registry.setMemoryPressure("CRITICAL");
+    registry.setMemoryPressure("CRITICAL");
+    expect(renderers.disposedIds).toEqual([1, 2]);
+    expect(registry.liveRendererCount).toBe(1);
+    registry.disposeAll();
+  });
+
+  it("빠듯한 동안 숨기는 pane은 그 자리에서 놓고, 다시 보이면 새로 만든다", () => {
+    const { registry, renderers } = budgetRegistry();
+    registry.setMemoryPressure("CRITICAL");
+    const entry = registry.acquire("v1");
+    entry.mount(makeParent()); // 렌더러 0 — 보이는 pane은 압력과 무관하게 만든다
+    expect(registry.liveRendererCount).toBe(1);
+
+    entry.unmount();
+    expect(renderers.disposedIds).toEqual([0]);
+    expect(registry.liveRendererCount).toBe(0);
+
+    entry.mount(makeParent());
+    expect(renderers.createdCount()).toBe(2);
+    expect(registry.liveRendererCount).toBe(1);
+    registry.disposeAll();
+  });
+
+  it("NORMAL(또는 샘플 없음)로 돌아오면 숨겨도 다시 살려 둔다", () => {
+    const { registry, renderers } = budgetRegistry();
+    registry.setMemoryPressure("WARNING");
+    registry.setMemoryPressure("NORMAL");
+    const a = registry.acquire("a");
+    a.mount(makeParent());
+    a.unmount();
+    expect(renderers.disposedIds).toEqual([]);
+    expect(registry.liveRendererCount).toBe(1);
+
+    registry.setMemoryPressure("WARNING");
+    expect(renderers.disposedIds).toEqual([0]);
+    registry.setMemoryPressure(null);
+    const b = registry.acquire("b");
+    b.mount(makeParent());
+    b.unmount();
+    expect(renderers.disposedIds).toEqual([0]);
+    expect(registry.liveRendererCount).toBe(1);
+    registry.disposeAll();
+  });
+});
+
+describe("TerminalRegistry 렌더러 예산 — 오래 숨은 pane(RENDERER_HIDDEN_TTL_MS)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function budgetRegistry() {
+    const renderers = trackingRenderers();
+    const registry = new TerminalRegistry({
+      createTerminal: fakeTerminal,
+      createDom: makeDom,
+      createRenderer: renderers.factory,
+    });
+    return { registry, renderers };
+  }
+
+  it("5분 넘게 숨은 pane의 렌더러를 놓고, 그 전에 다시 보인 pane의 것은 그대로 쓴다", () => {
+    const { registry, renderers } = budgetRegistry();
+    const a = registry.acquire("a");
+    a.mount(makeParent()); // 렌더러 0
+    a.unmount();
+    vi.advanceTimersByTime(2 * 60_000);
+    const b = registry.acquire("b");
+    b.mount(makeParent()); // 렌더러 1
+    b.unmount();
+
+    // a가 숨은 지 5분 — a만 회수한다(b는 아직 3분).
+    vi.advanceTimersByTime(RENDERER_HIDDEN_TTL_MS - 2 * 60_000);
+    expect(renderers.disposedIds).toEqual([0]);
+    expect(registry.liveRendererCount).toBe(1);
+
+    // b가 만료되기 전에 다시 보인다 — 새로 만들지 않고 그대로 재부착한다.
+    vi.advanceTimersByTime(60_000);
+    b.mount(makeParent());
+    vi.advanceTimersByTime(RENDERER_HIDDEN_TTL_MS * 2);
+    expect(renderers.disposedIds).toEqual([0]);
+    expect(renderers.createdCount()).toBe(2);
+    expect(registry.liveRendererCount).toBe(1);
+
+    // 회수된 a는 다시 보이면 새로 만든다.
+    a.mount(makeParent());
+    expect(renderers.createdCount()).toBe(3);
+    registry.disposeAll();
+  });
+
+  it("숨은 채 렌더러를 쥔 pane이 없으면 타이머를 걸어 두지 않는다", () => {
+    const { registry } = budgetRegistry();
+    const entry = registry.acquire("v1");
+    entry.mount(makeParent());
+    expect(vi.getTimerCount()).toBe(0);
+    entry.unmount();
+    expect(vi.getTimerCount()).toBe(1);
+    // 다시 보이면 겨눌 만료가 없다 — 타이머를 푼다.
+    entry.mount(makeParent());
+    expect(vi.getTimerCount()).toBe(0);
+    entry.unmount();
+    expect(vi.getTimerCount()).toBe(1);
+    // 압력으로 이미 회수했으면 시간 회수는 할 일이 없다.
+    registry.setMemoryPressure("WARNING");
+    expect(vi.getTimerCount()).toBe(0);
+    registry.disposeAll();
+  });
+
+  it("disposeAll과 렌더러 끄기는 회수 타이머를 남기지 않는다", () => {
+    const { registry } = budgetRegistry();
+    for (const id of ["a", "b"]) {
+      const entry = registry.acquire(id);
+      entry.mount(makeParent());
+      entry.unmount();
+    }
+    expect(vi.getTimerCount()).toBe(1);
+    registry.setRendererEnabled(false);
+    expect(registry.liveRendererCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    registry.setRendererEnabled(true);
+    const c = registry.acquire("c");
+    c.mount(makeParent());
+    c.unmount();
+    expect(vi.getTimerCount()).toBe(1);
+    registry.disposeAll();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -200,7 +200,9 @@ export const QueueDrawer = memo(function QueueDrawer(): JSX.Element | null {
  * 자동 양보 정책 토글(08-pressure-relief §2). 끄면 새 양보만 멈춘다 — 이미
  * 양보된 세션은 압력이 풀리거나 사용자가 직접 해제할 때 돌아온다. 플랫폼이
  * 되돌릴 수 있는 양보를 지원하지 않으면(08 §0-4) 끄고 잠근 채 사유를 보여
- * 준다. 표시값은 데몬이 돌려준 정책이다(요청값이 아니다).
+ * 준다. 표시값은 데몬이 돌려준 정책이다(요청값이 아니다). 바꾼 값은 컨트롤러가
+ * 사용자 설정으로도 저장해(설정 → 자원 관리와 같은 값) 데몬이 다시 시작해도
+ * 붙을 때 다시 적용된다.
  */
 function ReliefPolicyToggle(): JSX.Element {
   const { t } = useI18n();

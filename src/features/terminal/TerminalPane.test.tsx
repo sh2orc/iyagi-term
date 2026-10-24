@@ -271,6 +271,63 @@ describe("이어서 열 수 있는 종료 pane 오버레이(04-ui §5)", () => {
   });
 });
 
+describe("시작 줄 대기 표시(P2-5)", () => {
+  const resume = {
+    recordId: "rec-1",
+    agent: "claude" as const,
+    agentSessionId: "0123456789abcdef",
+    cwd: "/work/iyagi",
+    title: "iyagi",
+    program: "/opt/bin/claude",
+  };
+
+  it("메모리 여유를 기다리면 그 이유와 '지금 시작'을 이어서 열기 오버레이 대신 보인다", () => {
+    const html = renderPaneWith({ phase: "exited", sessionId: null, workloadId: null, resume, pendingStart: "memory" });
+    expect(html).toContain("pane-overlay-waiting");
+    expect(html).toContain(t("terminal.resume.waitingMemory"));
+    expect(html).toContain(t("terminal.resume.startNow"));
+    expect(html).toContain(t("terminal.resume.title", { agent: "Claude Code" }));
+    expect(html).not.toContain("pane-overlay-resume");
+    // 제목은 같지만 "이어서 열기" 버튼은 없다 — 이미 열기로 했다.
+    expect(html).not.toContain(`>${t("terminal.resume.open")}</button>`);
+  });
+
+  it("차례를 기다리는 새 pane(시작 중)도 같은 표시를 쓴다", () => {
+    const html = renderPaneWith({ phase: "starting", sessionId: null, workloadId: null, resume, pendingStart: "turn" });
+    expect(html).toContain(t("terminal.resume.waitingTurn"));
+    expect(html).not.toContain(t("terminal.overlay.starting"));
+  });
+});
+
+describe("가드 경고 칩(08 §5 guard_warning)", () => {
+  function renderWithWarning(warning: "host_memory_pressure" | "cpu_limit" | null, state: "RUNNING" | "SUCCEEDED" = "RUNNING"): string {
+    useWorkbenchStore.getState().upsertWorkload({
+      workload_id: "workload-1", session_id: "session-1", mode: "shell", state, priority: 1, title: "zsh", cwd: "/tmp",
+      program: "/bin/zsh", reservation_bytes: "0", cpu_slots: 1, enforcement: "observe", root_exited: false,
+      cancel_requested: false, connection: "attached", relief: { kind: "NONE" }, guard: { kind: "NONE" },
+      guard_warning: warning, protected: false,
+    });
+    try {
+      return renderPaneWith({ phase: "live" });
+    } finally {
+      useWorkbenchStore.setState({ workloads: [], workloadById: new Map(), workloadBySession: new Map() });
+    }
+  }
+
+  it("보고 있는 세션이 메모리 압력의 주범이면 경고 칩과 설명을 단다", () => {
+    const html = renderWithWarning("host_memory_pressure");
+    expect(html).toContain('class="pane-guard-warning"');
+    expect(html).toContain(t("terminal.pane.guardWarning.memory"));
+    expect(html).toContain(t("terminal.pane.guardWarning.hostMemoryDetail"));
+  });
+
+  it("CPU 한도 경고는 CPU 문구로, 경고가 없거나 끝난 작업이면 칩이 없다", () => {
+    expect(renderWithWarning("cpu_limit")).toContain(t("terminal.pane.guardWarning.cpu"));
+    expect(renderWithWarning(null)).not.toContain("pane-guard-warning");
+    expect(renderWithWarning("host_memory_pressure", "SUCCEEDED")).not.toContain("pane-guard-warning");
+  });
+});
+
 describe("에이전트 배지의 현재 모델·effort(/model·/effort 즉시 반영)", () => {
   const base = {
     agent: "claude",

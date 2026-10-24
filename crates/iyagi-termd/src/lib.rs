@@ -19,6 +19,7 @@ pub mod dispatch;
 pub mod exec;
 pub mod gate_listener;
 pub mod gateway;
+pub mod governance_ledger;
 pub mod guard;
 pub mod helper;
 pub mod hook;
@@ -100,6 +101,20 @@ impl Daemon {
             1
         })?);
         let report = storage.take_reconciliation_report().unwrap_or_default();
+        // 크래시 안전: 지난 데몬이 비정상 종료하며 남긴 정지·양보를 되돌린다
+        // (싱글턴 락을 잡은 뒤, 텔레메트리가 돌기 전). 아직 같은 프로세스인
+        // 것만 건드린다.
+        let ledger_path = paths.root().join("governance-ledger.json");
+        let recovered = governance_ledger::recover(&ledger_path);
+        if recovered != governance_ledger::RecoveryReport::default() {
+            tracing::warn!(
+                resumed = recovered.resumed,
+                restored = recovered.restored,
+                thawed_cgroups = recovered.thawed_cgroups,
+                skipped = recovered.skipped,
+                "recovered resource-governance operations left by a previous daemon"
+            );
+        }
         let daemon_id = uuid::Uuid::new_v4().to_string();
 
         let platform: Arc<dyn ResourcePlatform> = Arc::from(term_platform::group::select_backend());
@@ -131,7 +146,11 @@ impl Daemon {
         let cpu_pressure =
             CpuPressureTracker::new(config.cpu_pressure_config(), MonotonicClock::new());
         let relief_config = config.relief_config();
-        let guard_policy = config.guard_policy();
+        let guard_policy = config.guard_policy_for_host(
+            logical_cpus,
+            term_platform::telemetry::physical_memory_total_bytes(),
+        );
+        let guard_policy_default = guard_policy.clone();
         // O1 mission service: only while the feature gate advertises it
         // (O01). The gate off means no mission RPC state exists at all.
         let missions = config.missions_enabled.then(|| {
@@ -230,6 +249,12 @@ impl Daemon {
                 relief_config.release_interval_ms,
             )),
             guard: Mutex::new(crate::guard::GuardController::new(guard_policy)),
+            guard_policy_default,
+            governance_ledger: governance_ledger::GovernanceLedger::new(ledger_path),
+            governance_closing: AtomicBool::new(false),
+            launches_in_flight: std::sync::atomic::AtomicU32::new(0),
+            shell_members: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            reconciliation_survivors: Mutex::new(None),
             scheduling_yield_supported,
             suspend_resume_supported,
             runtime,
@@ -416,6 +441,11 @@ fn spawn_signal_handlers(state: Arc<DaemonState>) {
 /// effort: a workload whose processes already left simply has nothing to
 /// restore, and a failure here must never block shutdown.
 fn restore_yielded_on_shutdown(state: &Arc<DaemonState>) {
+    // 텔레메트리 틱이 이미 계획해 둔 정지·양보가 재개 뒤에 걸리지 않게
+    // 먼저 막는다(적용 직전에 이 표식을 본다).
+    state
+        .governance_closing
+        .store(true, std::sync::atomic::Ordering::Release);
     let ops = state
         .relief
         .lock()
@@ -437,6 +467,8 @@ fn restore_yielded_on_shutdown(state: &Arc<DaemonState>) {
             tracing::debug!(workload = %op.workload_id(), %error, "shutdown guard resume failed");
         }
     }
+    // 정상 종료: 걸어 둔 것이 없으니 크래시 장부도 비운다.
+    state.governance_ledger.clear();
 }
 
 /// Stop every session's delivery pump on the way out. The pump only exits by

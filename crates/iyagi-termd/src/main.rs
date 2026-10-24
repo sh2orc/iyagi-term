@@ -86,15 +86,38 @@ struct Cli {
     data_dir: Option<std::path::PathBuf>,
 }
 
+/// Daily log file name prefix (`iyagi-termd.log.YYYY-MM-DD`) — the same
+/// names `rolling::daily` produced, so files from earlier builds are pruned
+/// too.
+const LOG_FILE_PREFIX: &str = "iyagi-termd.log";
+/// Daily log files kept, today's included. 상한이 없어 날마다 하나씩
+/// 영원히 쌓이던 로그(61시간 가동에 24개)를 2주로 묶는다 — 넘치면 회전할
+/// 때마다 가장 오래된 것부터 지운다.
+const LOG_FILES_KEPT: usize = 14;
+
+/// The daemon's daily-rolling file appender under `logs_dir`, keeping at
+/// most [`LOG_FILES_KEPT`] files (pruned at startup and on every rotation).
+fn daily_log_appender(
+    logs_dir: &std::path::Path,
+) -> Result<tracing_appender::rolling::RollingFileAppender, tracing_appender::rolling::InitError> {
+    tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(LOG_FILE_PREFIX)
+        .max_log_files(LOG_FILES_KEPT)
+        .build(logs_dir)
+}
+
 /// Initialize tracing. Always writes to stderr (unchanged from before). When
 /// `enable_file` is set (the long-running daemon), it ALSO writes a
-/// daily-rolling `iyagi-termd.log` under `<data_dir>/logs/`, so the daemon
-/// keeps a persistent record even though its stderr is nulled once detached.
+/// daily-rolling `iyagi-termd.log` under `<data_dir>/logs/` (at most
+/// [`LOG_FILES_KEPT`] days), so the daemon keeps a persistent record even
+/// though its stderr is nulled once detached.
 ///
 /// The returned `WorkerGuard` flushes the non-blocking file writer on drop and
 /// MUST be held for the whole process lifetime — dropping it stops file
 /// logging. Falls back to stderr-only (returns `None`) when the log directory
-/// can't be created, so a bad/unwritable data dir never blocks startup.
+/// or file can't be created, so a bad/unwritable data dir never blocks
+/// startup.
 fn init_logging(
     data_dir: &std::path::Path,
     enable_file: bool,
@@ -105,12 +128,14 @@ fn init_logging(
         .unwrap_or_else(|_| "iyagi_termd_lib=info,iyagi_termd=info".into());
     let stderr_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
-    let mut file_dir_error: Option<(std::path::PathBuf, std::io::Error)> = None;
+    let mut file_dir_error: Option<(std::path::PathBuf, String)> = None;
     let (file_layer, guard) = if enable_file {
         let logs_dir = data_dir.join("logs");
-        match std::fs::create_dir_all(&logs_dir) {
-            Ok(()) => {
-                let appender = tracing_appender::rolling::daily(&logs_dir, "iyagi-termd.log");
+        let appender = std::fs::create_dir_all(&logs_dir)
+            .map_err(|error| error.to_string())
+            .and_then(|()| daily_log_appender(&logs_dir).map_err(|error| error.to_string()));
+        match appender {
+            Ok(appender) => {
                 let (non_blocking, guard) = tracing_appender::non_blocking(appender);
                 let layer = tracing_subscriber::fmt::layer()
                     .with_ansi(false)
@@ -234,4 +259,38 @@ fn main() {
     // exit so the WAL is consistent.
     runtime.shutdown_background();
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 일별 로그는 오늘 파일을 포함해 [`LOG_FILES_KEPT`]개만 남는다 — 이전
+    /// 빌드가 같은 이름으로 쌓아 둔 파일도 정리되고, 다른 이름의 파일은
+    /// 건드리지 않는다.
+    #[test]
+    fn daily_log_appender_keeps_at_most_two_weeks_of_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for day in 1..=24 {
+            let name = format!("{LOG_FILE_PREFIX}.2026-09-{day:02}");
+            std::fs::write(dir.path().join(name), b"old\n").expect("old log");
+        }
+        std::fs::write(dir.path().join("unrelated.txt"), b"keep").expect("unrelated");
+
+        let appender = daily_log_appender(dir.path()).expect("appender");
+        drop(appender);
+
+        let logs = std::fs::read_dir(dir.path())
+            .expect("read logs dir")
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(LOG_FILE_PREFIX)
+            })
+            .count();
+        assert_eq!(logs, LOG_FILES_KEPT);
+        assert!(dir.path().join("unrelated.txt").exists());
+    }
 }

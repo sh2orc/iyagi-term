@@ -2,10 +2,12 @@
  * mission 화면의 브리지·데몬 연결 상태(05 §10).
  *
  * 동기화 실패를 모두 "연결 끊김"으로 보이지 않도록 전송 계층 상태를 따로 본다.
- * 연결 상태를 알리는 공용 store/이벤트가 아직 없어서, 터미널 세션 제어기
- * (sessionController.checkTransport)와 같은 `transportStatus()`를 mission 화면이
- * 떠 있는 동안에만 주기적으로 읽는다. 재연결 자체는 세션 제어기와 RPC 재시도가
- * 맡고 여기서는 관찰만 한다 — 끊김→연결, 또는 연결 세대(generation)가 바뀌면
+ * 따로 폴링하지 않는다: 터미널 세션 제어기(sessionController.checkTransport)가
+ * 주기적으로 읽은 `transportStatus()` 결과를 공유 소식(daemon/transportFeed)으로
+ * 받는다 — 같은 브리지 상태를 두 타이머가 읽지 않고, 창이 숨은 동안 제어기가
+ * 점검을 늦추면(10초) 여기도 함께 느려진다. 화면이 처음 붙을 때 아직 관찰이
+ * 없으면 한 번만 직접 읽는다. 재연결 자체는 세션 제어기와 RPC 재시도가 맡고
+ * 여기서는 관찰만 한다 — 끊김→연결, 또는 연결 세대(generation)가 바뀌면
  * `reconnects`를 올려 화면이 snapshot을 다시 뽑게 한다.
  *
  * `transportStatus`가 없는 client(개발 mock·시험)는 상태를 모른다("unknown")
@@ -15,6 +17,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { RpcClientError } from "../daemon/client";
+import { lastTransportStatus, subscribeTransportStatus } from "../daemon/transportFeed";
 import { getMissionClient } from "./clientAccess";
 
 export type MissionConnectionStatus = "unknown" | "connected" | "disconnected";
@@ -27,6 +30,7 @@ export interface MissionConnectionState {
   reconnects: number;
 }
 
+/** 직접 확인(checkMissionConnection)을 몰아 부르지 않는 최소 간격 — 화면이 쓴다. */
 export const CONNECTION_POLL_MS = 3000;
 
 export const useMissionConnectionStore = create<MissionConnectionState>(() => ({
@@ -36,7 +40,7 @@ export const useMissionConnectionStore = create<MissionConnectionState>(() => ({
 }));
 
 let users = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
+let unsubscribe: (() => void) | null = null;
 let checking = false;
 
 /** 연결 상태를 한 번 읽는다(동기화 오류가 연결 문제처럼 보일 때도 즉시 부른다). */
@@ -67,19 +71,26 @@ export function applyConnection(status: MissionConnectionStatus, generation: num
   useMissionConnectionStore.setState({ status, generation: nextGeneration, reconnects });
 }
 
-/** mission 화면이 떠 있는 동안 연결 상태를 구독한다(여러 화면이 같은 주기를 공유). */
+/**
+ * mission 화면이 떠 있는 동안 연결 상태를 구독한다(여러 화면이 같은 구독을 공유).
+ * 세션 제어기의 전송 점검 결과를 받아 반영할 뿐 따로 폴링하지 않는다.
+ */
 export function useMissionConnection(): { status: MissionConnectionStatus; reconnects: number } {
   useEffect(() => {
     users += 1;
     if (users === 1) {
-      void checkMissionConnection();
-      timer = setInterval(() => void checkMissionConnection(), CONNECTION_POLL_MS);
+      const last = lastTransportStatus();
+      if (last) applyConnection(last.connected ? "connected" : "disconnected", last.generation);
+      else void checkMissionConnection();
+      unsubscribe = subscribeTransportStatus((observation) =>
+        applyConnection(observation.connected ? "connected" : "disconnected", observation.generation),
+      );
     }
     return () => {
       users -= 1;
-      if (users === 0 && timer !== null) {
-        clearInterval(timer);
-        timer = null;
+      if (users === 0 && unsubscribe !== null) {
+        unsubscribe();
+        unsubscribe = null;
       }
     };
   }, []);

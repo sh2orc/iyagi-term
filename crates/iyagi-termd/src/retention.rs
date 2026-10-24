@@ -62,6 +62,9 @@ const PRESSURE_LOW_PERCENT: u64 = 80;
 /// 데이터 볼륨의 실제 남은 바이트 하한. 이보다 적으면 정기 스윕과 무관하게
 /// 즉시 정리를 돈다(전체 다운 사고의 실제 방아쇠였던 디스크 가득 참 대응).
 const DISK_HEADROOM_FLOOR_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// 바닥 아래가 이어지는 동안의 상기 경고 간격. 확인은 매분이지만 경고는
+/// 진입·회복 때와 이 간격마다만 남긴다(매분 같은 경고가 하루 수백 줄 쌓였다).
+const HEADROOM_REMIND_EVERY: Duration = Duration::from_secs(60 * 60);
 
 /// Supervised loop body (`supervisor::spawn_supervised`).
 pub fn run(state: Arc<DaemonState>) {
@@ -198,24 +201,88 @@ fn disk_free_bytes(state: &DaemonState) -> Option<u64> {
 }
 
 /// 실제 디스크 여유가 바닥 이하로 떨어지면 시간당 스윕을 기다리지 않고
-/// 즉시 반응한다: 저널 연령 정리 + 오케스트레이션 정리를 돌리고 경고한다.
-/// 살아 있는 세션은 절대 건드리지 않는다(삭제 판정은 [`sweep`]의 규칙:
-/// 종료·비고정·비활성). 이 반응이 디스크를 다 채우지는 못해도 증가를
-/// 멈추고 다음 스윕까지의 창을 벌어 준다.
+/// 즉시 반응한다: 저널 연령 정리 + 오케스트레이션 정리를 돌린다. 경고는
+/// 상태가 바뀔 때(바닥 아래로 진입·회복)와 [`HEADROOM_REMIND_EVERY`]마다만
+/// 남긴다([`HeadroomAlarm`]). 살아 있는 세션은 절대 건드리지 않는다(삭제
+/// 판정은 [`sweep`]의 규칙: 종료·비고정·비활성). 이 반응이 디스크를 다
+/// 채우지는 못해도 증가를 멈추고 다음 스윕까지의 창을 벌어 준다.
 pub(crate) fn relieve_disk_headroom(state: &Arc<DaemonState>) {
     let Some(free) = disk_free_bytes(state) else {
         return;
     };
-    if free >= DISK_HEADROOM_FLOOR_BYTES {
+    let below = free < DISK_HEADROOM_FLOOR_BYTES;
+    let alarm = HEADROOM_ALARM
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .observe(below, std::time::Instant::now());
+    match alarm {
+        HeadroomLog::Enter => tracing::warn!(
+            free_bytes = free,
+            floor_bytes = DISK_HEADROOM_FLOOR_BYTES,
+            "disk headroom below floor — running early retention passes until it recovers"
+        ),
+        HeadroomLog::Remind => tracing::warn!(
+            free_bytes = free,
+            floor_bytes = DISK_HEADROOM_FLOOR_BYTES,
+            "disk headroom still below floor"
+        ),
+        HeadroomLog::Leave => tracing::info!(
+            free_bytes = free,
+            floor_bytes = DISK_HEADROOM_FLOOR_BYTES,
+            "disk headroom back above floor"
+        ),
+        HeadroomLog::Quiet => {}
+    }
+    if !below {
         return;
     }
-    tracing::warn!(
-        free_bytes = free,
-        floor_bytes = DISK_HEADROOM_FLOOR_BYTES,
-        "disk headroom below floor — running an early retention pass"
-    );
     sweep(state);
     prune_orchestration(state);
+}
+
+/// 디스크 여유 경고의 상태 기계. 확인(매분, 저널 열기 실패 때)마다 바닥
+/// 아래인지 받아 무엇을 로그에 남길지 정한다. 데몬 하나에 디스크 하나라
+/// 프로세스 전역 하나로 충분하다(로그 전용 상태).
+#[derive(Debug)]
+struct HeadroomAlarm {
+    /// 바닥 아래로 들어간 뒤 마지막으로 경고한 시각. `None`이면 정상.
+    warned_at: Option<std::time::Instant>,
+}
+
+/// [`HeadroomAlarm::observe`]가 고른 로그.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeadroomLog {
+    /// 바닥 아래로 막 들어갔다.
+    Enter,
+    /// 바닥 아래가 상기 간격 이상 이어졌다.
+    Remind,
+    /// 바닥 위로 돌아왔다.
+    Leave,
+    /// 남길 것이 없다.
+    Quiet,
+}
+
+static HEADROOM_ALARM: std::sync::Mutex<HeadroomAlarm> =
+    std::sync::Mutex::new(HeadroomAlarm { warned_at: None });
+
+impl HeadroomAlarm {
+    fn observe(&mut self, below: bool, now: std::time::Instant) -> HeadroomLog {
+        match (below, self.warned_at) {
+            (true, None) => {
+                self.warned_at = Some(now);
+                HeadroomLog::Enter
+            }
+            (true, Some(at)) if now.saturating_duration_since(at) >= HEADROOM_REMIND_EVERY => {
+                self.warned_at = Some(now);
+                HeadroomLog::Remind
+            }
+            (false, Some(_)) => {
+                self.warned_at = None;
+                HeadroomLog::Leave
+            }
+            _ => HeadroomLog::Quiet,
+        }
+    }
 }
 
 /// 데몬 수명당 한 번의 VACUUM. 읽기 풀과의 경합으로 BUSY가 나면 실패로
@@ -689,6 +756,33 @@ mod tests {
         // actor가 살아 있다: 뷰 유무와 무관하게 건너뛴다.
         assert!(skip_live_session(Some((false, false))));
         assert!(skip_live_session(Some((false, true))));
+    }
+
+    /// 디스크 여유 경고는 상태가 바뀔 때(진입·회복)와 시간당 한 번만 남는다
+    /// — 매분 확인이 같은 경고를 하루 수백 줄 쌓던 회귀 시험.
+    #[test]
+    fn headroom_alarm_logs_transitions_and_hourly_reminders() {
+        let start = std::time::Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let mut alarm = HeadroomAlarm { warned_at: None };
+        assert_eq!(alarm.observe(false, at(0)), HeadroomLog::Quiet);
+        assert_eq!(alarm.observe(true, at(60)), HeadroomLog::Enter);
+        for minute in 2..60 {
+            assert_eq!(
+                alarm.observe(true, at(minute * 60)),
+                HeadroomLog::Quiet,
+                "minute {minute}"
+            );
+        }
+        assert_eq!(alarm.observe(true, at(60 + 3_600)), HeadroomLog::Remind);
+        assert_eq!(alarm.observe(true, at(120 + 3_600)), HeadroomLog::Quiet);
+        assert_eq!(alarm.observe(false, at(180 + 3_600)), HeadroomLog::Leave);
+        assert_eq!(alarm.observe(false, at(240 + 3_600)), HeadroomLog::Quiet);
+        assert_eq!(
+            alarm.observe(true, at(300 + 3_600)),
+            HeadroomLog::Enter,
+            "a new episode warns at once"
+        );
     }
 
     /// 수위는 넘침 없이 상한의 비율로 내림한다.

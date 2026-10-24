@@ -66,6 +66,15 @@ describe("settings schema", () => {
       "terminateOnClose",
       "quitBehavior",
     ]);
+    expect(itemsInGroup("resources").map((i) => i.id)).toEqual([
+      "resourceAutoSuspend",
+      "resourceRssLimit",
+      "resourceRssSustain",
+      "resourceCpuLimit",
+      "resourceCpuSustain",
+      "resourceAutoResume",
+      "resourceAutoYield",
+    ]);
     expect(itemsInGroup("trackpad").map((i) => i.id)).toEqual([
       "tabSwipe",
       "tabSwipeSensitivity",
@@ -131,6 +140,16 @@ describe("설정 검색", () => {
     expect(searchItems("스와이프", t).map((i) => i.id)).toContain("tabSwipe");
     expect(searchItems("swipe", t).map((i) => i.id)).toContain("tabSwipe");
     expect(searchGroups("트랙패드", t).map((g) => g.id)).toEqual(["trackpad"]);
+  });
+
+  it("자원 관리 항목은 한/영 낱말로 찾힌다", () => {
+    const ids = (query: string) => searchItems(query, t).map((i) => i.id);
+    for (const query of ["메모리", "memory", "한도"]) {
+      expect(ids(query), query).toContain("resourceRssLimit");
+    }
+    for (const query of ["일시정지", "suspend"]) expect(ids(query), query).toContain("resourceAutoSuspend");
+    for (const query of ["양보", "yield"]) expect(ids(query), query).toContain("resourceAutoYield");
+    expect(searchGroups("자원 관리", t).map((g) => g.id)).toContain("resources");
   });
 
   it("항목 정의가 없는 그룹도 이름·설명으로 걸린다", () => {

@@ -2,8 +2,9 @@
 //!
 //! 계약:
 //!
-//! * CPU 압력이 WARNING 이상이면 포커스가 아닌 RUNNING 세션 전부가
-//!   `relief.kind = "YIELDED"`가 되고, 포커스 세션은 `NONE`으로 남는다(§0-3),
+//! * CPU 압력이 CRITICAL이면 포커스가 아닌 RUNNING 세션 전부가
+//!   `relief.kind = "YIELDED"`가 되고, 포커스 세션은 `NONE`으로 남는다(§0-3)
+//!   — WARNING에서는 낮은 우선순위 세션만 양보한다(P2-1, 단위 시험),
 //! * 그 양보는 진짜로 OS에 걸린다 — 관측된 트리의 pid마다 background 정책이
 //!   읽힌다(§9: "적용 → 해제 → 원상 확인"을 한 시험 안에서),
 //! * `session.relief restore`는 즉시 되돌리고, 압력이 남아 있는 동안
@@ -12,7 +13,7 @@
 //! * `relief.set_policy { auto_yield: false }`면 자동 양보는 일어나지 않는다.
 //!
 //! 압력은 호스트 부하에 맡길 수 없으므로 `IYAGI_TEST_CONFIG`의
-//! `cpu_pressure.warning_used_percent = 0`으로 강제한다(측정만 되면 WARNING).
+//! `cpu_pressure.critical_used_percent = 0`으로 강제한다(측정만 되면 CRITICAL).
 
 mod common;
 
@@ -25,10 +26,10 @@ const SETTLE: Duration = Duration::from_secs(20);
 /// "일어나지 않아야 한다"를 확인하는 관찰 창.
 const QUIET: Duration = Duration::from_secs(5);
 
-/// 항상 WARNING으로 분류되는 압력 설정 + 느슨한 admission.
-fn always_warning() -> Value {
+/// 항상 CRITICAL로 분류되는 압력 설정 + 느슨한 admission.
+fn always_critical() -> Value {
     common::relaxed_admission(json!({
-        "cpu_pressure": { "warning_used_percent": 0, "critical_used_percent": 200 },
+        "cpu_pressure": { "warning_used_percent": 0, "critical_used_percent": 0 },
     }))
 }
 
@@ -143,11 +144,11 @@ fn cleanup(control: &mut Client, workloads: &[&Value]) {
     }
 }
 
-/// §2: WARNING이면 비포커스 세션이 양보되고, 포커스 세션은 그대로다.
+/// §2: CRITICAL이면 비포커스 세션이 양보되고, 포커스 세션은 그대로다.
 /// 그리고 그 양보는 실제로 OS에 걸려 있다.
 #[test]
 fn pressure_yields_the_unfocused_session_and_spares_the_focused_one() {
-    let daemon = DaemonProc::spawn("relief-yield", Some(always_warning()));
+    let daemon = DaemonProc::spawn("relief-yield", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
 
     let (focused_w, focused_s) = live_shell(&mut control);
@@ -185,7 +186,7 @@ fn pressure_yields_the_unfocused_session_and_spares_the_focused_one() {
 /// 않는다(`protected`). OS 상태도 원상으로 돌아간다(§9).
 #[test]
 fn a_manual_restore_undoes_the_yield_and_is_not_re_yielded_under_pressure() {
-    let daemon = DaemonProc::spawn("relief-manual-restore", Some(always_warning()));
+    let daemon = DaemonProc::spawn("relief-manual-restore", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
 
     let (workload, session) = live_shell(&mut control);
@@ -223,7 +224,7 @@ fn a_manual_restore_undoes_the_yield_and_is_not_re_yielded_under_pressure() {
 /// §0-3: 포커스를 얻으면 압력이 남아 있어도 즉시 복원된다.
 #[test]
 fn focusing_a_yielded_session_restores_it() {
-    let daemon = DaemonProc::spawn("relief-focus-restore", Some(always_warning()));
+    let daemon = DaemonProc::spawn("relief-focus-restore", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
 
     let (keep, keep_session) = live_shell(&mut control);
@@ -313,7 +314,7 @@ fn manual_yield_and_protect_work_without_any_pressure() {
 /// 일어나지 않는다. 스냅샷의 `relief_policy`가 현재 값을 그대로 광고한다.
 #[test]
 fn turning_auto_yield_off_stops_automatic_yields() {
-    let daemon = DaemonProc::spawn("relief-policy", Some(always_warning()));
+    let daemon = DaemonProc::spawn("relief-policy", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
 
     let snapshot = control

@@ -369,7 +369,9 @@ impl Observer {
                             }
                         }
                     }
-                    std::thread::sleep(Duration::from_millis(50));
+                    // 4 Hz면 종료 감지에 충분하다 — 매 관찰이 전체 프로세스 목록을
+                    // 읽으므로 20 Hz는 실행 하나에 코어의 수 %를 썼다.
+                    std::thread::sleep(Duration::from_millis(250));
                 }
             })?;
         Ok(Self {

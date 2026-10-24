@@ -3,12 +3,16 @@
  *
  * - 벨은 읽지 않은 개수만 보여 준다(조용한 신호). 패널을 열면 전부
  *   읽음 처리되고, 항목 클릭은 연결된 pane으로 이동한다(AI 작업 알림은 그 작업 탭을 연다).
+ * - 자원 가드의 자동 일시정지 알림은 그 자리에서 "재개"·"보호"를 고른다 — 작업이 아직
+ *   정지돼 있을 때만 버튼을 보인다.
  * - CLI hooks 등록은 앱이 사용자 설정을 직접 고치지 않는다(§2.1 스펙).
  *   패널 하단에 붙여넣기용 등록 조각을 제공한다.
  */
 
+import { useContext } from "react";
 import { useI18n } from "../../i18n";
 import { useWorkbenchStore } from "../../store/workbenchStore";
+import { ControllerContext } from "../../app/controllerContext";
 import { interventionKindKey, selectUnreadCount, useNotificationStore, type NotificationItem } from "./notificationStore";
 import { listLeaves } from "../terminal/splitTree";
 import { openMissionTabAndSync } from "../missions/store";
@@ -113,7 +117,9 @@ function NotificationPanel(props: { onClose: () => void }): JSX.Element {
                           ? "notifications.kind.schedule"
                           : item.kind === "auto-continue"
                             ? "notifications.kind.autoContinue"
-                            : "notifications.kind.finished",
+                            : item.kind === "resource"
+                              ? "notifications.kind.autoSuspended"
+                              : "notifications.kind.finished",
                   )}
                 </span>
                 <span className="notif-title">{item.title}</span>
@@ -134,12 +140,63 @@ function NotificationPanel(props: { onClose: () => void }): JSX.Element {
                 >
                   {t("notifications.action.resume")}
                 </button>
+              ) : item.kind === "resource" && item.workloadId ? (
+                <ResourceActions notificationId={item.id} workloadId={item.workloadId} />
               ) : null}
             </li>
           ))}
         </ul>
       )}
       <p className="notif-hint muted">{t("notifications.hooksHint")}</p>
+    </div>
+  );
+}
+
+/** 항목 종류 라벨 키. */
+export function notificationKindKey(item: NotificationItem): string {
+  switch (item.kind) {
+    case "intervention":
+      return interventionKindKey(item.interventionKind ?? "notification");
+    case "mission":
+      return missionNotificationKindKey(item.missionEvent ?? "decision");
+    case "resource":
+      return "notifications.kind.autoSuspended";
+    default:
+      return "notifications.kind.finished";
+  }
+}
+
+/**
+ * 자동 일시정지 알림의 동작: "재개"(workload.resume)·"보호"(자동 완화·정지에서
+ * 빼고 재개). 작업이 아직 정지돼 있을 때만 보이고, 고르면 그 알림을 읽음으로 한다.
+ */
+function ResourceActions(props: { notificationId: string; workloadId: string }): JSX.Element | null {
+  const { t } = useI18n();
+  const controller = useContext(ControllerContext);
+  const suspended = useWorkbenchStore((s) => s.workloadById.get(props.workloadId)?.guard?.kind === "SUSPENDED");
+  if (!controller || !suspended) return null;
+  const done = () => useNotificationStore.getState().acknowledge(props.notificationId);
+  return (
+    <div className="notif-actions">
+      <button
+        type="button"
+        onClick={() => {
+          done();
+          void controller.resumeWorkload(props.workloadId);
+        }}
+      >
+        {t("notifications.resource.resume")}
+      </button>
+      <button
+        type="button"
+        title={t("notifications.resource.protectTitle")}
+        onClick={() => {
+          done();
+          void controller.protectWorkload(props.workloadId);
+        }}
+      >
+        {t("notifications.resource.protect")}
+      </button>
     </div>
   );
 }

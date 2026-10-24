@@ -237,6 +237,7 @@ fn snapshot_round_trips() {
         focused_session_ids: vec![term_contracts::ids::SessionId::generate()],
         relief_policy: ReliefPolicy { auto_yield: false },
         guard_policy: Default::default(),
+        guard_policy_default: None,
     };
     let json = serde_json::to_string(&snap).unwrap();
     let back: Snapshot = serde_json::from_str(&json).unwrap();

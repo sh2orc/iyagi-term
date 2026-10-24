@@ -15,8 +15,8 @@ pub const CRITICAL_ABSOLUTE_BYTES: u64 = 1 << 30;
 /// zero total = broken telemetry) — the old `<10%` ratio rule is gone, it
 /// raised false CRITICALs on large-RAM hosts where macOS keeps compressing
 /// and swapping well below it. Real crises surface through the kernel signal
-/// (`kernel_pressure::kernel_memory_critical`) instead, which the daemon
-/// feeds to the tracker's `force_critical`.
+/// (`kernel_pressure::kernel_memory_pressure`) instead, which the daemon
+/// feeds to the tracker's `update_with_kernel`.
 ///
 /// * WARNING when the ratio is strictly below 12% (`available * 25 <
 ///   total * 3`). Exactly 12.0% is NORMAL.

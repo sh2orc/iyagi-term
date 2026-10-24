@@ -85,7 +85,22 @@ const FORWARD_RESPONSE_HEADERS: [&str; 5] = [
 
 /// 업스트림 연결 수립 상한. 응답 대기·본문은 끊지 않는다(긴 생성은 정상이고
 /// CLI가 `API_TIMEOUT_MS`로 스스로 끊는다) — 연결조차 안 되는 경우만 자른다.
+/// 읽기 타임아웃도 일부러 두지 않는다: 비스트리밍 응답은 생성이 끝날 때까지
+/// 몇 분씩 아무 바이트도 오지 않을 수 있어, 안전한 값은 CLI 자신의 타임아웃
+/// (기본 600 s, 사용자 설정 가능)보다 길어야 하고 그러면 쓸모가 없다.
+/// 죽은 연결은 아래 TCP keepalive가 잡는다.
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 업스트림 TCP keepalive. 맥이 잠든 사이 NAT·공유기가 버린 연결은 깨어난
+/// 뒤에도 아무 신호가 없는 half-open이 되어, 풀에 남은 연결로 보낸 요청이나
+/// 응답을 기다리던 요청이 OS 기본값(2시간 뒤에야 탐침)이면 그만큼 매달린다.
+/// 30초 조용하면 탐침을 시작하고 10초 간격으로 3번 답이 없으면 끊는다(약
+/// 1분) — 살아 있는 상대의 커널은 탐침에 답하므로 몇 분씩 조용한 생성
+/// 응답은 끊기지 않는다. reqwest 0.12의 기본값(15 s, 15 s × 3)도 비슷하지만
+/// 의존성 기본값에 기대지 않게 명시한다(갱신으로 바뀌거나 빠질 수 있다).
+const UPSTREAM_TCP_KEEPALIVE: Duration = Duration::from_secs(30);
+const UPSTREAM_TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const UPSTREAM_TCP_KEEPALIVE_RETRIES: u32 = 3;
 
 /// 장부에 남기는 세션(게이트웨이 토큰) 상한. 초과하면 가장 오래 쉰 세션부터
 /// 버린다 — 종료 훅(`forget_workload`)이 정리를 담당하지만, 비정상 종료로
@@ -170,6 +185,9 @@ impl Gateway {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(UPSTREAM_CONNECT_TIMEOUT)
+            .tcp_keepalive(UPSTREAM_TCP_KEEPALIVE)
+            .tcp_keepalive_interval(UPSTREAM_TCP_KEEPALIVE_INTERVAL)
+            .tcp_keepalive_retries(UPSTREAM_TCP_KEEPALIVE_RETRIES)
             .build()
             .unwrap_or_default();
         Gateway {

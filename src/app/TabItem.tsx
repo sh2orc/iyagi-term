@@ -50,6 +50,11 @@ export interface TabItemProps {
   queued?: boolean;
   /** 미확인 개입 신호가 있는 탭(W1-5). */
   intervention?: boolean;
+  /**
+   * 자동 개입 표식: 자원 가드가 스스로 일시정지했거나("suspended") CPU 압력으로 자동
+   * 양보 중인("yielded") 창이 있는 탭. 정지가 먼저다. 없으면 null.
+   */
+  relief?: TabAutoRelief | null;
   /** 살아 있는 pane의 자원 요약(W2: 상태 스트립의 최소 증명). */
   usage?: { cpuCores: number | null; residentBytes: number | null } | null;
   /** 자동 감지된 에이전트의 활동 상태(타이틀 앞 마커). 에이전트가 없으면 null. */
@@ -93,6 +98,30 @@ export interface TabItemProps {
 
 type WorkbenchSnapshot = ReturnType<typeof useWorkbenchStore.getState>;
 type TerminalTab = TabState & { kind: "terminal" };
+
+/** 탭의 자동 개입 표식 종류. */
+export type TabAutoRelief = "suspended" | "yielded";
+
+/**
+ * 이 탭의 창 중 자원 가드가 스스로(manual=false) 일시정지했거나 자동 양보 중인 것이
+ * 있는가 — 정지가 먼저다. 사용자가 직접 한 정지·양보는 표시하지 않는다(본인이 안다).
+ */
+export function tabAutoRelief(
+  s: Pick<WorkbenchSnapshot, "panes" | "workloadById">,
+  root: SplitNode | null,
+): TabAutoRelief | null {
+  let yielded = false;
+  for (const leaf of listLeaves(root)) {
+    const pane = s.panes[leaf.id];
+    if (!pane?.workloadId) continue;
+    const workload = s.workloadById.get(pane.workloadId);
+    if (workload && !isFinishedWorkload(workload.state) && workload.guard?.kind === "SUSPENDED" && !workload.guard.manual) {
+      return "suspended";
+    }
+    if (pane.relief?.kind === "YIELDED" && !pane.relief.manual) yielded = true;
+  }
+  return yielded ? "yielded" : null;
+}
 
 /** 이 탭의 살아 있는 pane 중 최대 CPU·RAM(없으면 null). */
 function maxPaneUsage(
@@ -178,6 +207,8 @@ function TerminalTabItem(props: Omit<TabItemProps, "tab"> & { tab: TerminalTab }
     if (!pane?.workloadId) return false;
     return s.workloadById.get(pane.workloadId)?.state === "QUEUED";
   }));
+  // 자동 개입 표식(정지·양보) — 원시 문자열로 구독해 바뀔 때만 다시 그린다.
+  const relief = useWorkbenchStore((s) => tabAutoRelief(s, root));
   // 자원 배지(W2): 이 탭의 살아 있는 pane 중 최대 CPU·RAM — 자원 관리가
   // "살아 있는 에이전트"에 상시 보이는 최소 증명이다.
   // 객체를 새로 만드는 selector는 Object.is 비교를 항상 실패시켜 모든 탭이
@@ -198,6 +229,7 @@ function TerminalTabItem(props: Omit<TabItemProps, "tab"> & { tab: TerminalTab }
       finished={finished}
       queued={queued}
       intervention={intervention}
+      relief={relief}
       usage={usage}
       agentActivity={activity}
       agentId={activityAgent}
@@ -282,6 +314,7 @@ export function TabItem({
   finished = false,
   queued = false,
   intervention = false,
+  relief = null,
   usage = null,
   agentActivity = null,
   agentId = null,
@@ -417,6 +450,15 @@ export function TabItem({
             ) : null}
             {!active && queued ? (
               <span className="tab-badge tab-badge-queued" role="status">{t("app.tabQueued")}</span>
+            ) : null}
+            {!active && relief ? (
+              <span
+                className={`tab-badge tab-badge-relief tab-badge-relief-${relief}`}
+                role="status"
+                title={t(relief === "suspended" ? "app.tabRelief.suspendedTitle" : "app.tabRelief.yieldedTitle")}
+              >
+                {t(relief === "suspended" ? "app.tabRelief.suspended" : "app.tabRelief.yielded")}
+              </span>
             ) : null}
             {!active && finished ? (
               <span className="tab-badge tab-badge-finished" role="status">{t("app.tabFinished")}</span>

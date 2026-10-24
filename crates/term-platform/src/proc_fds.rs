@@ -249,13 +249,14 @@ mod imp {
     }
 }
 
-#[cfg(test)]
+// 두 시험 모두 fd 표가 있는 플랫폼 전용이다 — Windows에서는 모듈째 빠진다
+// (빈 모듈의 import가 경고로 남지 않게).
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests {
     use super::*;
     use std::io::Write;
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn our_own_open_file_shows_up_in_our_fd_table() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("held-open.lock");
@@ -279,7 +280,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn a_dead_pid_yields_none_instead_of_panicking() {
         assert!(open_file_paths(u32::MAX - 17).is_none());
     }

@@ -198,6 +198,62 @@ describe("게이트웨이 카드", () => {
   });
 });
 
+describe("게이트웨이 상태 폴 — 숨은 창", () => {
+  let hidden = false;
+
+  beforeEach(() => {
+    hidden = false;
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+  });
+
+  afterEach(() => {
+    // 문서 원래의 hidden(프로토타입 getter)으로 되돌린다.
+    delete (document as unknown as { hidden?: boolean }).hidden;
+    vi.useRealTimers();
+  });
+
+  const setHidden = async (next: boolean): Promise<void> => {
+    hidden = next;
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await flush();
+  };
+
+  it("창이 숨은 동안은 2초 폴을 건너뛰고, 다시 보이는 순간 곧바로 한 번 읽는다", async () => {
+    vi.useFakeTimers();
+    const gatewayStatusFn = vi.fn(async () => gatewayStatus());
+    await render({ gatewayStatus: gatewayStatusFn });
+    expect(gatewayStatusFn).toHaveBeenCalledTimes(1); // 마운트 직후 한 번
+
+    await act(async () => { vi.advanceTimersByTime(2000); });
+    await flush();
+    expect(gatewayStatusFn).toHaveBeenCalledTimes(2); // 보이는 동안은 2초마다
+
+    await setHidden(true);
+    await act(async () => { vi.advanceTimersByTime(20_000); });
+    await flush();
+    expect(gatewayStatusFn).toHaveBeenCalledTimes(2); // 숨은 동안은 데몬을 깨우지 않는다
+
+    await setHidden(false);
+    expect(gatewayStatusFn).toHaveBeenCalledTimes(3); // 돌아오자마자 한 번
+    await act(async () => { vi.advanceTimersByTime(2000); });
+    await flush();
+    expect(gatewayStatusFn).toHaveBeenCalledTimes(4); // 그리고 다시 주기대로
+  });
+
+  it("숨은 채로 열리면 첫 조회도 미루고, 보일 때 읽는다", async () => {
+    vi.useFakeTimers();
+    hidden = true;
+    const gatewayStatusFn = vi.fn(async () => gatewayStatus());
+    await render({ gatewayStatus: gatewayStatusFn });
+    await act(async () => { vi.advanceTimersByTime(6000); });
+    await flush();
+    expect(gatewayStatusFn).not.toHaveBeenCalled();
+
+    await setHidden(false);
+    expect(gatewayStatusFn).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("키 풀 카드", () => {
   it("브리지 오류 코드는 안내 문구로, 그 밖의 문구는 원문으로 보인다", async () => {
     pool.add.mockRejectedValueOnce({ code: "INVALID_ARGUMENT", message: "key_pool_full" });

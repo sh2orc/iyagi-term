@@ -58,6 +58,11 @@
 * **본문**: 요청은 Content-Length 필수(청크 요청은 411, Claude Code는 고정
   길이 JSON만 보낸다), 상한 64 MiB. 응답은 SSE면 청크 인코딩으로 스트리밍,
   아니면 버퍼(상한 8 MiB) 후 content-length로 응답.
+* **업스트림 연결**: 연결 수립 상한 30초. 읽기 타임아웃은 두지 않는다 — 긴
+  비스트리밍 생성은 몇 분씩 바이트가 없는 게 정상이고, CLI가
+  `API_TIMEOUT_MS`로 스스로 끊는다. 잠자기 뒤 NAT가 버린 half-open 연결은
+  TCP keepalive(30초 조용하면 탐침, 10초 간격 3회 무응답이면 끊음 — 약
+  1분)가 잡는다. 값은 의존성 기본값에 기대지 않고 명시한다.
 * **사용량 파싱**(`/v1/messages`만): SSE는 `data:` 줄 단위로
   `message_start`(input·cache)와 `message_delta`(output 누적값의 최종)을,
   비스트리밍은 응답 JSON의 `usage`를 읽는다. 파싱은 스캔일 뿐 — 본문을

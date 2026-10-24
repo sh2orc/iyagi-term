@@ -21,6 +21,7 @@ pub fn assess_reconciliation(
     report: Vec<term_storage::ReconciledWorkload>,
 ) {
     let mut survivors = 0;
+    let mut survivor_identities = Vec::new();
     let mut interrupted = Vec::new();
     // 스토리지가 이력의 진실 원본이다: 세션 id와 기록된 사실(mode·policy·
     // priority·exit)은 거기서 가져온다. 무작위 session_id를 만들면 스냅샷·
@@ -105,6 +106,7 @@ pub fn assess_reconciliation(
                 .is_some_and(|current| current.same_process(&ownership.identity));
             if alive {
                 survivors += 1;
+                survivor_identities.push(ownership.identity.clone());
                 tracing::warn!(
                     workload = %reconciled.workload_id,
                     pid = ownership.identity.pid,
@@ -120,6 +122,10 @@ pub fn assess_reconciliation(
         state.note_workload_terminal(workload_id);
     }
     if survivors > 0 {
+        *state
+            .reconciliation_survivors
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some((Instant::now(), survivor_identities));
         state
             .reconciliation_required
             .store(true, std::sync::atomic::Ordering::Release);
@@ -209,5 +215,103 @@ fn wait_while_any(
             return;
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// 아직 같은 프로세스인 생존자만 남기고, 재조정을 끝낼지 판정한다(모두
+/// 사라졌거나 유예가 지났다).
+fn prune_survivors(
+    survivors: &mut Vec<term_contracts::ids::ProcessIdentity>,
+    grace_expired: bool,
+) -> bool {
+    survivors.retain(|recorded| {
+        identity::process_identity(recorded.pid).is_some_and(|live| live.same_process(recorded))
+    });
+    survivors.is_empty() || grace_expired
+}
+
+/// 생존자가 남아 있어도 이만큼 지나면 재조정을 끝낸다. 그 프로세스들의
+/// 메모리는 이미 호스트 가용량에 반영돼 있다 — 관리 예약 장부에만 없을
+/// 뿐이라, 영원히 막을 이유는 없다(유예는 사용자가 정리할 시간).
+pub const RECONCILIATION_GRACE: Duration = Duration::from_secs(120);
+
+/// 재조정 생존자를 다시 확인한다(텔레메트리 틱마다, 싸다 — 생존자 몇 개의
+/// 신원 조회). 모두 사라졌거나 유예가 지났으면 `reconciliation_required`를
+/// 끄고 revision을 올린다(대기열이 다음 판정에서 다시 승인한다).
+pub fn recheck_reconciliation(state: &DaemonState) {
+    if !state
+        .reconciliation_required
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return;
+    }
+    let mut survivors = state
+        .reconciliation_survivors
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let (cleared, remaining, expired) = match survivors.as_mut() {
+        Some((since, identities)) => {
+            let expired = since.elapsed() >= RECONCILIATION_GRACE;
+            (
+                prune_survivors(identities, expired),
+                identities.len(),
+                expired,
+            )
+        }
+        // 생존자 목록 없이 켜진 플래그(예전 경로) — 더 기다릴 근거가 없다.
+        None => (true, 0, false),
+    };
+    if !cleared {
+        return;
+    }
+    *survivors = None;
+    drop(survivors);
+    state
+        .reconciliation_required
+        .store(false, std::sync::atomic::Ordering::Release);
+    state.bump_revision();
+    tracing::info!(
+        remaining,
+        expired,
+        "reconciliation cleared; surviving processes count as host usage"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 살아 있는 생존자는 유예 안에서 재조정을 붙잡고, 사라지면(또는 유예가
+    /// 지나면) 놓는다. 이미 없는 신원은 바로 빠진다.
+    #[cfg(unix)]
+    #[test]
+    fn survivors_hold_reconciliation_only_while_alive_or_within_grace() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let alive = identity::process_identity(child.id()).expect("identity");
+        let gone = term_contracts::ids::ProcessIdentity {
+            pid: u32::MAX - 3,
+            start_token: "gone".to_string(),
+            boot_id: alive.boot_id.clone(),
+        };
+        let mut survivors = vec![alive.clone(), gone];
+        assert!(
+            !prune_survivors(&mut survivors, false),
+            "살아 있으면 붙잡는다"
+        );
+        assert_eq!(survivors, vec![alive.clone()], "없는 신원은 빠진다");
+        assert!(
+            prune_survivors(&mut survivors.clone(), true),
+            "유예가 지나면 놓는다"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            prune_survivors(&mut survivors, false),
+            "모두 사라지면 놓는다"
+        );
+        assert!(survivors.is_empty());
     }
 }

@@ -592,7 +592,8 @@ impl Client {
         session_id: Option<&SessionId>,
     ) -> Result<SessionFocusResult, BridgeError> {
         let params = SessionFocusParams {
-            session_id: session_id.map(|id| id.clone()),
+            session_id: session_id.cloned(),
+            visible_session_ids: None,
         };
         let value = self
             .call(

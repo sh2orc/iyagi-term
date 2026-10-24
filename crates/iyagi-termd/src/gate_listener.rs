@@ -58,10 +58,57 @@ impl Write for GateIo {
     }
 }
 
-/// One-connection gate listener.
+/// One-connection gate listener. The socket file lives exactly as long as
+/// the listener: it is unlinked on drop — right after `accept` (the
+/// accepted stream no longer needs the path) or when the launch gives up —
+/// so `runtime/gate-*.sock` no longer piles up one file per launch.
 #[cfg(unix)]
 pub struct GateListener {
     listener: std::os::unix::net::UnixListener,
+    path: std::path::PathBuf,
+}
+
+/// 이보다 오래된 `gate-*.sock`은 찌꺼기다(게이트는 수 초 안에 끝난다) —
+/// 소켓을 지우지 않던 이전 빌드나 비정상 종료가 남긴 파일을 다음 실행의
+/// bind가 치운다.
+#[cfg(unix)]
+const STALE_GATE_SOCKET_AFTER: Duration = Duration::from_secs(60 * 60);
+
+/// 데몬이 만드는 게이트 소켓 이름(`gate-<8 hex>.sock`, `Paths::gate_endpoint`)인가.
+#[cfg(unix)]
+fn is_gate_socket_name(name: &str) -> bool {
+    name.strip_prefix("gate-")
+        .and_then(|rest| rest.strip_suffix(".sock"))
+        .is_some_and(|hex| hex.len() == 8 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// 소켓 디렉터리에서 [`STALE_GATE_SOCKET_AFTER`]보다 오래된 게이트 소켓을
+/// 지운다. 이름이 맞고 실제 소켓인 항목만 본다 — 진행 중인 게이트는 방금
+/// 만들어진 파일이라 건드리지 않는다.
+#[cfg(unix)]
+fn remove_stale_gate_sockets(dir: &std::path::Path, now: std::time::SystemTime) {
+    use std::os::unix::fs::FileTypeExt;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_str().is_some_and(is_gate_socket_name) {
+            continue;
+        }
+        // DirEntry::metadata는 심볼릭 링크를 따라가지 않는다.
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let stale = meta.file_type().is_socket()
+            && meta
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age >= STALE_GATE_SOCKET_AFTER);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -73,8 +120,19 @@ impl GateListener {
         use std::os::unix::net::UnixListener;
         let path = std::path::Path::new(endpoint);
         let _ = std::fs::remove_file(path);
+        let listener = UnixListener::bind(path)?;
+        // 데몬의 소켓 디렉터리에 묶였을 때만(이름이 데몬 형식) 옛 게이트
+        // 소켓을 치운다 — 시험처럼 공용 디렉터리에 묶으면 손대지 않는다.
+        let daemon_named = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_gate_socket_name);
+        if let Some(dir) = path.parent().filter(|_| daemon_named) {
+            remove_stale_gate_sockets(dir, std::time::SystemTime::now());
+        }
         Ok(GateListener {
-            listener: UnixListener::bind(path)?,
+            listener,
+            path: path.to_path_buf(),
         })
     }
 
@@ -100,6 +158,14 @@ impl GateListener {
                 Err(e) => return Err(e),
             }
         }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for GateListener {
+    fn drop(&mut self) {
+        // 받아들인 연결은 경로 없이도 산다 — 리스너가 끝나면 이름도 지운다.
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -316,6 +382,122 @@ mod probe_tests {
             .expect("join");
         });
         client.join().expect("client thread");
+    }
+
+    #[cfg(unix)]
+    fn current_thread_handle() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+    }
+
+    /// 파일 시각을 `age`만큼 과거로 돌린다(소켓 파일은 열 수 없어 utimes).
+    #[cfg(unix)]
+    fn backdate(path: &std::path::Path, age: Duration) {
+        use std::os::unix::ffi::OsStrExt;
+        let then = std::time::SystemTime::now() - age;
+        let secs = then
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after epoch")
+            .as_secs();
+        let time = libc::timeval {
+            tv_sec: secs as libc::time_t,
+            tv_usec: 0,
+        };
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).expect("path");
+        // SAFETY: valid NUL-terminated path and two initialized timevals.
+        let rc = unsafe { libc::utimes(c_path.as_ptr(), [time, time].as_ptr()) };
+        assert_eq!(rc, 0, "utimes {}", path.display());
+    }
+
+    /// 게이트 소켓 파일은 리스너가 끝나면 사라진다 — 쓰이지 않고 버려졌을
+    /// 때, deadline이 지나 accept가 실패했을 때, accept가 성공했을 때(받은
+    /// 연결은 경로 없이 계속 쓰인다) 모두. 예전엔 실행마다 하나씩 쌓였다.
+    #[cfg(unix)]
+    #[test]
+    fn gate_socket_file_is_removed_when_the_listener_is_done() {
+        let rt = current_thread_handle();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let endpoint = dir.path().join("gate-0123abcd.sock");
+        let ep = endpoint.to_str().expect("utf8").to_string();
+
+        let listener = GateListener::bind(&ep, rt.handle().clone()).expect("bind");
+        assert!(endpoint.exists());
+        drop(listener);
+        assert!(!endpoint.exists(), "an unused listener unlinks its socket");
+
+        let listener = GateListener::bind(&ep, rt.handle().clone()).expect("bind");
+        let err = listener
+            .accept(Instant::now())
+            .err()
+            .expect("past deadline");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(!endpoint.exists(), "a failed accept unlinks its socket");
+
+        let listener = GateListener::bind(&ep, rt.handle().clone()).expect("bind");
+        let client_ep = ep.clone();
+        let client = std::thread::spawn(move || {
+            let mut stream = SyncStream::connect(&client_ep).expect("connect");
+            stream.write_all(b"ping").expect("client write");
+            stream
+        });
+        let mut io = listener
+            .accept(Instant::now() + Duration::from_secs(5))
+            .expect("accept");
+        assert!(!endpoint.exists(), "accepted: the path is no longer needed");
+        let mut buf = [0u8; 4];
+        let mut got = 0;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while got < buf.len() {
+            match io.read(&mut buf[got..]) {
+                Ok(0) => panic!("peer closed early"),
+                Ok(n) => got += n,
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    assert!(Instant::now() < deadline, "no bytes from the client");
+                }
+                Err(e) => panic!("read: {e}"),
+            }
+        }
+        assert_eq!(&buf, b"ping", "the accepted stream keeps working");
+        drop(client.join().expect("client thread"));
+    }
+
+    /// bind는 이전 실행이 남긴 오래된 게이트 소켓만 치운다: 이름이 데몬
+    /// 형식이고, 실제 소켓이며, 한 시간보다 오래된 것. 방금 만들어진 다른
+    /// 게이트와 형식이 다른 파일은 그대로 둔다.
+    #[cfg(unix)]
+    #[test]
+    fn bind_sweeps_stale_gate_sockets_from_earlier_runs() {
+        use std::os::unix::net::UnixListener;
+        let rt = current_thread_handle();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stale = dir.path().join("gate-aaaaaaaa.sock");
+        // std's listener leaves its socket file behind on drop.
+        drop(UnixListener::bind(&stale).expect("stale socket"));
+        backdate(&stale, Duration::from_secs(2 * 60 * 60));
+        let in_flight = dir.path().join("gate-bbbbbbbb.sock");
+        drop(UnixListener::bind(&in_flight).expect("fresh socket"));
+        let regular = dir.path().join("gate-cccccccc.sock");
+        std::fs::write(&regular, b"not a socket").expect("regular file");
+        backdate(&regular, Duration::from_secs(2 * 60 * 60));
+        let foreign = dir.path().join("gate-other.sock");
+        drop(UnixListener::bind(&foreign).expect("foreign socket"));
+        backdate(&foreign, Duration::from_secs(2 * 60 * 60));
+
+        let endpoint = dir.path().join("gate-dddddddd.sock");
+        let listener = GateListener::bind(endpoint.to_str().expect("utf8"), rt.handle().clone())
+            .expect("bind");
+        assert!(!stale.exists(), "an hour-old gate socket is swept");
+        assert!(in_flight.exists(), "a fresh gate is left alone");
+        assert!(regular.exists(), "only sockets are swept");
+        assert!(foreign.exists(), "only daemon gate names are swept");
+        drop(listener);
+        assert!(!endpoint.exists());
     }
 
     #[test]

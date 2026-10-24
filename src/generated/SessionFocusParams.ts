@@ -6,4 +6,11 @@ import type { SessionId } from "./SessionId";
  * (spec `08-pressure-relief.md` §1). `None` = this window focuses no
  * session (every pane hidden / the window lost focus).
  */
-export type SessionFocusParams = { session_id?: SessionId | null, };
+export type SessionFocusParams = { session_id?: SessionId | null, 
+/**
+ * 이 창에서 지금 화면에 보이는 세션 전부(포커스 세션 포함). 자동
+ * 완화·정지는 보이는 pane도 포커스처럼 면제한다 — 2×2로 지켜보는
+ * 에이전트가 포커스 하나만 빼고 양보·정지되지 않게. 창이 숨겨졌으면
+ * 비운다. 구 앱은 보내지 않는다(`None` = 포커스 세션만).
+ */
+visible_session_ids?: Array<SessionId> | null, };

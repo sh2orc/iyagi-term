@@ -6,7 +6,7 @@
 //! operations (launch, finalize) run on dedicated blocking threads.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -313,6 +313,88 @@ pub const FINALIZED_SESSIONS_RETAINED: usize = 32;
 pub const FINISHED_WORKLOADS_RETAINED: usize = 64;
 
 /// The whole-daemon shared state.
+/// 세션 상한 안의 실행 자리 하나([`DaemonState::reserve_launch_slot`]).
+/// 드롭되면 자리를 돌려준다.
+pub struct LaunchSlot<'a> {
+    state: &'a DaemonState,
+}
+
+impl Drop for LaunchSlot<'_> {
+    fn drop(&mut self) {
+        self.state.launches_in_flight.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// 한 컨트롤 연결(창)의 포커스 보고(`session.focus`, 08 §1).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FocusReport {
+    /// 지금 입력을 받는 세션.
+    pub focused: Option<SessionId>,
+    /// 화면에 보이는 세션 전부(포커스 포함, 정렬·중복 제거). 구 앱은 비운다.
+    pub visible: Vec<SessionId>,
+}
+
+/// 세션 id 목록을 정렬하고 중복을 지운다.
+fn sorted_unique(mut ids: Vec<SessionId>) -> Vec<SessionId> {
+    ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    ids.dedup_by(|a, b| a.as_str() == b.as_str());
+    ids
+}
+
+/// 연결별 포커스 보고를 바꾼다. 포커스·보이는 목록이 모두 비면 보고를
+/// 지운다. 실제로 바뀌었으면 true(보이는 목록의 순서는 따지지 않는다).
+fn apply_focus_report(
+    reports: &mut HashMap<ConnectionId, FocusReport>,
+    conn: &ConnectionId,
+    focused: Option<SessionId>,
+    visible: Vec<SessionId>,
+) -> bool {
+    let next = FocusReport {
+        focused,
+        visible: sorted_unique(visible),
+    };
+    if next.focused.is_none() && next.visible.is_empty() {
+        return reports.remove(conn).is_some();
+    }
+    let previous = reports.insert(conn.clone(), next.clone());
+    previous.as_ref() != Some(&next)
+}
+
+/// 모든 보고의 포커스·보이는 세션 합집합(정렬·중복 제거).
+fn exempt_from_reports(reports: &HashMap<ConnectionId, FocusReport>) -> Vec<SessionId> {
+    sorted_unique(
+        reports
+            .values()
+            .flat_map(|report| report.focused.iter().chain(report.visible.iter()).cloned())
+            .collect(),
+    )
+}
+
+/// 사라진 세션을 모든 보고에서 지운다. 바뀌었으면 true.
+fn forget_session_in_reports(
+    reports: &mut HashMap<ConnectionId, FocusReport>,
+    session_id: &SessionId,
+) -> bool {
+    let mut changed = false;
+    for report in reports.values_mut() {
+        if report
+            .focused
+            .as_ref()
+            .is_some_and(|id| id.as_str() == session_id.as_str())
+        {
+            report.focused = None;
+            changed = true;
+        }
+        let before = report.visible.len();
+        report
+            .visible
+            .retain(|id| id.as_str() != session_id.as_str());
+        changed |= report.visible.len() != before;
+    }
+    reports.retain(|_, report| report.focused.is_some() || !report.visible.is_empty());
+    changed
+}
+
 pub struct DaemonState {
     pub daemon_id: String,
     pub config: DaemonConfig,
@@ -344,6 +426,12 @@ pub struct DaemonState {
     /// readers that must not take the tracker lock).
     pub cpu_pressure_level: Mutex<PressureLevel>,
     pub reconciliation_required: AtomicBool,
+    /// 재조정이 필요하게 만든 생존 프로세스(관리 워크로드 소유)와 그 판정
+    /// 시각. 텔레메트리 틱이 확인해 모두 사라지거나 유예가 지나면
+    /// `reconciliation_required`를 끈다(예전에는 끄는 곳이 없어 데몬이 사는
+    /// 내내 관리 실행이 WAIT_TELEMETRY에 머물렀다).
+    pub reconciliation_survivors:
+        Mutex<Option<(Instant, Vec<term_contracts::ids::ProcessIdentity>)>>,
 
     pub connections: Mutex<HashMap<ConnectionId, Arc<ConnHandle>>>,
     pub workloads: Mutex<HashMap<WorkloadId, Arc<Mutex<WorkloadEntry>>>>,
@@ -372,14 +460,28 @@ pub struct DaemonState {
     /// Cached per-workload usage from the telemetry loop.
     pub usage_cache: Mutex<HashMap<WorkloadId, WorkloadUsage>>,
     /// 컨트롤 연결이 지금 보고 있는 세션(`session.focus`, 08 §1). 연결 하나에
-    /// 최대 하나 — 연결이 닫히면 [`DaemonState::remove_connection`]이 지운다.
-    pub focused_sessions: Mutex<HashMap<ConnectionId, SessionId>>,
+    /// 보고 하나(포커스 하나 + 보이는 세션들) — 연결이 닫히면
+    /// [`DaemonState::remove_connection`]이 지운다.
+    pub focused_sessions: Mutex<HashMap<ConnectionId, FocusReport>>,
     /// 압력 완화(08 §2)의 결정 코어. 텔레메트리 틱과 `session.relief`가
     /// 공유하며, 락을 쥔 채로 플랫폼을 부르지 않는다(계획 → 락 해제 →
     /// 적용 → 락 → 기록).
     pub relief: Mutex<crate::relief::ReliefController>,
     /// 자원 가드(08 §5)의 결정 코어. 같은 규율로 공유된다.
     pub guard: Mutex<crate::guard::GuardController>,
+    /// 이 호스트의 기본 가드 정책(기동 때 호스트 코어·메모리로 유도). 스냅샷이
+    /// 설정 화면의 "기본값으로" 복원용으로 싣는다.
+    pub guard_policy_default: term_contracts::snapshot::GuardPolicy,
+    /// 크래시 안전 장부(가드·완화가 OS에 걸어 둔 조작).
+    pub governance_ledger: crate::governance_ledger::GovernanceLedger,
+    /// 종료 경로가 시작됐다 — 이미 계획된 자동 정지·양보도 적용하지 않는다.
+    pub governance_closing: AtomicBool,
+    /// 세션 상한을 통과했지만 아직 등록되지 않은 실행 수([`LaunchSlot`]).
+    pub launches_in_flight: AtomicU32,
+    /// 직접 셸의 관측 멤버(루트 트리 + 부모가 바뀌어 트리 밖으로 나간 예전
+    /// 멤버 + 워크로드 env 태그가 붙은 고아). 텔레메트리 스레드가 2초마다
+    /// 갱신하고, 계량 공급자와 정지·양보 적용이 함께 읽는다.
+    pub shell_members: Arc<Mutex<HashMap<WorkloadId, Vec<ProcessIdentity>>>>,
     /// `Capabilities.suspend_resume`이 Supported인가 — 데몬 기동에 한 번.
     pub suspend_resume_supported: bool,
     /// `Capabilities.scheduling_yield`가 Supported인가 — 데몬 기동에 한 번만
@@ -453,44 +555,59 @@ impl DaemonState {
 
     /// 모든 컨트롤 연결의 포커스 합집합(정렬·중복 제거).
     pub fn focused_session_ids(&self) -> Vec<SessionId> {
-        let mut ids: Vec<SessionId> = self
+        let ids = self
             .focused_sessions
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .values()
-            .cloned()
+            .filter_map(|report| report.focused.clone())
             .collect();
-        ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        ids.dedup_by(|a, b| a.as_str() == b.as_str());
-        ids
+        sorted_unique(ids)
     }
 
-    /// 이 연결의 포커스를 세우거나(Some) 지운다(None). 실제로 바뀌었으면 true.
+    /// 자동 완화·정지에서 빠지는 세션: 모든 연결의 포커스와 화면에 보이는
+    /// 세션의 합집합(정렬·중복 제거). 2×2로 지켜보는 에이전트가 포커스
+    /// 하나만 빼고 양보·정지되지 않게 한다.
+    pub fn exempt_session_ids(&self) -> Vec<SessionId> {
+        exempt_from_reports(
+            &self
+                .focused_sessions
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()),
+        )
+    }
+
+    /// 이 연결의 포커스만 세우거나(Some) 지운다(None) — 보이는 세션 목록은
+    /// 비운다. 실제로 바뀌었으면 true.
     pub fn set_focused_session(&self, conn: &ConnectionId, session_id: Option<SessionId>) -> bool {
-        let mut focused = self
+        self.set_focus(conn, session_id, Vec::new())
+    }
+
+    /// 이 연결의 포커스와 보이는 세션을 통째로 바꾼다. 둘 다 비면 보고를
+    /// 지운다. 실제로 바뀌었으면 true(순서는 따지지 않는다).
+    pub fn set_focus(
+        &self,
+        conn: &ConnectionId,
+        focused: Option<SessionId>,
+        visible: Vec<SessionId>,
+    ) -> bool {
+        let mut reports = self
             .focused_sessions
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        match session_id {
-            Some(id) => {
-                let previous = focused.insert(conn.clone(), id.clone());
-                previous.is_none_or(|old| old.as_str() != id.as_str())
-            }
-            None => focused.remove(conn).is_some(),
-        }
+        apply_focus_report(&mut reports, conn, focused, visible)
     }
 
     /// 세션이 사라졌다(워크로드 종료/회수): 그 세션을 보고 있던 모든 연결의
-    /// 포커스를 지운다 — 스냅샷이 죽은 세션을 포커스로 광고하면 안 된다.
+    /// 포커스·보이는 목록에서 지운다 — 스냅샷이 죽은 세션을 포커스로
+    /// 광고하면 안 된다.
     pub fn clear_focus_for_session(&self, session_id: &SessionId) {
-        let mut focused = self
+        let mut reports = self
             .focused_sessions
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let before = focused.len();
-        focused.retain(|_, id| id.as_str() != session_id.as_str());
-        let changed = focused.len() != before;
-        drop(focused);
+        let changed = forget_session_in_reports(&mut reports, session_id);
+        drop(reports);
         if changed {
             self.bump_revision();
         }
@@ -549,6 +666,14 @@ impl DaemonState {
                     workload_id: guard.workload_id.clone(),
                     session_id: guard.session_id.clone(),
                     state: guard.state,
+                    priority: guard.priority.0,
+                    busy: guard
+                        .agent
+                        .as_ref()
+                        .and_then(|agent| agent.session_status.as_deref())
+                        .is_some_and(|status| status.eq_ignore_ascii_case("busy")),
+                    // 귀속 코어는 텔레메트리 루프가 usage 캐시에서 채운다.
+                    cpu_cores: None,
                 })
             })
             .collect()
@@ -905,10 +1030,37 @@ impl DaemonState {
             focused_session_ids: self.focused_session_ids(),
             relief_policy: self.relief_policy(),
             guard_policy: self.guard_policy(),
+            guard_policy_default: Some(self.guard_policy_default.clone()),
         }
     }
 
     /// Count of non-terminal workloads (session-limit admission).
+    /// 세션 상한 안에서 실행 하나의 자리를 잡는다. 상한 검사와 등록 사이에
+    /// 동시 실행이 끼어들어 둘 다 통과하지 않게 한다(예전에는 각자 센 뒤
+    /// 각자 등록해 상한을 넘을 수 있었다). 슬롯이 살아 있는 동안 그 실행은
+    /// 활성 수에 더해진다 — 등록 뒤 잠시 이중으로 세는 쪽(보수적)이다.
+    pub fn reserve_launch_slot(&self) -> Option<LaunchSlot<'_>> {
+        let limit = self.config.session_limit() as usize;
+        loop {
+            let in_flight = self.launches_in_flight.load(Ordering::Acquire);
+            if self.active_workload_count() + in_flight as usize >= limit {
+                return None;
+            }
+            if self
+                .launches_in_flight
+                .compare_exchange(
+                    in_flight,
+                    in_flight + 1,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                return Some(LaunchSlot { state: self });
+            }
+        }
+    }
+
     pub fn active_workload_count(&self) -> usize {
         self.workloads
             .lock()
@@ -1420,5 +1572,58 @@ mod time_tests {
             format_iso8601_utc(1_788_825_600_000),
             "2026-09-08T00:00:00.000Z"
         );
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+
+    #[test]
+    fn focus_reports_union_focused_and_visible_sessions() {
+        let mut reports = HashMap::new();
+        let (w1, w2) = (ConnectionId::generate(), ConnectionId::generate());
+        let conn = |name: &str| if name == "w1" { w1.clone() } else { w2.clone() };
+        let (a, b, c) = (
+            SessionId::generate(),
+            SessionId::generate(),
+            SessionId::generate(),
+        );
+        // 창 1: a에 포커스, a·b가 보인다. 창 2: c만 보인다(포커스 없음).
+        assert!(apply_focus_report(
+            &mut reports,
+            &conn("w1"),
+            Some(a.clone()),
+            vec![b.clone(), a.clone()]
+        ));
+        assert!(apply_focus_report(
+            &mut reports,
+            &conn("w2"),
+            None,
+            vec![c.clone()]
+        ));
+        let exempt = exempt_from_reports(&reports);
+        assert_eq!(exempt.len(), 3);
+        // 같은 보고(순서만 다름)는 변화가 아니다.
+        assert!(!apply_focus_report(
+            &mut reports,
+            &conn("w1"),
+            Some(a.clone()),
+            vec![a.clone(), b.clone()]
+        ));
+        // 숨겨진 창은 모두 비운다 → 보고가 사라진다.
+        assert!(apply_focus_report(
+            &mut reports,
+            &conn("w2"),
+            None,
+            Vec::new()
+        ));
+        assert!(!reports.contains_key(&conn("w2")));
+        // 끝난 세션은 포커스·보이는 목록 양쪽에서 빠진다.
+        assert!(forget_session_in_reports(&mut reports, &a));
+        assert_eq!(exempt_from_reports(&reports), vec![b.clone()]);
+        assert!(forget_session_in_reports(&mut reports, &b));
+        assert!(reports.is_empty());
+        assert!(!forget_session_in_reports(&mut reports, &c));
     }
 }

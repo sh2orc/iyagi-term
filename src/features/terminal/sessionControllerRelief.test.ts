@@ -17,6 +17,7 @@ import type { SessionReliefParams } from "../../generated/SessionReliefParams";
 import type { SessionReliefResult } from "../../generated/SessionReliefResult";
 import type { WorkloadSummary } from "../../generated/WorkloadSummary";
 import { useWorkbenchStore, type PaneMeta } from "../../store/workbenchStore";
+import { DEFAULT_PREFERENCES, usePreferences } from "../../store/preferences";
 import { SessionController } from "./sessionController";
 import { TerminalRegistry, type RegistryDom, type TerminalLike } from "./registry";
 
@@ -143,6 +144,8 @@ let active: SessionController | null = null;
 afterEach(() => {
   active?.dispose();
   active = null;
+  // 자동 양보 토글은 사용자 변경분으로도 저장된다 — 다음 시험의 시작 재적용에 새지 않게.
+  usePreferences.setState({ ...DEFAULT_PREFERENCES });
   useWorkbenchStore.setState({
     tabs: [],
     activeTabId: null,
@@ -256,6 +259,8 @@ describe("SessionController auto-yield policy", () => {
     await h.controller.setAutoYield(false);
     expect(h.policyCalls).toEqual([{ auto_yield: false }]);
     expect(useWorkbenchStore.getState().reliefPolicy).toEqual({ auto_yield: false });
+    // 데몬 정책은 데몬 수명이다 — 다음 접속에서 다시 적용하도록 사용자 변경분으로 남긴다.
+    expect(usePreferences.getState().reliefAutoYield).toBe(false);
   });
 
   it("데몬이 요청과 다른 값을 돌려주면 그 값을 따른다", async () => {
@@ -278,6 +283,8 @@ describe("SessionController auto-yield policy", () => {
     await flush();
     expect(useWorkbenchStore.getState().reliefPolicy).toEqual({ auto_yield: true });
     expect(useWorkbenchStore.getState().toast).toContain("CAPABILITY_UNAVAILABLE");
+    // 받아들여지지 않은 값은 저장하지 않는다.
+    expect(usePreferences.getState().reliefAutoYield).toBeNull();
   });
 });
 

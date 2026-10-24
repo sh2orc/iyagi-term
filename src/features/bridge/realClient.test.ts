@@ -457,16 +457,54 @@ describe("RealDaemonClient session streams", () => {
     client.events.subscribe((event) => {
       if (event.kind !== "resource.snapshot") return;
       received = event.payload;
-      graph.push(event.payload);
+      graph.push(event.payload.host);
     });
     await flush();
 
+    // 구 데몬 모양({revision, host, pressure}): cpu_pressure·usage가 없다.
     expect(() => ipc.emit(0, {
       event: "resource.snapshot",
       payload: { revision: 7, host, pressure: "WARNING" },
     })).not.toThrow();
-    expect(received).toEqual({ ...host, pressure: "WARNING" });
+    expect(received).toEqual({
+      revision: 7,
+      host: { ...host, pressure: "WARNING", cpu_pressure: host.cpu_pressure },
+      pressure: "WARNING",
+      cpu_pressure: host.cpu_pressure,
+      usage: [],
+    });
     expect(graph.rings.cpuCores.length).toBe(1);
+  });
+
+  it("carries revision, both pressures and per-workload usage of the new daemon payload", async () => {
+    const ipc = new FakeIpc();
+    stubLifecycle(ipc);
+    const client = new RealDaemonClient(ipc);
+    const mock = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const { host } = await mock.systemSnapshot();
+    const seen: unknown[] = [];
+    client.events.subscribe((event) => {
+      if (event.kind === "resource.snapshot") seen.push(event.payload);
+    });
+    await flush();
+    const usage = [{
+      workload_id: "w1",
+      cpu_cores: { value: 1.5, source: "sysinfo", quality: "measured", reason: null },
+      resident_bytes: { value: "1048576", source: "sysinfo", quality: "measured", reason: null },
+    }];
+    ipc.emit(0, {
+      event: "resource.snapshot",
+      payload: { revision: 12, host: { ...host, cpu_pressure: "NORMAL" }, pressure: "NORMAL", cpu_pressure: "CRITICAL", usage },
+    });
+    // host가 없는 깨진 표본은 버린다(소비자가 undefined를 읽지 않게).
+    ipc.emit(0, { event: "resource.snapshot", payload: { revision: 13 } });
+    expect(seen).toEqual([{
+      revision: 12,
+      host: { ...host, pressure: "NORMAL", cpu_pressure: "CRITICAL" },
+      pressure: "NORMAL",
+      cpu_pressure: "CRITICAL",
+      usage,
+    }]);
   });
 
   it("subscribes the session output channel BEFORE attach, then routes outputs", async () => {

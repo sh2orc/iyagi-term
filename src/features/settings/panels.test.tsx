@@ -9,6 +9,8 @@ import { GeneralPanel } from "./GeneralPanel";
 import { ShortcutsPanel } from "./ShortcutsPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { TrackpadPanel } from "./TrackpadPanel";
+import { ResourcePanel } from "./ResourcePanel";
+import { scrollbackMemoryMB, scrollbackNeedsWarning, SCROLLBACK_WARN_LINES } from "./scrollbackEstimate";
 import { DEFAULT_PREFERENCES, usePreferences } from "../../store/preferences";
 import { t } from "../../i18n";
 import { SETTINGS_ITEMS } from "./schema";
@@ -30,6 +32,24 @@ describe("설정 패널 렌더", () => {
       expect(html, item.id).toContain(`data-setting-id="${item.id}"`);
     }
     expect(html).toContain(t("settings.item.defaultShell.auto"));
+  });
+
+  it("자원 관리 패널이 모든 항목을 내고, 정책을 모르면 안내한다(원시 키 없음)", () => {
+    const html = renderToString(<ResourcePanel />);
+    for (const item of SETTINGS_ITEMS.filter((i) => i.group === "resources")) {
+      expect(html, item.id).toContain(`data-setting-id="${item.id}"`);
+    }
+    expect(html).toContain(t("settings.resources.unavailable"));
+    expect(html).toContain(t("settings.resources.resetAll"));
+    expect(html).not.toContain("settings.item.");
+    expect(html).not.toContain("settings.resources.");
+  });
+
+  it("스크롤백 항목은 pane당 메모리 어림을 함께 보인다", () => {
+    const html = renderToString(<TerminalPanel platform="darwin" />);
+    expect(html).toContain('data-testid="scrollback-estimate"');
+    expect(html).toContain(t("settings.item.scrollback.estimate", { mb: scrollbackMemoryMB(DEFAULT_PREFERENCES.scrollbackLines) }));
+    expect(html).not.toContain(t("settings.item.scrollback.warn"));
   });
 
   it("트랙패드 패널이 제스처 네 항목을 모두 낸다", () => {
@@ -75,5 +95,19 @@ describe("숫자 입력 초안", () => {
       <SettingNumber id="n" value={12} min={9} max={24} ariaLabel="size" onChange={() => undefined} />,
     );
     expect(html.match(/value="12"/g)?.length).toBe(2);
+  });
+});
+
+describe("스크롤백 메모리 어림", () => {
+  it("셀당 12바이트 × 200열로 어림한다(10 MB 미만은 소수 첫째 자리)", () => {
+    expect(scrollbackMemoryMB(2000)).toBe(4.6);
+    expect(scrollbackMemoryMB(20_000)).toBe(46);
+    expect(scrollbackMemoryMB(100_000)).toBe(229);
+    expect(scrollbackMemoryMB(Number.NaN)).toBe(0);
+  });
+
+  it("2만 줄을 넘으면 경고한다", () => {
+    expect(scrollbackNeedsWarning(SCROLLBACK_WARN_LINES)).toBe(false);
+    expect(scrollbackNeedsWarning(SCROLLBACK_WARN_LINES + 1)).toBe(true);
   });
 });

@@ -242,7 +242,7 @@ pub struct PtyHandle {
     /// unblocks a reader blocked in `read()` — killing the child alone does
     /// NOT do that on ConPTY. On Unix the reader owns its own dup of the
     /// master fd, so closing here alone would not wake it; the
-    /// [`PollingReader`] stop flag does (see [`PtyHandle::close`]).
+    /// [`PollingReader`] stop signal does (see [`PtyHandle::close`]).
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     /// Shared so the Windows ConPTY query responder (see [`PtyHandle::reader`])
     /// can reply to conhost while the writer thread owns input writes.
@@ -251,10 +251,11 @@ pub struct PtyHandle {
     writer: std::sync::Arc<Mutex<Option<Box<dyn Write + Send>>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     pid: Option<u32>,
-    /// Unix: tells [`PollingReader`]s to return EOF at their next poll step,
-    /// and the non-blocking input writer to give up its pending chunk.
+    /// Unix: tells [`PollingReader`]s to return EOF (waking any blocked in
+    /// `poll`), and the non-blocking input writer to give up its pending
+    /// chunk.
     #[cfg(unix)]
-    reader_stop: std::sync::Arc<AtomicBool>,
+    reader_stop: std::sync::Arc<ReaderStop>,
     /// Monotonic ms (+1, so 0 means "not blocked") since which the current
     /// input write has made no progress because the tty input queue is full
     /// — the foreground program is not reading (hung, busy, stopped). See
@@ -288,21 +289,78 @@ const INPUT_RETRY_MIN_MS: u64 = 5;
 #[cfg(unix)]
 const INPUT_RETRY_MAX_MS: u64 = 100;
 
+/// Unix stop signal shared by a pty's [`PollingReader`]s and its input
+/// writer. The flag is the truth; the self-pipe only wakes readers blocked
+/// in `poll`: [`ReaderStop::signal`] writes one byte that is never read, so
+/// the read end stays readable for every reader at once (level-triggered)
+/// and a reader can poll without a timeout. Without a pipe (descriptors
+/// exhausted at spawn) readers fall back to a bounded poll step.
+#[cfg(unix)]
+struct ReaderStop {
+    stopped: AtomicBool,
+    wake: Option<(std::io::PipeReader, std::io::PipeWriter)>,
+}
+
+#[cfg(unix)]
+impl ReaderStop {
+    fn new() -> Self {
+        let wake = match std::io::pipe() {
+            Ok(pair) => Some(pair),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "pty reader stop pipe unavailable; readers poll on a bounded step"
+                );
+                None
+            }
+        };
+        Self {
+            stopped: AtomicBool::new(false),
+            wake,
+        }
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    /// Set the flag, then wake every reader. Idempotent: at most one byte
+    /// ever goes into the (otherwise empty) pipe, so the write cannot block.
+    fn signal(&self) {
+        if self.stopped.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Some((_, writer)) = &self.wake {
+            let _ = (&*writer).write(&[1]);
+        }
+    }
+
+    fn wake_fd(&self) -> Option<std::os::unix::io::RawFd> {
+        use std::os::unix::io::AsRawFd;
+        self.wake.as_ref().map(|(reader, _)| reader.as_raw_fd())
+    }
+}
+
 /// Unix reader over a private dup of the master fd. portable-pty's
 /// `try_clone_reader` also dups the fd, but a blocking `read()` on it only
 /// returns when data arrives or EVERY slave fd is closed — a descendant that
 /// kept the slave (`sleep 1000 &` from an exited shell) blocks the reader
 /// thread, and with it the actor's `join`, for as long as it lives.
-/// Polling with a bounded step lets [`PtyHandle::close`] end the thread
-/// promptly; the fd is closed on drop so the pty can hang up.
+/// The reader polls the master together with the [`ReaderStop`] pipe, so
+/// [`PtyHandle::close`] ends the thread promptly without the reader waking
+/// on a timer (it used to poll in 250 ms steps — 4 wake-ups/s per idle
+/// session); the fd is closed on drop so the pty can hang up.
 #[cfg(unix)]
 struct PollingReader {
     fd: std::os::unix::io::RawFd,
-    stop: std::sync::Arc<AtomicBool>,
+    stop: std::sync::Arc<ReaderStop>,
+    /// The stop pipe misbehaved (readable without the flag set): poll the
+    /// master alone on the bounded step from then on.
+    step_fallback: bool,
 }
 
-/// Poll step for [`PollingReader`]: bounds how long `close()` waits for the
-/// reader thread to notice the stop flag.
+/// Poll step for a [`PollingReader`] without a usable stop pipe: bounds how
+/// long `close()` waits for the reader thread to notice the stop flag.
 #[cfg(unix)]
 const READER_POLL_STEP_MS: libc::c_int = 250;
 
@@ -313,19 +371,32 @@ impl Read for PollingReader {
             return Ok(0);
         }
         loop {
-            if self.stop.load(Ordering::Acquire) {
+            if self.stop.is_stopped() {
                 // Reported as EOF: the actor treats it exactly like a pty
                 // hangup (the session is finalizing anyway).
                 return Ok(0);
             }
-            let mut pfd = libc::pollfd {
-                fd: self.fd,
-                events: libc::POLLIN,
-                revents: 0,
+            let wake_fd = self.stop.wake_fd().filter(|_| !self.step_fallback);
+            let mut fds = [
+                libc::pollfd {
+                    fd: self.fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: wake_fd.unwrap_or(-1),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            let (nfds, timeout) = match wake_fd {
+                Some(_) => (2, -1),
+                None => (1, READER_POLL_STEP_MS),
             };
-            // SAFETY: `pfd` is a valid, initialized pollfd for the duration
-            // of the call; the fd is owned by this reader until drop.
-            let ready = unsafe { libc::poll(&mut pfd, 1, READER_POLL_STEP_MS) };
+            // SAFETY: `fds` holds `nfds` valid, initialized pollfds for the
+            // duration of the call; the master dup is owned by this reader
+            // until drop and the pipe by the shared `ReaderStop`.
+            let ready = unsafe { libc::poll(fds.as_mut_ptr(), nfds, timeout) };
             if ready < 0 {
                 let err = std::io::Error::last_os_error();
                 if err.kind() == std::io::ErrorKind::Interrupted {
@@ -334,6 +405,16 @@ impl Read for PollingReader {
                 return Err(err);
             }
             if ready == 0 {
+                continue;
+            }
+            if fds[0].revents == 0 {
+                // Only the stop pipe fired. `signal` sets the flag before it
+                // writes, so the check at the top ends the read; a pipe that
+                // reports anything without the flag would spin — poll the
+                // master alone on the bounded step instead.
+                if !self.stop.is_stopped() {
+                    self.step_fallback = true;
+                }
                 continue;
             }
             // Readable, hung up or errored: a read returns at once in all
@@ -471,20 +552,20 @@ impl PtyHandle {
             pid,
             input_blocked_since: std::sync::Arc::new(AtomicU64::new(0)),
             #[cfg(unix)]
-            reader_stop: std::sync::Arc::new(AtomicBool::new(false)),
+            reader_stop: std::sync::Arc::new(ReaderStop::new()),
         })
     }
 
     /// Close the master and the writer, and (Unix) stop every reader
-    /// obtained from [`PtyHandle::reader`]. Readers return EOF within one
-    /// poll step, so a session's reader thread can always be joined even
-    /// while a descendant still holds the slave; once the reader's dup is
-    /// gone too, no master fd remains and the pty hangs up. Windows:
-    /// `ClosePseudoConsole` unblocks the reader. Further IO fails.
-    /// Idempotent.
+    /// obtained from [`PtyHandle::reader`]. Readers return EOF at once (the
+    /// stop pipe wakes their `poll`), so a session's reader thread can
+    /// always be joined even while a descendant still holds the slave; once
+    /// the reader's dup is gone too, no master fd remains and the pty hangs
+    /// up. Windows: `ClosePseudoConsole` unblocks the reader. Further IO
+    /// fails. Idempotent.
     pub fn close(&self) {
         #[cfg(unix)]
-        self.reader_stop.store(true, Ordering::Release);
+        self.reader_stop.signal();
         let taken = self.master.lock().unwrap_or_else(|p| p.into_inner()).take();
         drop(taken);
         let writer = self.lock_writer().take();
@@ -544,6 +625,7 @@ impl PtyHandle {
             Ok(Box::new(PollingReader {
                 fd: dup,
                 stop: std::sync::Arc::clone(&self.reader_stop),
+                step_fallback: false,
             }))
         }
     }
@@ -579,7 +661,7 @@ impl PtyHandle {
         let mut written = 0usize;
         let mut backoff_ms = INPUT_RETRY_MIN_MS;
         while written < bytes.len() {
-            if self.reader_stop.load(Ordering::Acquire) {
+            if self.reader_stop.is_stopped() {
                 return Err(PtyError::Io("pty closed".into()));
             }
             let attempt = {
@@ -750,6 +832,108 @@ impl Read for ConPtyQueryResponder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pipe standing in for the pty master, plus a [`PollingReader`] over
+    /// a dup of its read end (the reader closes the dup on drop).
+    #[cfg(unix)]
+    fn fake_master(
+        stop: &std::sync::Arc<ReaderStop>,
+    ) -> (PollingReader, std::io::PipeWriter, std::io::PipeReader) {
+        use std::os::unix::io::AsRawFd;
+        let (master_rx, master_tx) = std::io::pipe().expect("pipe");
+        // SAFETY: dup of a valid descriptor; the reader owns the copy.
+        let fd = unsafe { libc::fcntl(master_rx.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+        assert!(fd >= 0, "dup failed");
+        let reader = PollingReader {
+            fd,
+            stop: std::sync::Arc::clone(stop),
+            step_fallback: false,
+        };
+        (reader, master_tx, master_rx)
+    }
+
+    /// Read on a side thread; the result arrives on the returned channel.
+    #[cfg(unix)]
+    fn read_in_background(
+        mut reader: PollingReader,
+    ) -> std::sync::mpsc::Receiver<Result<usize, std::io::ErrorKind>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 16];
+            let _ = tx.send(reader.read(&mut buf).map_err(|e| e.kind()));
+        });
+        rx
+    }
+
+    /// The reader polls without a timer (an idle session's reader thread
+    /// used to wake every 250 ms): data is read as usual, an idle read
+    /// stays parked in `poll`, and `close()`'s stop signal ends it as EOF
+    /// through the self-pipe.
+    #[cfg(unix)]
+    #[test]
+    fn polling_reader_parks_until_data_or_the_stop_pipe() {
+        let stop = std::sync::Arc::new(ReaderStop::new());
+        assert!(stop.wake_fd().is_some(), "the stop pipe opened");
+        let (mut reader, mut master_tx, _master_rx) = fake_master(&stop);
+        master_tx.write_all(b"hello").expect("write");
+        let mut buf = [0u8; 16];
+        assert_eq!(reader.read(&mut buf).expect("read"), 5);
+        assert_eq!(&buf[..5], b"hello");
+
+        let done = read_in_background(reader);
+        assert!(
+            done.recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "nothing to read: the reader stays parked"
+        );
+        stop.signal();
+        assert_eq!(
+            done.recv_timeout(std::time::Duration::from_secs(2)),
+            Ok(Ok(0)),
+            "the stop pipe wakes the parked reader with EOF"
+        );
+        stop.signal(); // idempotent
+        assert!(stop.is_stopped());
+    }
+
+    /// Without a stop pipe (descriptors exhausted at spawn) — or with one
+    /// that turns readable without the flag — the reader neither hangs nor
+    /// spins: it polls the master on the bounded step and still sees the
+    /// flag.
+    #[cfg(unix)]
+    #[test]
+    fn polling_reader_without_a_usable_pipe_falls_back_to_the_step() {
+        let no_pipe = std::sync::Arc::new(ReaderStop {
+            stopped: AtomicBool::new(false),
+            wake: None,
+        });
+        let (reader, _tx, _rx) = fake_master(&no_pipe);
+        let done = read_in_background(reader);
+        no_pipe.signal();
+        assert_eq!(
+            done.recv_timeout(std::time::Duration::from_secs(2)),
+            Ok(Ok(0))
+        );
+
+        let stray = std::sync::Arc::new(ReaderStop::new());
+        let (reader, _tx, _rx) = fake_master(&stray);
+        let done = read_in_background(reader);
+        // A byte in the stop pipe without the flag: the reader must not
+        // treat it as data nor spin on it.
+        let (_, writer) = stray.wake.as_ref().expect("pipe");
+        (&*writer).write_all(&[1]).expect("stray byte");
+        assert!(
+            done.recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "a stray wake is not EOF"
+        );
+        stray.stopped.store(true, Ordering::Release);
+        assert_eq!(
+            done.recv_timeout(std::time::Duration::from_secs(2)),
+            Ok(Ok(0)),
+            "the flag still ends the read on the bounded step"
+        );
+    }
 
     #[cfg(unix)]
     #[test]

@@ -469,6 +469,7 @@ interface GatewayFeed {
  *   시작되면 순번을 올려 진행 중인 폴을 무효로 만든다 — 늦게 도착한 옛
  *   상태가 방금 바꾼 정책을 덮어쓰지 못하게.
  * - 조회가 아직 돌고 있으면 주기 틱은 건너뛴다(느린 데몬에 요청이 쌓이지 않게).
+ * - 창이 숨어 있으면 주기 틱을 건너뛰고, 다시 보이는 순간 한 번 읽는다.
  * - 언마운트 뒤 도착한 응답은 버린다.
  * - 모르는 메서드 거절([`isUnknownMethod`])만 "지원 안 함"이다. 나머지 실패는 일시적이라 보고
  *   마지막 상태를 유지한 채 오류 문구만 낸다.
@@ -513,11 +514,20 @@ function useGatewayStatus(controller: SessionController | null): GatewayFeed {
 
   useEffect(() => {
     if (!available) return;
-    void refresh();
-    const timer = window.setInterval(() => {
+    // 창이 숨어 있는 동안(트레이·최소화·다른 앱)은 폴하지 않는다 — 보는 사람이
+    // 없는 카드를 위해 2초마다 데몬을 깨울 이유가 없다. 다시 보이면 곧바로 한 번
+    // 읽는다(이미 도는 조회가 있으면 그 응답을 기다린다).
+    const poll = (): void => {
+      if (typeof document !== "undefined" && document.hidden) return;
       if (inFlightRef.current === 0) void refresh();
-    }, GATEWAY_POLL_MS);
-    return () => { window.clearInterval(timer); };
+    };
+    poll();
+    const timer = window.setInterval(poll, GATEWAY_POLL_MS);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", poll);
+    };
   }, [available, refresh]);
 
   const setPolicy = useCallback(async (params: GatewayPolicyParams): Promise<GatewayPolicy> => {

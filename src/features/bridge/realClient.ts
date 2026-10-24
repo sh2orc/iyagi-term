@@ -25,6 +25,7 @@ import type { RepositoryInspectResult } from "../../generated/RepositoryInspectR
 
 import type { ErrorCode } from "../../generated/ErrorCode";
 import type { HostSample } from "../../generated/HostSample";
+import type { ResourceSnapshotEvent } from "../../generated/ResourceSnapshotEvent";
 import type { SessionOutput } from "../../generated/SessionOutput";
 import type { Snapshot } from "../../generated/Snapshot";
 import type { SnapshotPage } from "../../generated/SnapshotPage";
@@ -659,10 +660,8 @@ function toDaemonEvent(envelope: BridgeEventEnvelope): DaemonEvent | null {
     case "queue.changed":
       return { kind: "queue.changed", payload: payload as EventPayload<"queue.changed"> };
     case "resource.snapshot": {
-      // The daemon wraps periodic samples in {revision, host, pressure}.
-      // UI consumers take HostSample directly, with the classified pressure.
-      const snapshot = payload as { host: HostSample; pressure: HostSample["pressure"] };
-      return { kind: "resource.snapshot", payload: { ...snapshot.host, pressure: snapshot.pressure } };
+      const snapshot = toResourceSnapshot(payload);
+      return snapshot ? { kind: "resource.snapshot", payload: snapshot } : null;
     }
     case "session.output":
       return { kind: "session.output", payload: payload as SessionOutput };
@@ -696,6 +695,28 @@ function toDaemonEvent(envelope: BridgeEventEnvelope): DaemonEvent | null {
     default:
       return null;
   }
+}
+
+/**
+ * 데몬의 주기 표본(`{revision, host, pressure, cpu_pressure, usage}`)을 계약
+ * 모양으로 맞춘다. 압력은 히스테리시스를 거친 바깥 값이 정본이라 host 안에도
+ * 덮어쓴다 — host만 읽는 소비자(상태 스트립·그래프)가 같은 판정을 본다. 구
+ * 데몬이 빼먹는 cpu_pressure·usage는 NORMAL·빈 배열로, revision은 0으로 채운다
+ * (0은 스냅샷 다시 받기 판정에 걸리지 않는다). host가 없으면 버린다.
+ */
+function toResourceSnapshot(payload: unknown): ResourceSnapshotEvent | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const raw = payload as Partial<Omit<ResourceSnapshotEvent, "host">> & { host?: HostSample | null };
+  if (typeof raw.host !== "object" || raw.host === null) return null;
+  const pressure = raw.pressure ?? raw.host.pressure;
+  const cpuPressure = raw.cpu_pressure ?? raw.host.cpu_pressure ?? "NORMAL";
+  return {
+    revision: typeof raw.revision === "number" && Number.isFinite(raw.revision) ? raw.revision : 0,
+    host: { ...raw.host, pressure, cpu_pressure: cpuPressure },
+    pressure,
+    cpu_pressure: cpuPressure,
+    usage: Array.isArray(raw.usage) ? raw.usage : [],
+  };
 }
 
 function asRpcError(value: unknown): RpcErrorShape | null {

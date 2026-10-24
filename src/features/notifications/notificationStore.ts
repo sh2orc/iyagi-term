@@ -10,12 +10,18 @@
 
 import { create } from "zustand";
 
+/**
+ * 알림 종류. "resource"는 자원 가드가 스스로 작업을 일시정지했다는 알림이다(08 §5) —
+ * 알림 패널이 그 자리에서 "재개"·"보호"를 고르게 한다. "schedule"/"auto-continue"는
+ * 예약 명령·네트워크 회복 자동 continue의 결과 알림이다.
+ */
 export type NotificationKind =
   | "intervention"
   | "workload-finished"
   | "mission"
   | "schedule"
-  | "auto-continue";
+  | "auto-continue"
+  | "resource";
 
 export interface NotificationItem {
   /** 멱등 키(개입: report_id / 완료: workload id + 종료 상태). */
@@ -35,6 +41,8 @@ export interface NotificationItem {
   missionId?: string;
   /** AI 작업 알림의 사건 종류(결정 필요·확정 대기·실패) — 라벨용. */
   missionEvent?: "decision" | "acceptance" | "failed";
+  /** 자원 알림(kind "resource")의 작업 id — "재개"·"보호"가 이 작업에 간다. */
+  workloadId?: string;
   /** 사용자가 확인했는지(패널 열람·항목 클릭). */
   acknowledged: boolean;
 }

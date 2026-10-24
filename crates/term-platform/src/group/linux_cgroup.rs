@@ -360,23 +360,55 @@ pub(super) fn member_pids(dir: &Path) -> io::Result<Vec<u32>> {
 
 /// `populated` flag from `cgroup.events`.
 pub(super) fn populated(dir: &Path) -> io::Result<bool> {
+    events_flag(dir, "populated")
+}
+
+/// A `0`/`1` flag (`populated`, `frozen`) from `cgroup.events`.
+fn events_flag(dir: &Path, name: &str) -> io::Result<bool> {
     let events = read_trimmed(&dir.join("cgroup.events"))?;
     for line in events.lines() {
-        if let Some(value) = line.strip_prefix("populated") {
+        let Some((key, value)) = line.split_once(' ') else {
+            continue;
+        };
+        if key == name {
             return match value.trim() {
                 "0" => Ok(false),
                 "1" => Ok(true),
                 _ => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "invalid populated flag",
+                    format!("invalid {name} flag"),
                 )),
             };
         }
     }
     Err(io::Error::new(
         io::ErrorKind::InvalidData,
-        "cgroup.events has no populated field",
+        format!("cgroup.events has no {name} field"),
     ))
+}
+
+/// How long a freeze request may take to settle before it is reported
+/// partial. Runnable tasks freeze on their way back to user space within
+/// microseconds; a task in uninterruptible sleep (NFS, a stuck device) only
+/// when it wakes — the kernel keeps the request and finishes on its own.
+const FREEZE_SETTLE: Duration = Duration::from_millis(200);
+
+/// `cgroup.freeze` is the request, `cgroup.events` `frozen` is the result:
+/// poll until they agree or [`FREEZE_SETTLE`] runs out. A `cgroup.events`
+/// that cannot be read leaves the verified write as the only evidence.
+fn freeze_settled(dir: &Path, frozen: bool) -> bool {
+    let deadline = Instant::now() + FREEZE_SETTLE;
+    loop {
+        match events_flag(dir, "frozen") {
+            Ok(state) if state == frozen => return true,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 fn page_size() -> u64 {
@@ -496,31 +528,55 @@ fn tree_signal_member(ident: &ProcessIdentity, signal: i32) {
 
 impl LinuxCgroupPlatform {
     /// 08 §5: `suspend_owned`/`resume_owned`의 공용 헬퍼. cgroup 위임이 있으면
-    /// `cgroup.freeze`로, 없으면 관측 트리의 검증된 멤버에 per-pid
-    /// SIGSTOP/SIGCONT로 일시정지/재개한다. nice와 달리 SIGSTOP 되돌리기에
-    /// 특권이 필요 없어 비위임 경로도 안전하다.
+    /// `cgroup.freeze`로, 없으면(비위임 관측 트리, 또는 freezer가 없는 5.2
+    /// 미만 커널) 검증된 멤버에 per-pid SIGSTOP/SIGCONT로 일시정지/재개한다.
+    /// nice와 달리 SIGSTOP 되돌리기에 특권이 필요 없어 비위임 경로도 안전하다.
     fn set_suspended(&self, group: &GroupHandle, suspend: bool) -> io::Result<SchedulingOutcome> {
         if let GroupInner::ObservedTree(tree) = &group.inner {
-            let (verified, reused, _unverifiable) = self.tree_members(tree)?;
-            if !reused.is_empty() {
-                tracing::debug!(?reused, "skipped reused pids during suspend");
-            }
-            return scheduling::set_process_suspend(&verified, suspend);
+            let walk = || {
+                let (verified, reused, _unverifiable) = self.tree_members(tree)?;
+                if !reused.is_empty() {
+                    tracing::debug!(?reused, "skipped reused pids during suspend");
+                }
+                Ok(verified)
+            };
+            return per_pid_suspend(walk, suspend);
         }
         let inner = cgroup_inner(group)?;
         if inner.anchor.removed()? {
             return Ok(SchedulingOutcome::default());
         }
-        write_verified(
-            &inner.anchor.path(),
-            "cgroup.freeze",
-            if suspend { "1" } else { "0" },
-        )?;
+        let dir = inner.anchor.path();
+        if !dir.join("cgroup.freeze").exists() {
+            let walk = || {
+                Ok(member_pids(&dir)?
+                    .into_iter()
+                    .filter_map(identity::process_identity)
+                    .collect())
+            };
+            return per_pid_suspend(walk, suspend);
+        }
+        write_verified(&dir, "cgroup.freeze", if suspend { "1" } else { "0" })?;
+        let settled = freeze_settled(&dir, suspend);
         Ok(SchedulingOutcome {
-            applied: 1,
-            failed: 0,
+            applied: usize::from(settled),
+            failed: usize::from(!settled),
             skipped_reused: 0,
+            skipped_denied: 0,
         })
+    }
+}
+
+/// Per-pid stop/continue over a membership walk: a stop re-walks for late
+/// forks, a resume wakes the current membership (children first).
+fn per_pid_suspend(
+    mut walk: impl FnMut() -> io::Result<Vec<ProcessIdentity>>,
+    suspend: bool,
+) -> io::Result<SchedulingOutcome> {
+    if suspend {
+        scheduling::suspend_walked(walk).map(|(outcome, _)| outcome)
+    } else {
+        scheduling::set_process_suspend(&walk()?, false)
     }
 }
 
@@ -571,7 +627,11 @@ impl super::ResourcePlatform for LinuxCgroupPlatform {
                     },
                     // 08 §5: freeze는 위임 여부와 무관하게 검증된 트리의
                     // SIGSTOP/SIGCONT로도 되돌릴 수 있다.
-                    suspend_resume: supported("cgroup v2 freeze (per-pid fallback)".into()),
+                    suspend_resume: if d.root.join("cgroup.freeze").exists() {
+                        supported("cgroup v2 freeze (per-pid fallback)".into())
+                    } else {
+                        supported("per-pid SIGSTOP/SIGCONT (kernel has no cgroup.freeze)".into())
+                    },
                     reattach: LimitCapability {
                         support: LimitSupport::Supported,
                         reason: None,
@@ -1108,6 +1168,7 @@ impl super::ResourcePlatform for LinuxCgroupPlatform {
             applied: 1,
             failed: 0,
             skipped_reused: 0,
+            skipped_denied: 0,
         })
     }
 
@@ -1182,6 +1243,15 @@ pub(crate) struct LinuxTreeShared {
     /// RUNNING until its owned descendants leave (B08).
     recorded: Mutex<BTreeMap<u32, ProcessIdentity>>,
     prev: Mutex<Option<RateSample>>,
+    /// When the handle was created (Unix s). A process that started earlier
+    /// cannot carry this workload's freshly minted tag, so its environ is
+    /// never read. `0` (default) checks everything.
+    created_epoch_secs: u64,
+    /// Env-tag verdict per (pid, start time). Each process's environ is read
+    /// once — re-reading every `/proc/*/environ` on every walk cost a file
+    /// read per host process per tick (and pulled every environment,
+    /// secrets included, through the daemon). Pruned to live processes.
+    env_verdicts: Mutex<HashMap<(u32, u64), bool>>,
 }
 
 impl std::ops::Deref for LinuxTreeInner {
@@ -1205,6 +1275,10 @@ fn observed_tree_handle(workload: &WorkloadDescriptor) -> GroupHandle {
         inner: GroupInner::ObservedTree(LinuxTreeInner {
             shared: Arc::new(LinuxTreeShared {
                 env_tag,
+                created_epoch_secs: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
                 ..LinuxTreeShared::default()
             }),
         }),
@@ -1216,27 +1290,51 @@ const ENVIRON_SCAN_CAP: u64 = 256 * 1024;
 
 /// Live pids (from the refreshed inventory) whose environment carries
 /// `tag`, skipping pids already observed. Unreadable environs (other users,
-/// kernel threads, exited) are simply not ours.
-fn env_tagged_pids(system: &System, tag: &[u8], skip: &BTreeSet<u32>) -> Vec<u32> {
-    use std::io::Read;
+/// kernel threads, exited) are simply not ours. Only processes started since
+/// the handle was created are candidates, and each is read once.
+fn env_tagged_pids(
+    system: &System,
+    inner: &LinuxTreeShared,
+    tag: &[u8],
+    skip: &BTreeSet<u32>,
+) -> Vec<u32> {
+    let mut verdicts = inner.env_verdicts.lock().unwrap_or_else(|p| p.into_inner());
+    verdicts.retain(|(pid, start), _| {
+        system
+            .process(Pid::from_u32(*pid))
+            .is_some_and(|process| process.start_time() == *start)
+    });
     let mut found = Vec::new();
     let me = std::process::id();
-    for pid in system.processes().keys().map(|p| p.as_u32()) {
-        if pid == me || skip.contains(&pid) {
+    for (pid, process) in system.processes() {
+        let pid = pid.as_u32();
+        let start = process.start_time();
+        // 1 s slack: start times are boot time + ticks, rounded to seconds.
+        if pid == me || skip.contains(&pid) || start.saturating_add(1) < inner.created_epoch_secs {
             continue;
         }
-        let Ok(file) = fs::File::open(format!("/proc/{pid}/environ")) else {
-            continue;
-        };
-        let mut buf = Vec::new();
-        if file.take(ENVIRON_SCAN_CAP).read_to_end(&mut buf).is_err() {
-            continue;
-        }
-        if buf.split(|b| *b == 0).any(|entry| entry == tag) {
+        let tagged = *verdicts
+            .entry((pid, start))
+            .or_insert_with(|| environ_carries(pid, tag));
+        if tagged {
             found.push(pid);
         }
     }
     found
+}
+
+/// Whether `/proc/<pid>/environ` (first [`ENVIRON_SCAN_CAP`] bytes) holds
+/// the exact `KEY=VALUE` entry `tag`. Unreadable counts as no.
+fn environ_carries(pid: u32, tag: &[u8]) -> bool {
+    use std::io::Read;
+    let Ok(file) = fs::File::open(format!("/proc/{pid}/environ")) else {
+        return false;
+    };
+    let mut buf = Vec::new();
+    if file.take(ENVIRON_SCAN_CAP).read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    buf.split(|b| *b == 0).any(|entry| entry == tag)
 }
 
 fn tree_root(inner: &LinuxTreeInner) -> io::Result<ProcessIdentity> {
@@ -1368,7 +1466,7 @@ fn observe_workload(
         observed_subtree(system, anchor, &mut observed);
     }
     if let Some(tag) = inner.env_tag.as_deref() {
-        for pid in env_tagged_pids(system, tag, &observed) {
+        for pid in env_tagged_pids(system, inner, tag, &observed) {
             observed_subtree(system, pid, &mut observed);
         }
     }
@@ -1550,6 +1648,33 @@ mod tests {
         assert!(!populated(dir.path()).unwrap());
         std::fs::write(dir.path().join("cgroup.events"), "populated 1\nfrozen 0\n").unwrap();
         assert!(populated(dir.path()).unwrap());
+    }
+
+    /// `cgroup.freeze`는 요청이고 `frozen`이 결과다: 결과가 요청과 같아질
+    /// 때만 적용으로 센다. 기한 안에 안 맞으면 partial(커널이 요청을 쥐고
+    /// 스스로 마친다), events를 읽을 수 없으면 검증된 쓰기만 믿는다.
+    #[test]
+    fn freeze_completion_is_read_from_the_frozen_flag() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(
+            freeze_settled(dir.path(), true),
+            "events 없음: 쓰기만 믿는다"
+        );
+
+        let events = dir.path().join("cgroup.events");
+        std::fs::write(&events, "populated 1\nfrozen 1\n").unwrap();
+        assert!(events_flag(dir.path(), "frozen").unwrap());
+        assert!(freeze_settled(dir.path(), true));
+
+        std::fs::write(&events, "populated 1\nfrozen 0\n").unwrap();
+        let started = Instant::now();
+        assert!(!freeze_settled(dir.path(), true), "아직 얼지 않음");
+        assert!(started.elapsed() >= FREEZE_SETTLE);
+        assert!(freeze_settled(dir.path(), false), "해동 확인");
+
+        // 이름이 접두사로 겹치는 줄(`frozen_x`)과 헷갈리지 않는다.
+        std::fs::write(&events, "frozen_x 1\nfrozen 0\n").unwrap();
+        assert!(!events_flag(dir.path(), "frozen").unwrap());
     }
 
     #[test]

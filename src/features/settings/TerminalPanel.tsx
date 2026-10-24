@@ -35,6 +35,7 @@ import { customProfile, profileDisplayLabel, type ShellProfile } from "../termin
 import type { Platform } from "../terminal/shortcuts";
 import { SettingNumber, SettingRow, SettingSelect, SettingToggle } from "./controls";
 import { itemsInGroup } from "./schema";
+import { scrollbackMemoryMB, scrollbackNeedsWarning } from "./scrollbackEstimate";
 
 const items = itemsInGroup("terminal");
 const fontSizeItem = items.find((i) => i.id === "fontSize")!;
@@ -171,15 +172,26 @@ export function TerminalPanel(props: { platform: Platform }): JSX.Element {
         onReset={() => usePreferences.getState().resetPreference("scrollbackLines")}
       >
         {(id) => (
-          <SettingNumber
-            id={id}
-            value={scrollbackLines}
-            min={MIN_SCROLLBACK_LINES}
-            max={MAX_SCROLLBACK_LINES}
-            unit={t("settings.item.scrollback.unit")}
-            ariaLabel={t(scrollbackItem.labelKey)}
-            onChange={(value) => usePreferences.getState().setScrollbackLines(value)}
-          />
+          <span className="setting-scrollback">
+            <SettingNumber
+              id={id}
+              value={scrollbackLines}
+              min={MIN_SCROLLBACK_LINES}
+              max={MAX_SCROLLBACK_LINES}
+              unit={t("settings.item.scrollback.unit")}
+              ariaLabel={t(scrollbackItem.labelKey)}
+              onChange={(value) => usePreferences.getState().setScrollbackLines(value)}
+            />
+            {/* 메모리 어림(셀당 약 12바이트 × 200열) — 2만 줄을 넘기면 경고로 바꾼다. */}
+            <small
+              className={`setting-hint${scrollbackNeedsWarning(scrollbackLines) ? " setting-hint-warn" : ""}`}
+              data-testid="scrollback-estimate"
+              title={scrollbackNeedsWarning(scrollbackLines) ? t("settings.item.scrollback.warn") : undefined}
+            >
+              {t("settings.item.scrollback.estimate", { mb: scrollbackMemoryMB(scrollbackLines) })}
+              {scrollbackNeedsWarning(scrollbackLines) ? ` — ${t("settings.item.scrollback.warn")}` : null}
+            </small>
+          </span>
         )}
       </SettingRow>
 

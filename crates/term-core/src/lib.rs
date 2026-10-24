@@ -34,7 +34,9 @@ pub use admission::{
 };
 pub use clock::{Clock, FakeClock, MonotonicClock};
 pub use error::CoreError;
-pub use pressure::{CpuPressureConfig, CpuPressureTracker, PressureConfig, PressureTracker};
+pub use pressure::{
+    CpuPressureConfig, CpuPressureTracker, KernelMemorySignal, PressureConfig, PressureTracker,
+};
 pub use queue::{
     effective_priority, PickOutcome, QueueCandidate, QueueConfig, SkippedEntry, WorkloadQueue,
 };

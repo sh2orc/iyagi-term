@@ -10,6 +10,7 @@
 
 pub mod group;
 pub mod identity;
+pub mod native_proc;
 pub mod proc_fds;
 pub mod proc_scan;
 pub mod telemetry;

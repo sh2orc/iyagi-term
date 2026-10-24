@@ -26,9 +26,13 @@
 //! ([`JournalOptions::segment_cap`], the daemon's default) the session
 //! limit is a retention window: a full segment rotates into `<base>.<k>`
 //! and the oldest closed segments are deleted (see [`crate::segments`]),
-//! so the journal never stops for its own limit. A legacy single-file
-//! writer, and a rolling writer with nothing left to trim, still return cap
-//! errors — then the caller must stop reading the PTY.
+//! so the journal never stops for its own limit. Near the global cap every
+//! live rolling writer trims itself to its fair share of the budget
+//! ([`JournalWriter::yield_to_global_pressure`]), so a `GlobalCap` refusal
+//! (a young writer has nothing of its own to trim) clears once the others
+//! have trimmed — the caller keeps the output aside and retries. A legacy
+//! single-file writer at its session cap still returns `SessionCap` — then
+//! the caller must stop reading the PTY.
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -66,6 +70,12 @@ pub const DEFAULT_GLOBAL_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 /// defaults.json `journal_segment_bytes` (16 MiB): cap on a rolling
 /// journal's segment target.
 pub const DEFAULT_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
+/// Floor of a live rolling writer's fair share of the global budget, and
+/// the headroom below the cap at which the fair share is enforced (see
+/// [`GlobalJournalBudget::under_pressure`]): however many sessions share
+/// the budget, each keeps at least this much history. A budget smaller
+/// than eight floors scales both down to an eighth of its limit.
+pub const FAIR_SHARE_FLOOR: u64 = DEFAULT_SEGMENT_BYTES;
 /// Smallest segment target. A record is at most 16 KiB + framing, so a
 /// segment always holds at least one record whatever the target.
 pub const MIN_SEGMENT_BYTES: u64 = 4 * 1024;
@@ -175,9 +185,12 @@ impl JournalRecord {
     }
 }
 
-/// Journal and budget errors. `SessionCap`/`GlobalCap` mean the caller must
-/// stop reading the PTY for this session; `DiskFull` is mapped from
-/// disk-space I/O errors on the write path.
+/// Journal and budget errors. `SessionCap` means the caller must stop
+/// reading the PTY for this session. `GlobalCap` is transient: the shared
+/// budget frees as live rolling writers trim to their fair share
+/// ([`JournalWriter::yield_to_global_pressure`]) and retention deletes
+/// finished journals, so the caller keeps the output aside and retries.
+/// `DiskFull` is mapped from disk-space I/O errors on the write path.
 #[derive(Debug, thiserror::Error)]
 pub enum JournalFlowError {
     #[error("journal I/O error on {path}: {source}")]
@@ -211,15 +224,28 @@ pub enum JournalFlowError {
 /// every write; reservations represent on-disk bytes, so they are released
 /// only when journal files are deleted (retention cleanup is out of scope
 /// for this module).
+///
+/// The default limits let 32 sessions × 128 MiB outgrow 2 GiB, and a writer
+/// only trims its own history, so the budget also counts the live rolling
+/// writers: near the cap each of them trims to its fair share
+/// ([`GlobalJournalBudget::fair_share`]), which keeps room for a young
+/// session that has nothing of its own to give up.
 #[derive(Debug)]
 pub struct GlobalJournalBudget {
     limit: u64,
     used: u64,
+    /// Rolling writers currently open on this budget (registered by
+    /// [`JournalWriter::open_with`], released on drop).
+    rolling_writers: u64,
 }
 
 impl GlobalJournalBudget {
     pub const fn new(limit: u64) -> Self {
-        Self { limit, used: 0 }
+        Self {
+            limit,
+            used: 0,
+            rolling_writers: 0,
+        }
     }
 
     /// Shared budget handle with a custom limit.
@@ -271,6 +297,31 @@ impl GlobalJournalBudget {
     /// delete leaves no other means to keep its active file well-formed.
     pub fn seed_used(&mut self, bytes: u64) {
         self.used = self.used.saturating_add(bytes);
+    }
+
+    /// Live rolling writers sharing this budget.
+    pub fn rolling_writers(&self) -> u64 {
+        self.rolling_writers
+    }
+
+    /// [`FAIR_SHARE_FLOOR`], scaled down to an eighth of the limit for
+    /// budgets smaller than eight floors.
+    fn share_floor(&self) -> u64 {
+        FAIR_SHARE_FLOOR.min(self.limit / 8)
+    }
+
+    /// One live rolling writer's fair share: the limit split evenly across
+    /// the live rolling writers, never below the floor. A writer further
+    /// caps it at its own session limit.
+    pub fn fair_share(&self) -> u64 {
+        (self.limit / self.rolling_writers.max(1)).max(self.share_floor())
+    }
+
+    /// Near the cap: less than one fair-share floor of headroom is left.
+    /// Live rolling writers then trim to their fair share
+    /// ([`JournalWriter::yield_to_global_pressure`]).
+    pub fn under_pressure(&self) -> bool {
+        self.used.saturating_add(self.share_floor()) > self.limit
     }
 }
 
@@ -427,6 +478,11 @@ impl JournalWriter {
             dropped_bytes: 0,
             tracker: Arc::new(SegmentTracker::new()),
         });
+        if rolling.is_some() {
+            // Fair-share divisor; the writer's Drop gives the slot back, so
+            // the header write below may fail without leaking it.
+            lock_budget(&global).rolling_writers += 1;
+        }
         let mut writer = Self {
             buf: BufWriter::with_capacity(WRITE_BUFFER_BYTES, file),
             path,
@@ -477,7 +533,9 @@ impl JournalWriter {
     /// Flush buffered records to the OS if at least
     /// [`FLUSH_INTERVAL_MS`] elapsed since the last tick flush (and there is
     /// anything buffered). `now_ms` is caller-injected. Returns whether a
-    /// flush happened.
+    /// flush happened. A failed attempt (disk full) still starts the next
+    /// cadence window, so the caller retries one interval later instead of
+    /// on every call.
     pub fn flush_tick(&mut self, now_ms: u64) -> Result<bool, JournalFlowError> {
         if !self.dirty {
             return Ok(false);
@@ -488,9 +546,24 @@ impl JournalWriter {
         if !due {
             return Ok(false);
         }
-        self.do_flush()?;
         self.last_flush_ms = Some(now_ms);
+        self.do_flush()?;
         Ok(true)
+    }
+
+    /// When [`JournalWriter::flush_tick`] next has work, on the caller's
+    /// clock: `None` with nothing buffered, the next cadence boundary
+    /// otherwise (`0` — at once — before the first tick flush and after
+    /// [`JournalWriter::flush_now`]). A tick loop parks until this instead of
+    /// polling the cadence.
+    pub fn flush_due_at(&self) -> Option<u64> {
+        if !self.dirty {
+            return None;
+        }
+        Some(
+            self.last_flush_ms
+                .map_or(0, |last| last.saturating_add(FLUSH_INTERVAL_MS)),
+        )
     }
 
     /// Explicit flush (e.g. on session teardown before Drop).
@@ -694,6 +767,36 @@ impl JournalWriter {
         self.dirty = true;
         self.publish_tracker();
         Ok(())
+    }
+
+    /// Global fair share (rolling mode). While the shared budget is near its
+    /// cap ([`GlobalJournalBudget::under_pressure`]), delete this writer's
+    /// oldest closed segments until its retained bytes fit its fair share —
+    /// the limit split across the live rolling writers
+    /// ([`GlobalJournalBudget::fair_share`]), capped at this session's limit.
+    /// A writer otherwise trims only on its own append path, so a young
+    /// writer with nothing closed to give up stayed refused for as long as
+    /// idle sessions sat on the whole budget. The active segment is never
+    /// touched, and the budget gets back exactly the bytes deleted (a failed
+    /// unlink keeps them counted). Returns the bytes given back.
+    pub fn yield_to_global_pressure(&mut self) -> u64 {
+        if self.rolling.is_none() {
+            return 0;
+        }
+        let share = {
+            let budget = lock_budget(&self.global);
+            if !budget.under_pressure() {
+                return 0;
+            }
+            budget.fair_share().min(self.session_limit)
+        };
+        let before = self.journal_bytes;
+        while self.journal_bytes > share {
+            if !self.trim_oldest_closed() {
+                break;
+            }
+        }
+        before.saturating_sub(self.journal_bytes)
     }
 
     /// Global reservation. A rolling writer gives up its own oldest history
@@ -935,6 +1038,10 @@ impl Drop for JournalWriter {
     fn drop(&mut self) {
         if let Err(error) = self.buf.flush() {
             tracing::warn!(path = %self.path.display(), %error, "journal flush on drop failed");
+        }
+        if self.rolling.is_some() {
+            let mut budget = lock_budget(&self.global);
+            budget.rolling_writers = budget.rolling_writers.saturating_sub(1);
         }
     }
 }
@@ -2101,6 +2208,135 @@ mod tests {
         let active = JournalReader::open(&path).unwrap();
         assert_eq!(active.status(), ScanStatus::Ok);
         assert_eq!((active.first_seq(), active.last_seq()), (10, 11));
+    }
+
+    /// Fair-share arithmetic: the limit split across the live rolling
+    /// writers, floored at 16 MiB (an eighth of a small limit), with the
+    /// same floor as the "near the cap" headroom.
+    #[test]
+    fn fair_share_splits_the_limit_and_keeps_a_floor() {
+        let mut budget = GlobalJournalBudget::new(DEFAULT_GLOBAL_LIMIT);
+        assert_eq!(budget.fair_share(), DEFAULT_GLOBAL_LIMIT, "no writer yet");
+        budget.rolling_writers = 23;
+        assert_eq!(budget.fair_share(), DEFAULT_GLOBAL_LIMIT / 23);
+        budget.rolling_writers = 1_000;
+        assert_eq!(budget.fair_share(), FAIR_SHARE_FLOOR, "floored");
+        assert!(!budget.under_pressure());
+        budget.seed_used(DEFAULT_GLOBAL_LIMIT - FAIR_SHARE_FLOOR);
+        assert!(!budget.under_pressure(), "exactly one floor left");
+        budget.seed_used(1);
+        assert!(budget.under_pressure());
+
+        let mut small = GlobalJournalBudget::new(64 * 1024);
+        small.rolling_writers = 16;
+        assert_eq!(small.fair_share(), 8 * 1024, "an eighth of a small limit");
+        small.seed_used(56 * 1024 + 1);
+        assert!(small.under_pressure());
+    }
+
+    /// Rolling writers count toward the fair-share divisor while open;
+    /// legacy single-file writers never do.
+    #[test]
+    fn rolling_writers_register_while_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = GlobalJournalBudget::shared_default();
+        let a = rolling(&dir.path().join("a.mtj"), 64 * 1024, global.clone());
+        let b = rolling(&dir.path().join("b.mtj"), 64 * 1024, global.clone());
+        let legacy = JournalWriter::with_budget(
+            dir.path().join("legacy.mtj"),
+            Uuid::new_v4(),
+            DEFAULT_SESSION_LIMIT,
+            global.clone(),
+        )
+        .unwrap();
+        assert_eq!(global.lock().unwrap().rolling_writers(), 2);
+        drop(a);
+        assert_eq!(global.lock().unwrap().rolling_writers(), 1);
+        drop(legacy);
+        drop(b);
+        assert_eq!(global.lock().unwrap().rolling_writers(), 0);
+    }
+
+    /// The regression: a young session (no closed segment of its own) under
+    /// a full global budget was refused for good while an idle session sat
+    /// on most of the budget. Near the cap the old writer yields down to its
+    /// fair share, the young one reserves again, and the accounting stays
+    /// exact — the budget got back precisely the deleted segments' bytes.
+    #[test]
+    fn young_writer_reserves_again_once_others_yield_their_fair_share() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = GlobalJournalBudget::shared(64 * 1024);
+        let old_path = dir.path().join("old.mtj");
+        let mut old = rolling(&old_path, 64 * 1024, global.clone()); // 8 KiB segments
+        old.append_resize(80, 24).unwrap();
+        let payload = vec![b'o'; 1000];
+        for _ in 0..50 {
+            old.append_output(&payload).unwrap();
+        }
+        assert!(
+            old.dropped_bytes() == 0 && old.journal_bytes() > 48 * 1024,
+            "the old session holds most of the budget, untrimmed"
+        );
+        // Not near the cap yet: nobody yields.
+        assert_eq!(old.yield_to_global_pressure(), 0);
+
+        let mut young = rolling(&dir.path().join("young.mtj"), 64 * 1024, global.clone());
+        young.append_resize(80, 24).unwrap();
+        // The rest of the budget belongs to journals nobody can trim here
+        // (finished sessions waiting for retention).
+        let seeded = {
+            let mut budget = global.lock().unwrap();
+            let free = budget.limit() - budget.used();
+            budget.seed_used(free);
+            free
+        };
+        let err = young.append_output(&payload).unwrap_err();
+        assert!(matches!(err, JournalFlowError::GlobalCap { .. }), "{err}");
+        let young_seq = young.last_seq();
+
+        let old_before = old.journal_bytes();
+        let released = old.yield_to_global_pressure();
+        assert!(released > 0, "the old writer gives up its oldest segments");
+        let share = global.lock().unwrap().fair_share();
+        assert_eq!(share, 32 * 1024, "two live rolling writers");
+        assert!(old.journal_bytes() <= share, "{}", old.journal_bytes());
+        assert_eq!(old.journal_bytes(), old_before - released);
+        assert_eq!(old.dropped_bytes(), released);
+
+        let seq = young.append_output(&payload).unwrap();
+        assert_eq!(seq, young_seq + 1, "the refused record burned no seq");
+        old.flush_now().unwrap();
+        young.flush_now().unwrap();
+        assert_eq!(
+            global.lock().unwrap().used(),
+            seeded + old.journal_bytes() + young.journal_bytes(),
+            "the budget gave back exactly the deleted bytes"
+        );
+        assert_eq!(journal_files_bytes(&old_path), old.journal_bytes());
+        // At or below its share a writer keeps its history, pressure or not.
+        assert_eq!(old.yield_to_global_pressure(), 0);
+    }
+
+    /// The flush cadence is driven by the caller's tick: `flush_due_at`
+    /// says when the buffered tail is next due so a tick loop can park
+    /// until then instead of polling.
+    #[test]
+    fn flush_due_at_follows_the_tick_cadence() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = JournalWriter::open(dir.path().join("due.mtj"), Uuid::new_v4()).unwrap();
+        writer.append_resize(80, 24).unwrap();
+        assert_eq!(writer.flush_due_at(), Some(0), "first tick flushes at once");
+        assert!(writer.flush_tick(1_000).unwrap());
+        assert_eq!(writer.flush_due_at(), None, "nothing buffered");
+        writer.append_output(b"burst").unwrap();
+        assert_eq!(writer.flush_due_at(), Some(1_000 + FLUSH_INTERVAL_MS));
+        assert!(!writer.flush_tick(1_100).unwrap(), "inside the cadence");
+        assert!(writer.flush_tick(1_000 + FLUSH_INTERVAL_MS).unwrap());
+        writer.append_output(b"tail").unwrap();
+        writer.flush_now().unwrap();
+        assert_eq!(writer.flush_due_at(), None);
+        writer.append_output(b"after-flush-now").unwrap();
+        assert_eq!(writer.flush_due_at(), Some(0));
     }
 
     /// `session.search` reads through a capped stream: the cap bounds the

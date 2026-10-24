@@ -4,11 +4,15 @@
 //!   `QUEUE_FULL`;
 //! * ordering: effective priority → queued_at → workload id (string
 //!   compare) — all deterministic;
-//! * aging: one priority level up (toward 0 = highest) per full
-//!   `timing_ms.priority_aging` interval (30 s), floored at 0;
+//! * aging: one priority level up per full `timing_ms.priority_aging`
+//!   interval (5 min), but never above NORMAL(1) — 낮은 우선순위(2)가 오래
+//!   기다리면 보통 요청과 같은 줄에 서지만, 높은 우선순위(0)를 앞지르지는
+//!   않는다(P2-1). 원래 0인 요청은 그대로 0이다;
 //! * head-of-line bypass: when the head waits on resources, the first entry
 //!   the current conditions admit may start; skipped heads record their wait
-//!   reason for the UI.
+//!   reason for the UI. 큰 요청이 [`HOL_BYPASS_LIMIT_MS`] 넘게 자원(메모리
+//!   여유·CPU 슬롯·예약 예산)을 기다렸으면 더는 추월시키지 않는다 — 작은
+//!   요청이 끝없이 앞질러 큰 요청이 굶는 것을 막는다.
 //!
 //! `pick_next` does **not** reserve anything: it hands the winner to the
 //! caller, which pairs it with [`crate::reservation::ReservationLedger`].
@@ -24,12 +28,18 @@ use term_contracts::snapshot::{QueueEntry, QueueReason};
 use crate::clock::Clock;
 use crate::error::CoreError;
 
-/// Queue sizing from defaults: 64 entries, one aging step per 30 s.
+/// 자원을 기다리는 머리 항목을 이보다 오래 추월시키지 않는다.
+pub const HOL_BYPASS_LIMIT_MS: u64 = 10 * 60_000;
+
+/// 에이징이 올려 줄 수 있는 가장 높은 우선순위(NORMAL).
+pub const AGING_CEILING: u8 = 1;
+
+/// Queue sizing from defaults: 64 entries, one aging step per 5 min.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueueConfig {
     /// `limits.queued_workloads` (default 64).
     pub max_entries: u32,
-    /// `timing_ms.priority_aging` (default 30_000).
+    /// `timing_ms.priority_aging` (default 300_000).
     pub aging_step_ms: u64,
 }
 
@@ -43,8 +53,9 @@ impl QueueConfig {
 }
 
 /// Effective priority after aging: `steps = elapsed / aging_step_ms` full
-/// intervals, one level up per step, floored at 0. An `aging_step_ms` of 0
-/// disables aging (no step is ever complete).
+/// intervals, one level up per step, but never above [`AGING_CEILING`]
+/// (an original 0 stays 0). An `aging_step_ms` of 0 disables aging (no step
+/// is ever complete).
 pub fn effective_priority(
     priority: Priority,
     queued_at_ms: u64,
@@ -56,7 +67,20 @@ pub fn effective_priority(
     }
     let elapsed = now_ms.saturating_sub(queued_at_ms);
     let steps = u8::try_from(elapsed / aging_step_ms).unwrap_or(u8::MAX);
-    Priority(priority.0.saturating_sub(steps))
+    let ceiling = priority.0.min(AGING_CEILING);
+    Priority(priority.0.saturating_sub(steps).max(ceiling))
+}
+
+/// 머리 항목이 이 사유로 오래 기다리면 뒤 항목의 추월을 막는다 — 요청
+/// 크기에 따라 갈리는 자원 대기만 해당한다(압력·텔레메트리·동시 실행 수는
+/// 모두에게 같아서 추월로 굶을 일이 없다).
+fn size_dependent_wait(reason: QueueReason) -> bool {
+    matches!(
+        reason,
+        QueueReason::WaitMemoryHeadroom
+            | QueueReason::WaitCpuSlots
+            | QueueReason::WaitReservationBudget
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -269,8 +293,21 @@ impl<C: Clock> WorkloadQueue<C> {
 
         let mut skipped: Vec<SkippedEntry> = Vec::new();
         let mut picked: Option<QueueEntry> = None;
+        // 오래 굶은 머리 항목이 있으면 그 뒤는 평가하지 않고 같은 사유로 기다린다.
+        let mut held_by: Option<QueueReason> = None;
         for &(effective, queued_at, index) in &ranked {
             let entry = &state.entries[index];
+            if let Some(reason) = held_by {
+                let workload_id = entry.workload_id.clone();
+                let request_id = entry.request_id.clone();
+                state.entries[index].wait_reason = Some(reason);
+                skipped.push(SkippedEntry {
+                    workload_id,
+                    request_id,
+                    reason,
+                });
+                continue;
+            }
             let candidate = QueueCandidate {
                 workload_id: &entry.workload_id,
                 request_id: &entry.request_id,
@@ -301,6 +338,11 @@ impl<C: Clock> WorkloadQueue<C> {
                         request_id,
                         reason,
                     });
+                    if size_dependent_wait(reason)
+                        && now.saturating_sub(queued_at) >= HOL_BYPASS_LIMIT_MS
+                    {
+                        held_by = Some(reason);
+                    }
                 }
             }
         }
@@ -338,7 +380,7 @@ mod tests {
     fn from_defaults_pins_capacity_and_aging() {
         let cfg = config();
         assert_eq!(cfg.max_entries, 64);
-        assert_eq!(cfg.aging_step_ms, 30_000);
+        assert_eq!(cfg.aging_step_ms, 300_000);
     }
 
     #[test]
@@ -406,31 +448,81 @@ mod tests {
     }
 
     #[test]
-    fn aging_steps_one_level_per_full_30s_and_floors_at_zero() {
+    fn aging_rises_one_level_per_full_5min_and_stops_at_normal() {
         let clock = FakeClock::new();
         let q = queue(&clock);
         q.enqueue(qid(1), rid(1), Priority(2)).unwrap();
         let eff = || q.snapshot()[0].effective_priority;
 
         assert_eq!(eff(), Priority(2));
-        clock.advance(29_999);
+        clock.advance(299_999);
         assert_eq!(eff(), Priority(2), "incomplete interval does not age");
-        clock.advance(1); // exactly 30 s
-        assert_eq!(eff(), Priority(1), "one level per full 30 s");
-        clock.advance(15_000); // 45 s total
+        clock.advance(1); // exactly 5 min
+        assert_eq!(eff(), Priority(1), "one level per full interval");
+        clock.advance(3_600_000);
         assert_eq!(
             eff(),
             Priority(1),
-            "45 s is still the first interval -> one level, not two"
+            "aging stops at NORMAL — never jumps a high-priority request"
         );
-        clock.advance(15_000); // 60 s total: two full intervals
-        assert_eq!(eff(), Priority(0), "risen twice");
-        clock.advance(3_600_000);
-        assert_eq!(eff(), Priority(0), "floor at 0, never above");
         assert_eq!(
             q.snapshot()[0].priority,
             Priority(2),
             "original priority kept"
+        );
+        // 원래 높은(0) 요청은 그대로 0, 보통(1)은 그대로 1.
+        assert_eq!(
+            effective_priority(Priority(0), 0, 3_600_000, 300_000),
+            Priority(0)
+        );
+        assert_eq!(
+            effective_priority(Priority(1), 0, 3_600_000, 300_000),
+            Priority(1)
+        );
+    }
+
+    /// 자원(크기)을 기다리는 머리 항목이 오래 굶으면 뒤 항목의 추월을 막는다.
+    #[test]
+    fn a_long_starved_head_stops_the_bypass() {
+        let clock = FakeClock::new();
+        let q = queue(&clock);
+        q.enqueue(qid(1), rid(1), Priority(1)).unwrap(); // 큰 요청
+        clock.advance(1_000);
+        q.enqueue(qid(2), rid(2), Priority(1)).unwrap(); // 작은 요청
+        let big = qid(1);
+        let decide = |c: &QueueCandidate<'_>| {
+            if c.workload_id == &big {
+                QueueReason::WaitMemoryHeadroom
+            } else {
+                QueueReason::Admit
+            }
+        };
+        // 아직은 추월된다.
+        assert_eq!(
+            q.pick_next(decide).picked.expect("bypass").workload_id,
+            qid(2)
+        );
+        q.enqueue(qid(3), rid(3), Priority(1)).unwrap();
+        // 머리가 상한 넘게 기다렸다: 더는 추월시키지 않고 같은 사유로 기다린다.
+        clock.advance(HOL_BYPASS_LIMIT_MS);
+        let outcome = q.pick_next(decide);
+        assert!(outcome.picked.is_none(), "{outcome:?}");
+        assert_eq!(outcome.skipped.len(), 2);
+        assert!(outcome
+            .skipped
+            .iter()
+            .all(|s| s.reason == QueueReason::WaitMemoryHeadroom));
+        // 크기와 무관한 대기(압력)는 추월을 막지 않는다.
+        let pressure = |c: &QueueCandidate<'_>| {
+            if c.workload_id == &big {
+                QueueReason::WaitHostPressure
+            } else {
+                QueueReason::Admit
+            }
+        };
+        assert_eq!(
+            q.pick_next(pressure).picked.expect("bypass").workload_id,
+            qid(3)
         );
     }
 
@@ -513,8 +605,9 @@ mod tests {
     #[test]
     fn aging_lifting_an_old_low_priority_above_new_arrivals() {
         // High priority is permanently blocked. A low-priority entry ages to
-        // effective 0 after 60 s and then outranks a freshly queued middle
-        // priority; before that, the middle entry wins the bypass order.
+        // effective 1 after 5 min and then outranks a freshly queued middle
+        // priority (older queued_at wins within the same level); before that,
+        // the middle entry wins the bypass order.
         let clock = FakeClock::new();
         let q = queue(&clock);
         let high = qid(1);
@@ -535,8 +628,8 @@ mod tests {
             "middle priority outranks the un-aged low entry"
         );
 
-        // Now age the low entry past two intervals.
-        clock.advance(61_000);
+        // Now age the low entry past one interval.
+        clock.advance(300_000);
         q.enqueue(qid(4), rid(4), Priority(1)).unwrap();
         let second = q.pick_next(|c| {
             if c.workload_id == &high {
@@ -548,7 +641,7 @@ mod tests {
         assert_eq!(
             second.picked.expect("starvation relief").workload_id,
             qid(3),
-            "aged low entry (effective 0) now outranks the fresh priority 1"
+            "aged low entry (effective 1, older) now outranks the fresh priority 1"
         );
         assert_eq!(second.skipped[0].workload_id, qid(1));
         // The permanently blocked head keeps its reason for the UI.
@@ -581,7 +674,7 @@ mod tests {
         let clock = FakeClock::new();
         let q = queue(&clock);
         q.enqueue(qid(1), rid(1), Priority(2)).unwrap();
-        clock.advance(45_000);
+        clock.advance(345_000);
         let seen: Mutex<Vec<(u8, u8, u64)>> = Mutex::new(Vec::new());
         q.pick_next(|c| {
             seen.lock()
@@ -592,8 +685,8 @@ mod tests {
         let seen = seen.into_inner().unwrap();
         assert_eq!(
             seen,
-            vec![(2, 1, 45_000)],
-            "priority 2, aged to 1 after one full interval, 45 s waited"
+            vec![(2, 1, 345_000)],
+            "priority 2, aged to 1 after one full interval, 345 s waited"
         );
     }
 }

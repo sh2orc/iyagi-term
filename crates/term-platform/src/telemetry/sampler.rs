@@ -16,7 +16,7 @@
 //!   dropped; [`TelemetrySampler::workload_sample_age_ms`] exposes sample
 //!   age so the scheduler can treat `M_i` as 0 past that point (spec §3).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use term_contracts::ids::{ProcessIdentity, U64String, WorkloadId};
@@ -90,15 +90,33 @@ pub struct InterfaceReading {
 /// deliberately no argv, env, exe, or cwd.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProcessReading {
-    /// Platform start token (sysinfo start time) recorded to notice pid
-    /// reuse between polls.
+    /// Platform start token recorded to notice pid reuse between polls.
     pub start_token: String,
+    /// 시작 시각(epoch ms). 직전 폴 뒤에 생긴 프로세스의 CPU를 통째로 세는
+    /// 판정에 쓴다. 모르면 `None`(그런 프로세스는 다음 폴부터 차분한다).
+    pub start_epoch_ms: Option<u64>,
+    /// 부모 pid(0 = 모름). 추적 중인 부모가 회수한 자식의 CPU를 두 번 세지
+    /// 않는 데 쓴다.
+    pub ppid: u32,
     /// Accumulated CPU time in CPU-milliseconds.
     pub cpu_ms: u64,
+    /// 회수된(wait된) 자식들의 CPU 누계(ms). 짧게 살다 간 컴파일러·테스트
+    /// 프로세스의 CPU는 폴 사이에 태어나 죽어 따로 보이지 않고 여기로만
+    /// 들어온다. 0 = 모름·없음.
+    pub child_cpu_ms: u64,
     pub rss_bytes: u64,
+    /// 물리 footprint(macOS)·익명+공유+스왑(Linux). 있으면 RSS 대신 쓴다 —
+    /// RSS 합은 공유 페이지를 이중으로 세고 압축된 페이지를 뺀다.
+    pub footprint_bytes: Option<u64>,
     pub read_total_bytes: u64,
     pub write_total_bytes: u64,
 }
+
+/// 직전 폴보다 이만큼 먼저 시작한 프로세스까지 "새 프로세스"로 본다 — 멤버
+/// 목록 재스캔(2 s)과 폴(1 s) 사이의 지연을 덮는다. 그보다 오래된 프로세스가
+/// 늦게 멤버가 되면(부모가 바뀐 자손 재부착·태그 고아) 평생 누적 CPU를 한
+/// 틱에 쏟지 않도록 다음 폴부터 차분한다.
+const NEW_PROCESS_SLACK_MS: u64 = 3_000;
 
 /// Selective-refresh boundary over one shared sysinfo instance. The
 /// production implementation is [`SysinfoSource`]; tests inject fakes.
@@ -117,6 +135,13 @@ pub trait PlatformSource: Send {
     fn read_interfaces(&self) -> Vec<InterfaceReading>;
     /// `None` when the pid is gone or no longer exists.
     fn read_process(&self, pid: u32) -> Option<ProcessReading>;
+    /// 지금 시각(epoch ms) — 새 프로세스 판정의 기준. 시험이 바꾼다.
+    fn now_epoch_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
 }
 
 /// Refresh kinds used for workload pids: cpu + memory + io only. No
@@ -138,6 +163,12 @@ pub struct SysinfoSource {
     networks: sysinfo::Networks,
     /// sysinfo reports 0% usage until it has two refreshes to difference.
     cpu_refresh_count: u64,
+    /// 네이티브 계량값(macOS·Linux) — `refresh_processes`가 채운다.
+    native: HashMap<u32, crate::native_proc::PidUsage>,
+    /// 지난 갱신이 요청한 pid(sysinfo 경로) — 다음 갱신에 함께 넘겨 죽은
+    /// pid의 레코드를 버리게 한다(`ProcessesToUpdate::Some`은 요청한 pid만
+    /// 정리한다).
+    last_pids: Vec<u32>,
 }
 
 impl SysinfoSource {
@@ -152,6 +183,8 @@ impl SysinfoSource {
             disks: sysinfo::Disks::new_with_refreshed_list(),
             networks: sysinfo::Networks::new_with_refreshed_list(),
             cpu_refresh_count: 1,
+            native: HashMap::new(),
+            last_pids: Vec::new(),
         }
     }
 }
@@ -181,7 +214,25 @@ impl PlatformSource for SysinfoSource {
     }
 
     fn refresh_processes(&mut self, pids: &[u32]) {
-        let list: Vec<sysinfo::Pid> = pids.iter().map(|&p| sysinfo::Pid::from_u32(p)).collect();
+        // macOS·Linux: 네이티브 계량(rusage·/proc) — CPU에 회수된 자식 시간,
+        // 메모리에 footprint가 함께 온다. sysinfo의 갱신은 거치지 않는다.
+        if crate::native_proc::supported() {
+            self.native = pids
+                .iter()
+                .filter_map(|&pid| crate::native_proc::pid_usage(pid).map(|usage| (pid, usage)))
+                .collect();
+            return;
+        }
+        // 지난번에 요청했지만 이번에 빠진 pid도 함께 넘겨 죽은 레코드를 버린다.
+        let mut union: Vec<u32> = pids.to_vec();
+        union.extend(
+            self.last_pids
+                .iter()
+                .copied()
+                .filter(|pid| !pids.contains(pid)),
+        );
+        self.last_pids = pids.to_vec();
+        let list: Vec<sysinfo::Pid> = union.iter().map(|&p| sysinfo::Pid::from_u32(p)).collect();
         // `remove_dead_processes = true`: sysinfo keeps one `Process` record
         // per pid it was ever handed, so a long-lived daemon that sampled
         // thousands of short-lived workload pids would grow forever. With
@@ -247,6 +298,20 @@ impl PlatformSource for SysinfoSource {
     }
 
     fn read_process(&self, pid: u32) -> Option<ProcessReading> {
+        if crate::native_proc::supported() {
+            let usage = self.native.get(&pid)?;
+            return Some(ProcessReading {
+                start_token: usage.start_token.clone(),
+                start_epoch_ms: Some(usage.start_epoch_ms),
+                ppid: usage.ppid,
+                cpu_ms: usage.cpu_ms,
+                child_cpu_ms: usage.child_cpu_ms,
+                rss_bytes: usage.resident_bytes,
+                footprint_bytes: usage.footprint_bytes,
+                read_total_bytes: usage.read_bytes,
+                write_total_bytes: usage.written_bytes,
+            });
+        }
         let process = self.system.process(sysinfo::Pid::from_u32(pid))?;
         if !process.exists() {
             return None;
@@ -254,8 +319,12 @@ impl PlatformSource for SysinfoSource {
         let io = process.disk_usage();
         Some(ProcessReading {
             start_token: process.start_time().to_string(),
+            start_epoch_ms: Some(process.start_time().saturating_mul(1_000)),
+            ppid: process.parent().map(|parent| parent.as_u32()).unwrap_or(0),
             cpu_ms: process.accumulated_cpu_time(),
+            child_cpu_ms: 0,
             rss_bytes: process.memory(),
+            footprint_bytes: None,
             read_total_bytes: io.total_read_bytes,
             write_total_bytes: io.total_written_bytes,
         })
@@ -381,7 +450,9 @@ struct PidBaseline {
     /// different token on a later poll means the pid was reused by a new
     /// process and the baseline is void.
     start_token: String,
+    ppid: u32,
     cpu_ms: u64,
+    child_cpu_ms: u64,
     read_total_bytes: u64,
     write_total_bytes: u64,
 }
@@ -390,6 +461,8 @@ struct WorkloadState {
     provider: Arc<dyn Fn() -> Vec<ProcessIdentity> + Send + Sync>,
     per_pid: HashMap<u32, PidBaseline>,
     last_poll_ms: Option<u64>,
+    /// 직전 폴의 epoch 시각(새 프로세스 판정 기준).
+    last_poll_epoch_ms: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +641,7 @@ impl TelemetrySampler {
                 provider: pid_provider,
                 per_pid: HashMap::new(),
                 last_poll_ms: None,
+                last_poll_epoch_ms: None,
             });
     }
 
@@ -598,6 +672,7 @@ impl TelemetrySampler {
                 );
                 state.per_pid.clear();
                 state.last_poll_ms = None;
+                state.last_poll_epoch_ms = None;
             }
         }
         let identities = (state.provider)();
@@ -614,12 +689,14 @@ impl TelemetrySampler {
         }
 
         let dt = state.last_poll_ms.map(|last| now_ms.saturating_sub(last));
+        let now_epoch_ms = self.source.now_epoch_ms();
         let usage = build_workload_usage(
             workload_id,
             &visible,
             missing,
             dt,
             &state.per_pid,
+            state.last_poll_epoch_ms,
             coverage_hint,
         );
 
@@ -630,7 +707,9 @@ impl TelemetrySampler {
                     *pid,
                     PidBaseline {
                         start_token: reading.start_token.clone(),
+                        ppid: reading.ppid,
                         cpu_ms: reading.cpu_ms,
+                        child_cpu_ms: reading.child_cpu_ms,
                         read_total_bytes: reading.read_total_bytes,
                         write_total_bytes: reading.write_total_bytes,
                     },
@@ -638,6 +717,7 @@ impl TelemetrySampler {
             })
             .collect();
         state.last_poll_ms = Some(now_ms);
+        state.last_poll_epoch_ms = Some(now_epoch_ms);
         Some(usage)
     }
 
@@ -662,14 +742,23 @@ impl TelemetrySampler {
 }
 
 /// Differentials the visible readings against the previous poll's
-/// baselines. Pids without a baseline (newly spawned) contribute no delta;
-/// pids whose start token changed (pid reuse) start fresh baselines.
+/// baselines.
+///
+/// * 기존 pid: 자기 CPU 증가분 + 회수된 자식 CPU 증가분(폴 사이에 태어나
+///   죽은 짧은 자식의 몫).
+/// * 기준선이 없는 pid(새로 보였거나 pid 재사용): 직전 폴 뒤에 시작했으면
+///   ([`NEW_PROCESS_SLACK_MS`] 여유) CPU·IO를 통째로 센다. 그보다 오래된
+///   프로세스가 늦게 멤버가 된 것이면 다음 폴부터 차분한다.
+/// * 사라진 pid의 부모가 아직 보이면 그 부모가 회수했다 — 부모의 자식 CPU에
+///   이미 센 몫이 다시 들어오므로 빼서 두 번 세지 않는다.
+#[allow(clippy::too_many_arguments)]
 fn build_workload_usage(
     workload_id: &WorkloadId,
     visible: &[(u32, ProcessReading)],
     missing: usize,
     dt: Option<u64>,
     baselines: &HashMap<u32, PidBaseline>,
+    prev_poll_epoch_ms: Option<u64>,
     coverage_hint: UsageCoverage,
 ) -> WorkloadUsage {
     let mut cpu_delta_ms: u128 = 0;
@@ -682,18 +771,35 @@ fn build_workload_usage(
     let mut write_pairs = 0usize;
     let mut write_reset = false;
     for (pid, reading) in visible {
-        let Some(baseline) = baselines.get(pid) else {
-            continue; // newly observed process: no differential yet
+        let baseline = baselines
+            .get(pid)
+            .filter(|baseline| baseline.start_token == reading.start_token);
+        let Some(baseline) = baseline else {
+            // 새로 보인 프로세스(또는 재사용된 pid의 새 주인): 직전 폴 뒤에
+            // 태어났으면 지금까지의 전부가 이번 구간의 몫이다.
+            let born_since_last_poll = matches!(
+                (prev_poll_epoch_ms, reading.start_epoch_ms),
+                (Some(prev), Some(start)) if start.saturating_add(NEW_PROCESS_SLACK_MS) >= prev
+            );
+            if dt.is_some() && born_since_last_poll {
+                cpu_delta_ms += u128::from(reading.cpu_ms) + u128::from(reading.child_cpu_ms);
+                cpu_pairs += 1;
+                read_delta += u128::from(reading.read_total_bytes);
+                read_pairs += 1;
+                write_delta += u128::from(reading.write_total_bytes);
+                write_pairs += 1;
+            }
+            continue;
         };
-        if baseline.start_token != reading.start_token {
-            continue; // pid reused: the baseline belongs to a dead process
-        }
-        match reading.cpu_ms.checked_sub(baseline.cpu_ms) {
-            Some(delta) => {
-                cpu_delta_ms += u128::from(delta);
+        match (
+            reading.cpu_ms.checked_sub(baseline.cpu_ms),
+            reading.child_cpu_ms.checked_sub(baseline.child_cpu_ms),
+        ) {
+            (Some(own), Some(children)) => {
+                cpu_delta_ms += u128::from(own) + u128::from(children);
                 cpu_pairs += 1;
             }
-            None => cpu_reset = true,
+            _ => cpu_reset = true,
         }
         match reading
             .read_total_bytes
@@ -716,6 +822,20 @@ fn build_workload_usage(
             None => write_reset = true,
         }
     }
+
+    // 추적 중인 부모가 회수한 자식: 부모의 자식 CPU 증가분에 그 자식의 전부가
+    // 들어왔다 — 이미 센 몫(직전 폴까지)을 뺀다.
+    let visible_pids: HashSet<u32> = visible.iter().map(|(pid, _)| *pid).collect();
+    let already_counted: u128 = baselines
+        .iter()
+        .filter(|(pid, baseline)| {
+            !visible_pids.contains(pid)
+                && baseline.ppid != 0
+                && visible_pids.contains(&baseline.ppid)
+        })
+        .map(|(_, baseline)| u128::from(baseline.cpu_ms) + u128::from(baseline.child_cpu_ms))
+        .sum();
+    cpu_delta_ms = cpu_delta_ms.saturating_sub(already_counted);
 
     // Shared null-semantics for per-pid differentials; `scale` converts the
     // summed delta into the metric's unit (bytes/s multiply by 1000/dt;
@@ -786,18 +906,26 @@ fn build_workload_usage(
         windows_io_reason,
     );
 
-    let resident_bytes = if visible.is_empty() {
-        Metric::unavailable(SRC, "no visible processes")
-    } else {
-        let sum: u128 = visible
-            .iter()
-            .map(|(_, reading)| u128::from(reading.rss_bytes))
-            .sum();
-        bytes_metric(
-            sum,
-            MetricQuality::Estimated,
-            Some("shared pages double-counted"),
-        )
+    let footprints: Option<u128> = visible
+        .iter()
+        .map(|(_, reading)| reading.footprint_bytes.map(u128::from))
+        .sum();
+    let resident_bytes = match (visible.is_empty(), footprints) {
+        (true, _) => Metric::unavailable(SRC, "no visible processes"),
+        // footprint: 공유 페이지를 이중으로 세지 않고 압축·스왑된 몫을 포함 —
+        // Activity Monitor의 "메모리"와 같은 기준이다.
+        (false, Some(sum)) => bytes_metric(sum, MetricQuality::Measured, None),
+        (false, None) => {
+            let sum: u128 = visible
+                .iter()
+                .map(|(_, reading)| u128::from(reading.rss_bytes))
+                .sum();
+            bytes_metric(
+                sum,
+                MetricQuality::Estimated,
+                Some("shared pages double-counted"),
+            )
+        }
     };
 
     WorkloadUsage {
@@ -848,6 +976,8 @@ mod tests {
 
     #[derive(Default)]
     struct FakeCore {
+        /// `now_epoch_ms`가 돌려줄 벽시계(새 프로세스 판정).
+        epoch_ms: u64,
         host_refreshes: u64,
         disk_refreshes: u64,
         network_refreshes: u64,
@@ -901,6 +1031,9 @@ mod tests {
         }
         fn read_process(&self, pid: u32) -> Option<ProcessReading> {
             self.core.lock().unwrap().procs.get(&pid).cloned()
+        }
+        fn now_epoch_ms(&self) -> u64 {
+            self.core.lock().unwrap().epoch_ms
         }
     }
 
@@ -1244,6 +1377,7 @@ mod tests {
             rss_bytes: rss,
             read_total_bytes: 10_000 + u64::from(pid),
             write_total_bytes: 20_000 + u64::from(pid),
+            ..ProcessReading::default()
         }
     }
 
@@ -1256,6 +1390,164 @@ mod tests {
     }
 
     // ------------------------------------------------------ workload tests
+
+    /// 부모(셸)의 회수된 자식 CPU: 폴 사이에 태어나 죽은 컴파일러의 몫이
+    /// 부모의 자식 누계로만 보여도 워크로드 CPU에 들어간다.
+    #[test]
+    fn reaped_child_cpu_counts_toward_the_workload() {
+        let (mut sampler, core) = workload_sampler();
+        let shell = |child_ms: u64| ProcessReading {
+            ppid: 1,
+            child_cpu_ms: child_ms,
+            ..proc_reading(100, 1_000, 1 << 20)
+        };
+        core.lock().unwrap().procs = HashMap::from([(100, shell(0))]);
+        let id = WorkloadId::generate();
+        sampler.track_workload(id.clone(), identities(&[100]));
+        sampler.poll_workload(&id, 0, UsageCoverage::ObservedTree);
+        // 1초 사이에 자식이 1.5 코어·초를 쓰고 회수됐다.
+        core.lock().unwrap().procs = HashMap::from([(100, shell(1_500))]);
+        let usage = sampler
+            .poll_workload(&id, 1_000, UsageCoverage::ObservedTree)
+            .unwrap();
+        assert!(
+            (usage.cpu_cores.value.unwrap() - 1.5).abs() < 1e-9,
+            "{usage:?}"
+        );
+    }
+
+    /// 직전 폴 뒤에 태어난 프로세스는 첫 관측에서 통째로 세고, 늦게 멤버가 된
+    /// 오래된 프로세스는 다음 폴부터 차분한다(평생 누적을 한 틱에 쏟지 않음).
+    #[test]
+    fn new_processes_count_in_full_but_old_late_joiners_do_not() {
+        let (mut sampler, core) = workload_sampler();
+        core.lock().unwrap().epoch_ms = 10_000_000;
+        core.lock().unwrap().procs = HashMap::from([(100, proc_reading(100, 1_000, 0))]);
+        let id = WorkloadId::generate();
+        let members = Arc::new(Mutex::new(vec![100u32]));
+        let provider_members = Arc::clone(&members);
+        sampler.track_workload(
+            id.clone(),
+            Arc::new(move || {
+                provider_members
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|&pid| ProcessIdentity {
+                        pid,
+                        start_token: format!("token-{pid}"),
+                        boot_id: "boot".into(),
+                    })
+                    .collect()
+            }),
+        );
+        sampler.poll_workload(&id, 0, UsageCoverage::ObservedTree);
+        {
+            let mut core = core.lock().unwrap();
+            core.epoch_ms = 10_001_000;
+            // 101: 직전 폴(10_000_000) 뒤에 태어나 벌써 800 ms를 썼다.
+            core.procs.insert(
+                101,
+                ProcessReading {
+                    start_epoch_ms: Some(10_000_400),
+                    ..proc_reading(101, 800, 0)
+                },
+            );
+            // 102: 한 시간 전에 태어난 고아가 이제야 멤버가 됐다(누적 1시간).
+            core.procs.insert(
+                102,
+                ProcessReading {
+                    start_epoch_ms: Some(10_000_000 - 3_600_000),
+                    ..proc_reading(102, 3_600_000, 0)
+                },
+            );
+        }
+        members.lock().unwrap().extend([101, 102]);
+        let usage = sampler
+            .poll_workload(&id, 1_000, UsageCoverage::ObservedTree)
+            .unwrap();
+        // 100은 그대로(0), 101은 통째로(0.8), 102는 세지 않는다.
+        assert!(
+            (usage.cpu_cores.value.unwrap() - 0.8).abs() < 1e-9,
+            "{usage:?}"
+        );
+    }
+
+    /// 추적 중인 부모가 추적 중이던 자식을 회수하면 그 자식의 몫이 부모의
+    /// 자식 누계로 다시 들어온다 — 이미 센 몫은 빼서 두 번 세지 않는다.
+    #[test]
+    fn a_child_reaped_by_a_tracked_parent_is_not_counted_twice() {
+        let (mut sampler, core) = workload_sampler();
+        let parent = |child_ms: u64| ProcessReading {
+            child_cpu_ms: child_ms,
+            ..proc_reading(100, 1_000, 0)
+        };
+        let child = |cpu_ms: u64| ProcessReading {
+            ppid: 100,
+            ..proc_reading(101, cpu_ms, 0)
+        };
+        core.lock().unwrap().procs = HashMap::from([(100, parent(0)), (101, child(2_000))]);
+        let id = WorkloadId::generate();
+        let members = Arc::new(Mutex::new(vec![100u32, 101]));
+        let provider_members = Arc::clone(&members);
+        sampler.track_workload(
+            id.clone(),
+            Arc::new(move || {
+                provider_members
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|&pid| ProcessIdentity {
+                        pid,
+                        start_token: format!("token-{pid}"),
+                        boot_id: "boot".into(),
+                    })
+                    .collect()
+            }),
+        );
+        sampler.poll_workload(&id, 0, UsageCoverage::ObservedTree);
+        // 자식이 마지막 1초에 500 ms를 더 쓰고(총 2_500) 끝나 부모가 회수했다.
+        core.lock().unwrap().procs = HashMap::from([(100, parent(2_500))]);
+        members.lock().unwrap().retain(|pid| *pid == 100);
+        let usage = sampler
+            .poll_workload(&id, 1_000, UsageCoverage::ObservedTree)
+            .unwrap();
+        // 이번 구간의 몫은 자식이 마지막에 쓴 0.5 코어·초뿐이다.
+        assert!(
+            (usage.cpu_cores.value.unwrap() - 0.5).abs() < 1e-9,
+            "{usage:?}"
+        );
+    }
+
+    /// footprint가 있으면 RSS 합 대신 쓰고 측정값으로 보고한다.
+    #[test]
+    fn footprint_replaces_the_rss_sum_when_available() {
+        let (mut sampler, core) = workload_sampler();
+        core.lock().unwrap().procs = HashMap::from([
+            (
+                100,
+                ProcessReading {
+                    footprint_bytes: Some(300 << 20),
+                    ..proc_reading(100, 0, 646 << 20)
+                },
+            ),
+            (
+                101,
+                ProcessReading {
+                    footprint_bytes: Some(305 << 20),
+                    ..proc_reading(101, 0, 235 << 20)
+                },
+            ),
+        ]);
+        let id = WorkloadId::generate();
+        sampler.track_workload(id.clone(), identities(&[100, 101]));
+        let usage = sampler
+            .poll_workload(&id, 0, UsageCoverage::ObservedTree)
+            .unwrap();
+        assert_eq!(usage.resident_bytes.quality, MetricQuality::Measured);
+        assert_eq!(reason_of(&usage.resident_bytes), None);
+        assert_eq!(usage.resident_bytes.value.unwrap().get(), 605 << 20);
+    }
 
     #[test]
     fn workload_first_sample_is_null_differential() {

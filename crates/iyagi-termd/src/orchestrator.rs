@@ -32,8 +32,7 @@ use crate::claude_provider::ResolvedClaudeProvider;
 use crate::connections::SecretRedactor;
 use crate::gate_listener::GateListener;
 use crate::sessions::{
-    release_journal, spawn_journal_flusher, spawn_pump, GroupWatch, NotifySink, RedactingJournal,
-    SessionEntry, SharedJournal,
+    release_journal, GroupWatch, NotifySink, RedactingJournal, SessionEntry, SharedJournal,
 };
 use crate::state::{DaemonState, WorkloadEntry};
 
@@ -230,12 +229,12 @@ fn launch_shell(
     // when the user needs a terminal (to find and stop the offender). What
     // pressure does govern is the managed queue (WAIT_HOST_PRESSURE) and the
     // relief/guard loops over already-running workloads.
-    if state.active_workload_count() as u32 >= state.config.session_limit() {
+    let Some(_launch_slot) = state.reserve_launch_slot() else {
         return Err(RpcError::new(
             ErrorCode::SessionLimit,
             format!("session limit {} reached", state.config.session_limit()),
         ));
-    }
+    };
 
     let (workload_id, session_id) = (WorkloadId::generate(), SessionId::generate());
     // 관측 게이트웨이가 열려 있으면 라우팅을 감싼다 — base URL은 지금
@@ -402,12 +401,12 @@ fn launch_managed(
     canonical_cwd: std::path::PathBuf,
     claude_provider: Option<ResolvedClaudeProvider>,
 ) -> Result<LaunchOutcome, RpcError> {
-    if state.active_workload_count() as u32 >= state.config.session_limit() {
+    let Some(_launch_slot) = state.reserve_launch_slot() else {
         return Err(RpcError::new(
             ErrorCode::SessionLimit,
             format!("session limit {} reached", state.config.session_limit()),
         ));
-    }
+    };
 
     // 이 호스트가 절대 받을 수 없는 크기는 거절하지 않고 받을 수 있는 최대로
     // 줄여 받는다(`fit_policy_to_host`). 지문·중복 판정은 원래 요청 그대로다.
@@ -456,15 +455,26 @@ fn launch_managed(
     };
 
     // Admission decide + reserve atomically (term-core reservation ledger).
+    // 대기열에 먼저 온 요청이 있으면 직접 승인으로 새치기하지 않는다 —
+    // 대기열로 보내 스케줄러의 순서(우선순위·대기 시간·추월 규칙)에 맡긴다
+    // (높은 우선순위면 다음 틱에 바로 시작한다).
     let host = state.admission_host();
     let admission = AdmissionRequest {
         reservation_bytes: policy.reservation_bytes.get(),
         cpu_slots: policy.cpu_slots,
     };
-    match state
-        .ledger
-        .try_admit_and_reserve(&host, workload_id.clone(), admission)
-    {
+    let queued_ahead = state.queue.snapshot().first().map(|head| {
+        head.wait_reason
+            .filter(|reason| *reason != QueueReason::Admit)
+            .unwrap_or(QueueReason::WaitConcurrency)
+    });
+    let admitted = match queued_ahead {
+        Some(reason) => Err(CoreError::AdmissionDenied { reason }),
+        None => state
+            .ledger
+            .try_admit_and_reserve(&host, workload_id.clone(), admission),
+    };
+    match admitted {
         Ok(_) => {}
         Err(CoreError::AdmissionDenied {
             reason: QueueReason::ResourceUnschedulable,
@@ -1266,9 +1276,12 @@ pub(crate) fn fit_policy_to_host(
                         &state.ledger.active_workloads(),
                     ))
             });
+            // 지금의 여유로 줄이되 예산의 절반 아래로는 줄이지 않는다 — 여유가
+            // 50 MiB뿐일 때 12 GiB 요청을 50 MiB 예약으로 들이면 예약의 뜻이
+            // 사라진다. 그만큼 여유가 생길 때까지는 대기열에서 기다린다.
             let bytes = headroom
                 .filter(|headroom| *headroom > 0)
-                .map_or(budget, |headroom| headroom.min(budget));
+                .map_or(budget, |headroom| headroom.clamp(budget / 2, budget));
             if let Ok(bytes) = term_contracts::U64String::new(bytes) {
                 fitted.reservation_bytes = bytes;
             }
@@ -1416,8 +1429,8 @@ pub fn journal_error_code(error: &str) -> Option<&'static str> {
 // ---------------------------------------------------------------------------
 // Session actor wiring
 
-/// Build the registry `SessionEntry`, spawn the journal flusher + delivery
-/// pump, then start the actor with daemon-side adapters. A journal-open
+/// Build the registry `SessionEntry`, then start the actor with daemon-side
+/// adapters (the delivery pump starts with the first attach). A journal-open
 /// failure fails the workload here (group teardown + reservation release)
 /// and returns `Err` so the caller kills the already-spawned PTY child
 /// instead of leaving it unsupervised.
@@ -1503,9 +1516,10 @@ fn start_session_actor(
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .insert(session_id.clone(), Arc::clone(&session));
-
-    spawn_journal_flusher(Arc::clone(state), Arc::clone(&session), journal_inner);
-    spawn_pump(Arc::clone(state), Arc::clone(&session));
+    // 세션 보조 스레드는 여기서 띄우지 않는다. 저널 flush 캐이던스는 actor
+    // 루프가 `JournalSink::tick`으로 굴리고(세션마다 100 ms로 깨던 flusher
+    // 스레드가 없다), 배달 펌프는 첫 attach가 `ensure_pump`로 띄운다 — 뷰가
+    // 없는 세션에는 펌프 스레드도 없다.
 
     let cleanup = Arc::new(SessionFinalizer {
         state: Arc::clone(state),
@@ -1525,7 +1539,7 @@ fn start_session_actor(
         None => Box::new(journal),
     };
     config.journal = journal;
-    config.sink = Box::new(NotifySink::new(Arc::clone(state), session_id.clone()));
+    config.sink = Box::new(NotifySink::new(Arc::clone(state), &session));
     config.cleanup = cleanup;
     config.descendants = descendants;
     let (handle, join) = term_pty::actor::start(config);
@@ -1540,15 +1554,12 @@ fn start_session_actor(
     if cancel_flagged {
         handle.cancel();
     }
-    let reap_id = workload_id.clone();
-    std::thread::Builder::new()
-        .name(format!("reap-{reap_id}"))
-        .spawn(move || {
-            if let Ok(status) = join.join() {
-                tracing::debug!(workload = %reap_id, ?status.lifecycle, "session actor reaped");
-            }
-        })
-        .expect("spawn reaper");
+    // actor 스레드는 떼어 둔다(detach). 세션마다 join만 기다리며 수명 내내
+    // 붙어 있던 reap 스레드는 아무것도 거두지 않았다: 자식 프로세스는
+    // actor가 exit poll(`try_wait`)과 finalize의 HUP→KILL 단계적 종료로
+    // 직접 회수하고, reader·writer 스레드도 actor가 끝나기 전에 join한다.
+    // 종료 기록은 actor의 "session actor finalized" 로그가 남긴다.
+    drop(join);
     Ok(())
 }
 
@@ -2217,6 +2228,28 @@ pub fn cancel_workload_with_force(
 const STOP_FORCE_RETRY_ATTEMPTS: u32 = 3;
 const STOP_FORCE_RETRY_INTERVAL: Duration = Duration::from_secs(10);
 
+/// 가드가 정지시킨 워크로드를 재개한다(정지 중이 아니면 아무것도 하지 않는다).
+/// 블로킹: 정지 사다리의 스레드에서 부른다.
+fn resume_if_guard_suspended(state: &Arc<DaemonState>, workload_id: &WorkloadId) {
+    let ops = {
+        let mut guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
+        if guard.view(workload_id).0.is_suspended() {
+            guard.manual(workload_id, false)
+        } else {
+            Vec::new()
+        }
+    };
+    if ops.is_empty() {
+        return;
+    }
+    for op in ops {
+        let outcome = crate::guard::apply(state, &op);
+        let mut guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
+        guard.record(&op, &outcome, state.now_ms());
+    }
+    state.workload_state_changed(workload_id);
+}
+
 pub fn request_stop(state: &Arc<DaemonState>, workload_id: &WorkloadId) {
     let state = Arc::clone(state);
     let workload_id = workload_id.clone();
@@ -2230,6 +2263,9 @@ pub fn request_stop(state: &Arc<DaemonState>, workload_id: &WorkloadId) {
                 }
                 None => return,
             };
+            // 가드가 얼린(SIGSTOP) 워크로드는 SIGTERM을 처리하지 못한다 —
+            // 유예 단계 전에 먼저 깨워서 상태를 저장하고 끝날 기회를 준다.
+            resume_if_guard_suspended(&state, &workload_id);
             if let Some(group) = &group {
                 // Windows R1: Grace is a documented no-op (02-runner §7).
                 let _ = state

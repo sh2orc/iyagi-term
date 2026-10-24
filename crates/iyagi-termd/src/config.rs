@@ -157,10 +157,55 @@ impl DaemonConfig {
         }
     }
 
-    /// 08 §5: 가드 정책 초기값.
+    /// 08 §5: 가드 정책 초기값(명세 기본값 그대로).
     pub fn guard_policy(&self) -> term_contracts::snapshot::GuardPolicy {
         self.defaults.resource_guard.clone()
     }
+
+    /// 08 §5: 이 호스트의 가드 정책 초기값. 명세 기본값(6코어·4 GiB)은
+    /// 호스트 크기와 무관한 절대값이라, 논리 코어가 6개 이하인 호스트에서는
+    /// "6코어 초과" 독점이 불가능해 양보가 아예 걸리지 않았고 8 GiB 호스트의
+    /// 4 GiB는 RAM의 절반이었다. CPU 독점 한도는 논리 코어의 절반(최소 2),
+    /// 메모리 한도는 RAM의 1/4을 2~8 GiB로 자른다. 총량을 모르면 메모리
+    /// 한도는 명세 기본값을 둔다.
+    pub fn guard_policy_for_host(
+        &self,
+        logical_cpus: u32,
+        total_bytes: Option<u64>,
+    ) -> term_contracts::snapshot::GuardPolicy {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        let mut policy = self.guard_policy();
+        policy.cpu_cores_limit = (logical_cpus / 2).max(2);
+        if let Some(total) = total_bytes.filter(|total| *total > 0) {
+            let limit = (total / 4).clamp(2 * GIB, 8 * GIB);
+            if let Ok(limit) = term_contracts::ids::U64String::new(limit) {
+                policy.rss_limit_bytes = limit;
+            }
+        }
+        policy
+    }
+}
+
+/// `guard.set_policy` 값 검사. 범위 밖 값은 거부한다 — 예를 들어 메모리
+/// 한도 "0"은 압력 WARNING에서 비포커스 워크로드를 전부 얼린다.
+pub fn validate_guard_policy(policy: &term_contracts::snapshot::GuardPolicy) -> Result<(), String> {
+    const MIB: u64 = 1024 * 1024;
+    const TIB: u64 = 1024 * 1024 * MIB;
+    if !(1..=1024).contains(&policy.cpu_cores_limit) {
+        return Err("cpu_cores_limit must be between 1 and 1024".to_string());
+    }
+    if !(256 * MIB..=TIB).contains(&policy.rss_limit_bytes.get()) {
+        return Err("rss_limit_bytes must be between 256 MiB and 1 TiB".to_string());
+    }
+    for (name, value) in [
+        ("sustain_ms", policy.sustain_ms.get()),
+        ("rss_sustain_ms", policy.rss_sustain_ms.get()),
+    ] {
+        if !(1_000..=600_000).contains(&value) {
+            return Err(format!("{name} must be between 1000 and 600000"));
+        }
+    }
+    Ok(())
 }
 
 /// Startup values of the relief controller.
@@ -436,5 +481,49 @@ mod tests {
         let admission = cfg.admission_config(8);
         assert_eq!(admission.managed_budget_bytes(10 << 30), 10 << 30);
         assert_eq!(admission.host_reserve_bytes(10 << 30), 1);
+    }
+
+    #[test]
+    fn guard_policy_scales_with_the_host() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        let cfg = DaemonConfig::load();
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // 10코어·24 GiB(M4): 독점 한도 5코어, 메모리 한도 6 GiB.
+        let mac = cfg.guard_policy_for_host(10, Some(24 * GIB));
+        assert_eq!(mac.cpu_cores_limit, 5);
+        assert_eq!(mac.rss_limit_bytes.get(), 6 * GIB);
+        // 작은 호스트: 2코어 하한, 2 GiB 하한(8 GiB의 절반이던 4 GiB 대신).
+        let small = cfg.guard_policy_for_host(2, Some(8 * GIB));
+        assert_eq!(small.cpu_cores_limit, 2);
+        assert_eq!(small.rss_limit_bytes.get(), 2 * GIB);
+        // 큰 호스트: 8 GiB 상한.
+        let big = cfg.guard_policy_for_host(32, Some(128 * GIB));
+        assert_eq!(big.cpu_cores_limit, 16);
+        assert_eq!(big.rss_limit_bytes.get(), 8 * GIB);
+        // 총량을 모르면 메모리 한도는 명세 기본값.
+        let unknown = cfg.guard_policy_for_host(8, None);
+        assert_eq!(unknown.rss_limit_bytes, cfg.guard_policy().rss_limit_bytes);
+        // 나머지 필드는 명세 그대로.
+        assert_eq!(mac.sustain_ms, cfg.guard_policy().sustain_ms);
+        assert_eq!(mac.auto_suspend, cfg.guard_policy().auto_suspend);
+    }
+
+    #[test]
+    fn guard_policy_validation_rejects_out_of_range_values() {
+        use term_contracts::ids::U64String;
+        let ok = term_contracts::snapshot::GuardPolicy::default();
+        assert!(validate_guard_policy(&ok).is_ok());
+        let mut zero_rss = ok.clone();
+        zero_rss.rss_limit_bytes = U64String::new(0).unwrap();
+        assert!(validate_guard_policy(&zero_rss).is_err());
+        let mut zero_cpu = ok.clone();
+        zero_cpu.cpu_cores_limit = 0;
+        assert!(validate_guard_policy(&zero_cpu).is_err());
+        let mut fast = ok.clone();
+        fast.rss_sustain_ms = U64String::new(10).unwrap();
+        assert!(validate_guard_policy(&fast).is_err());
+        let mut slow = ok;
+        slow.sustain_ms = U64String::new(3_600_000).unwrap();
+        assert!(validate_guard_policy(&slow).is_err());
     }
 }

@@ -14,6 +14,7 @@
  *   attach replays from the journal.
  */
 
+import type { PressureLevel } from "../../generated/PressureLevel";
 import { lineHeightForFont } from "./defaultFont";
 import { readablePaletteFor } from "./terminalPalette";
 import { preserveViewport, type ViewportTerminal } from "./viewport";
@@ -26,8 +27,18 @@ import { beginZoomPreview, cancelZoomPreview, observeHistoryRedraws, zoomPreview
  * pane(활성 탭, 최대 8개)은 항상 유지하고, 초과분은 가장 오래된 숨은 pane의
  * 렌더러부터 회수한다. xterm 인스턴스·버퍼는 그대로 살아 있어 재생성 비용만
  * 한 번 더 드는 정도다.
+ *
+ * 상한 안이라도 숨은 pane의 렌더러(컨텍스트·글리프 아틀라스)는 두 경우에 먼저
+ * 회수한다: 호스트 메모리 압력이 WARNING 이상일 때(`setMemoryPressure` — 그동안
+ * 숨기는 pane은 곧바로 놓는다), 그리고 RENDERER_HIDDEN_TTL_MS 넘게 숨어 있을 때.
  */
 const RENDERER_CONTEXT_CAP = 12;
+/**
+ * 숨은 pane의 렌더러를 살려 두는 시간. 그 안에 돌아오는 탭 전환은 매끄럽게
+ * 재부착하고, 그보다 오래 안 보는 탭의 GPU 메모리는 돌려준다 — 다시 보이면
+ * 새로 만든다(한 번의 재생성 비용).
+ */
+export const RENDERER_HIDDEN_TTL_MS = 5 * 60_000;
 /**
  * 컨텍스트를 잃은 WebGL 렌더러를 다시 만들기까지의 대기(보이는 pane만). DOM
  * 렌더러로 오래 남으면 대체 글꼴 글리프(스피너·기호)마다 줄 기준선이 달라져
@@ -150,7 +161,8 @@ export interface RendererHooks {
 /**
  * 보이는 pane에 렌더러를 만든다(null이면 xterm 기본 DOM 렌더러 그대로). 숨겨도
  * (unmount) 해제하지 않고 재부착에 다시 쓰며, 살아 있는 수는
- * RENDERER_CONTEXT_CAP으로 묶어 가장 오래 숨은 pane의 것부터 회수한다.
+ * RENDERER_CONTEXT_CAP으로 묶어 가장 오래 숨은 pane의 것부터 회수한다. 메모리
+ * 압력(WARNING 이상)이나 오래 숨음(RENDERER_HIDDEN_TTL_MS)에도 숨은 것은 회수한다.
  */
 export type RendererFactory = (terminal: TerminalLike, hooks: RendererHooks) => RendererLike | null;
 export type ResizeObserverFactory = (callback: () => void) => ResizeObserverLike;
@@ -227,10 +239,12 @@ class RegistryEntryImpl implements RegistryEntry {
   private fitHandler: ((dims: FitDimensions) => void) | null = null;
   private lastFit: { cols: number; rows: number } | null = null;
   /** WebGL 렌더러. 숨겨도(unmount) 살려 두고 재생성 없이 재부착한다.
-   *  회수는 registry의 LRU 예산·설정 끔·dispose에서만. */
+   *  회수는 registry의 예산(LRU 상한·메모리 압력·오래 숨음)·설정 끔·dispose에서만. */
   private renderer: RendererLike | null = null;
   /** 렌더러 LRU 정렬값(registry가 show/hide 때 증가시킨다). */
   lruStamp = 0;
+  /** 숨긴 시각(Date.now) — 보이는 동안은 null. 오래 숨은 렌더러 회수의 기준이다. */
+  hiddenAt: number | null = null;
   /** 컨텍스트 상실 뒤 재생성 시도 타이머·횟수. */
   private rendererRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private rendererRetries = 0;
@@ -317,7 +331,8 @@ class RegistryEntryImpl implements RegistryEntry {
     // 렌더러는 폐기하지 않는다 — 재부착 시 WebGL 재생성을 피한다.
     // 복귀 때 캐시 무효화와 전체 repaint로 분리 중 남은 화면 상태를 복구한다.
     // registry가 LRU 상한을 넘으면 가장 오래된
-    // 숨은 pane의 렌더러만 회수한다(WebGL 컨텍스트 예산 보호).
+    // 숨은 pane의 렌더러만 회수한다(WebGL 컨텍스트 예산 보호). 메모리 압력이
+    // WARNING 이상이면 곧바로, 오래 숨어 있으면 시간이 지나서 회수한다.
     this.registry.onEntryHidden(this);
   }
 
@@ -596,14 +611,70 @@ class RegistryEntryImpl implements RegistryEntry {
  * 검은 글자를 그대로 두면 글자가 배경에 묻힌다. 반대(어두운 테마 + 사용자가
  * 고른 밝은 배경)도 같은 이유로 밝은 테마 팔레트로 바꾼다. 배경만 바꿔도
  * 되는 경우(명암이 테마와 같은 방향)는 지금 팔레트를 그대로 둔다.
+ *
+ * 결과는 (base 테마, 색)으로 기억해 같은 입력이면 같은 참조를 돌려준다 — xterm은
+ * 참조가 같을 때만 테마 적용을 건너뛰고, 새 객체마다 테마 전체를 다시 적용한다
+ * (WebGL 글리프 아틀라스 비움). workload.changed마다 tint pane 전부의 배경을 다시
+ * 맞추므로 매번 새 객체를 만들면 그때마다 모든 tint pane이 다시 그려진다. 이미
+ * 칠한 테마를 base로 넘기면 칠하기 전 base에서 다시 계산한다 — 같은 색을 몇 번
+ * 얹어도 같은 참조이고, null은 tint를 남기지 않고 base로 돌아간다(전역 테마가
+ * 아직 없어 터미널의 현재 테마가 base인 경우).
  */
-const withBackground = (theme: unknown, color: string | null): unknown => {
-  if (color === null) return theme;
-  const base = (theme ?? {}) as Record<string, unknown>;
-  const foreground = typeof base.foreground === "string" ? base.foreground : null;
+export const withBackground = (theme: unknown, color: string | null): unknown => {
+  const origin = isThemeObject(theme) ? tintOrigins.get(theme) : undefined;
+  const base = origin ? origin.base : theme;
+  if (color === null) return base;
+  const cache = tintCacheFor(base);
+  const cached = cache.get(color);
+  if (cached !== undefined) {
+    // 최근에 쓴 색을 뒤로 옮긴다 — 상한을 넘을 때 가장 오래 안 쓴 색부터 버린다.
+    cache.delete(color);
+    cache.set(color, cached);
+    return cached;
+  }
+  const source = (base ?? {}) as Record<string, unknown>;
+  const foreground = typeof source.foreground === "string" ? source.foreground : null;
   const palette = foreground === null ? null : readablePaletteFor(color, foreground);
-  return { ...base, ...palette, background: color, cursorAccent: color };
+  const tinted = { ...source, ...palette, background: color, cursorAccent: color };
+  cache.set(color, tinted);
+  if (cache.size > TINT_CACHE_PER_BASE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  tintOrigins.set(tinted, { base });
+  return tinted;
 };
+
+/** base 테마 하나에 기억해 두는 색 수 — 색 고르기를 끌며 지나간 색으로 끝없이 자라지 않게. */
+const TINT_CACHE_PER_BASE = 32;
+/** base 테마 객체 → (색 → 배경을 얹은 테마). base가 버려지면 함께 사라진다. */
+const tintCaches = new WeakMap<object, Map<string, unknown>>();
+/** 객체가 아닌 base(전역 테마 적용 전 null·undefined)용 캐시. */
+const tintCacheWithoutBase = new Map<string, unknown>();
+/** 배경을 얹은 테마 → 그 base. 칠한 테마가 다시 base로 들어오면 풀어서 쓴다. */
+const tintOrigins = new WeakMap<object, { base: unknown }>();
+
+function isThemeObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
+}
+
+function tintCacheFor(base: unknown): Map<string, unknown> {
+  if (!isThemeObject(base)) return tintCacheWithoutBase;
+  let cache = tintCaches.get(base);
+  if (!cache) {
+    cache = new Map();
+    tintCaches.set(base, cache);
+  }
+  return cache;
+}
+
+/**
+ * 계산한 테마가 지금 적용된 것과 같은 참조면 건드리지 않는다 — 같은 값을 다시
+ * 대입해도 xterm은 걸러 내지만, 접근자를 거치는 대입 자체를 줄여 둔다.
+ */
+function applyTheme(options: NonNullable<TerminalLike["options"]>, theme: unknown): void {
+  if (options.theme !== theme) options.theme = theme;
+}
 
 export class TerminalRegistry {
   private readonly entries = new Map<string, RegistryEntryImpl>();
@@ -623,6 +694,15 @@ export class TerminalRegistry {
    * WebGL 렌더러 유지(LRU)와는 독립이다.
    */
   private visibilityListener: ((viewId: string, visible: boolean) => void) | null = null;
+  /**
+   * 호스트 메모리 압력이 WARNING 이상인가(`setMemoryPressure`). 그동안은 숨은 pane의
+   * 렌더러를 쥐고 있지 않는다 — 숨기는 즉시 놓는다.
+   */
+  private memoryTight = false;
+  /** 오래 숨은 렌더러 회수 타이머(하나만) — 가장 먼저 만료되는 시각에 맞춘다. */
+  private hiddenSweepTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 위 타이머가 겨눈 만료 시각(Date.now 기준). 같은 시각이면 다시 걸지 않는다. */
+  private hiddenSweepAt: number | null = null;
 
   constructor(private readonly deps: RegistryDeps) {
     this.rendererEnabled = deps.rendererEnabled ?? true;
@@ -633,6 +713,8 @@ export class TerminalRegistry {
     if (this.rendererEnabled === enabled) return;
     this.rendererEnabled = enabled;
     for (const entry of this.entries.values()) entry.syncRenderer();
+    // 숨은 pane의 렌더러는 syncRenderer가 이미 놓았다 — 남은 회수 타이머를 정리한다.
+    this.scheduleHiddenSweep();
   }
 
   /**
@@ -648,16 +730,80 @@ export class TerminalRegistry {
   /** pane이 보이게 됨(mount): LRU 갱신 후 예산을 지킨다. */
   onEntryShown(entry: RegistryEntryImpl): void {
     entry.lruStamp = ++this.lruCounter;
+    entry.hiddenAt = null;
     this.enforceRendererBudget();
+    // 다시 보인 pane은 오래 숨음 회수 대상에서 빠진다 — 겨눈 만료 시각을 다시 고른다.
+    this.scheduleHiddenSweep();
     // LRU 판정과 무관한 표시 통보 — 숨김 동안 낮췄던 표시 빈도를 되돌리게 한다.
     this.visibilityListener?.(entry.viewId, true);
   }
   /** pane이 숨겨짐(unmount): 렌더러는 살아 있으므로 예산을 지킨다. */
   onEntryHidden(entry: RegistryEntryImpl): void {
     entry.lruStamp = ++this.lruCounter;
+    entry.hiddenAt = Date.now();
+    // 메모리가 빠듯한 동안은 숨은 pane의 렌더러를 남기지 않는다 — 다시 보이면 새로 만든다.
+    if (this.memoryTight) entry.releaseRendererForBudget();
     this.enforceRendererBudget();
+    this.scheduleHiddenSweep();
     // 렌더러는 살아 있어 계속 그릴 수 있으므로 표시 빈도를 낮추라고 통보한다.
     this.visibilityListener?.(entry.viewId, false);
+  }
+
+  /**
+   * 렌더러 예산 갈고리: 호스트 메모리 압력(데몬 `resource.snapshot`의 pressure)을
+   * 알려 준다. WARNING 이상이 되면 숨은 pane의 렌더러를 상한과 무관하게 곧바로
+   * 회수하고, 그 상태가 이어지는 동안 숨기는 pane도 그 자리에서 놓는다. NORMAL
+   * (또는 샘플 없음 null)로 돌아오면 원래대로 최근 것을 상한까지 살려 둔다. 보이는
+   * pane의 렌더러는 건드리지 않는다. 매 샘플(1초)마다 불러도 되게, 판정이 그대로면
+   * 아무것도 하지 않는다.
+   */
+  setMemoryPressure(level: PressureLevel | null): void {
+    const tight = level === "WARNING" || level === "CRITICAL";
+    if (tight === this.memoryTight) return;
+    this.memoryTight = tight;
+    if (!tight) return;
+    for (const entry of this.entries.values()) {
+      if (!entry.mounted && entry.hasLiveRenderer()) entry.releaseRendererForBudget();
+    }
+    this.scheduleHiddenSweep();
+  }
+
+  /**
+   * 오래 숨은 렌더러 회수 타이머를 가장 이른 만료에 맞춘다. 숨은 채 렌더러를 쥔
+   * pane이 없으면 타이머를 걸지 않는다(걸려 있으면 푼다).
+   */
+  private scheduleHiddenSweep(): void {
+    let due: number | null = null;
+    for (const entry of this.entries.values()) {
+      if (entry.mounted || entry.hiddenAt === null || !entry.hasLiveRenderer()) continue;
+      const expiry = entry.hiddenAt + RENDERER_HIDDEN_TTL_MS;
+      if (due === null || expiry < due) due = expiry;
+    }
+    if (due === this.hiddenSweepAt) return;
+    this.clearHiddenSweep();
+    if (due === null) return;
+    this.hiddenSweepAt = due;
+    this.hiddenSweepTimer = setTimeout(() => {
+      this.hiddenSweepTimer = null;
+      this.hiddenSweepAt = null;
+      this.sweepHiddenRenderers();
+    }, Math.max(0, due - Date.now()));
+  }
+
+  private clearHiddenSweep(): void {
+    if (this.hiddenSweepTimer !== null) clearTimeout(this.hiddenSweepTimer);
+    this.hiddenSweepTimer = null;
+    this.hiddenSweepAt = null;
+  }
+
+  /** RENDERER_HIDDEN_TTL_MS 넘게 숨은 pane의 렌더러를 놓고, 다음 만료에 타이머를 다시 건다. */
+  private sweepHiddenRenderers(): void {
+    const now = Date.now();
+    for (const entry of this.entries.values()) {
+      if (entry.mounted || entry.hiddenAt === null || !entry.hasLiveRenderer()) continue;
+      if (now - entry.hiddenAt >= RENDERER_HIDDEN_TTL_MS) entry.releaseRendererForBudget();
+    }
+    this.scheduleHiddenSweep();
   }
   /**
    * 살아 있는 WebGL 렌더러 수를 상한 이하로 유지한다. 회수 대상은 숨은
@@ -707,7 +853,7 @@ export class TerminalRegistry {
       // 있으면 생성 직후 적용한다 — 이후 applyGlobalPreferences가 유지한다.
       const override = this.backgroundOverrides.get(viewId);
       if (override !== undefined && terminal.options) {
-        terminal.options.theme = withBackground(this.baseTheme ?? terminal.options.theme, override);
+        applyTheme(terminal.options, withBackground(this.baseTheme ?? terminal.options.theme, override));
       }
     }
     return entry;
@@ -728,6 +874,7 @@ export class TerminalRegistry {
 
   disposeAll(): void {
     for (const entry of [...this.entries.values()]) entry.dispose();
+    this.clearHiddenSweep();
   }
 
   /** Wire fit results (cols/rows + px) to e.g. the session pipeline. */
@@ -752,8 +899,9 @@ export class TerminalRegistry {
     for (const entry of this.entries.values()) {
       const options = entry.terminal.options;
       if (!options) continue;
-      // pane별 덮어쓰기가 있으면 새 기본 테마 위에 다시 얹는다.
-      options.theme = withBackground(prefs.theme, this.backgroundOverrides.get(entry.viewId) ?? null);
+      // pane별 덮어쓰기가 있으면 새 기본 테마 위에 다시 얹는다. 테마가 그대로면(글꼴·
+      // 스크롤백만 바뀐 호출) 같은 참조가 나와 대입하지 않는다 — xterm이 테마를 다시 적용하지 않게.
+      applyTheme(options, withBackground(prefs.theme, this.backgroundOverrides.get(entry.viewId) ?? null));
       if (prefs.cursorStyle !== undefined) options.cursorStyle = prefs.cursorStyle;
       if (prefs.scrollback !== undefined) options.scrollback = prefs.scrollback;
       if (prefs.fontFamily !== undefined && options.fontFamily !== prefs.fontFamily) {
@@ -783,7 +931,8 @@ export class TerminalRegistry {
     else this.backgroundOverrides.set(viewId, color);
     const options = this.entries.get(viewId)?.terminal.options;
     if (!options) return;
-    options.theme = withBackground(this.baseTheme ?? options.theme, color);
+    // workload.changed마다 같은 색으로 다시 불린다 — 기억해 둔 같은 참조면 대입하지 않는다.
+    applyTheme(options, withBackground(this.baseTheme ?? options.theme, color));
   }
 
   /** 현재 기본 테마의 배경색(없으면 null) — tint 혼합의 베이스 계산용. */
@@ -796,6 +945,8 @@ export class TerminalRegistry {
   remove(viewId: string): void {
     this.entries.delete(viewId);
     this.backgroundOverrides.delete(viewId);
+    // 폐기된 pane을 겨눈 회수 타이머가 남지 않게 다시 고른다.
+    this.scheduleHiddenSweep();
   }
 
   private createDom(): RegistryDom {

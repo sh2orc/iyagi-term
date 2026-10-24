@@ -3,9 +3,16 @@ import type { ApiKeyStatus, ClaudeUsageStatus, ProviderUsage } from "./types";
 
 export const SUBSCRIPTION_REFRESH_EVENT = "iyagi-subscription-refresh";
 
-export async function refreshSubscriptionUsage(): Promise<ProviderUsage[]> {
+/**
+ * 구독 사용량을 다시 읽는다. CLI로 읽는 행은 브리지가 짧게 캐시한다 —
+ * `force`(사용자가 명시적으로 누른 새로고침, 설정 변경 직후)는 캐시를 건너뛴다.
+ * 자동 주기 갱신은 캐시를 그대로 쓴다.
+ */
+export async function refreshSubscriptionUsage(options: { force?: boolean } = {}): Promise<ProviderUsage[]> {
   if (!isTauri()) return [];
-  return tauriIpcAdapter.invoke<ProviderUsage[]>("subscription_usage_refresh");
+  return options.force
+    ? tauriIpcAdapter.invoke<ProviderUsage[]>("subscription_usage_refresh", { force: true })
+    : tauriIpcAdapter.invoke<ProviderUsage[]>("subscription_usage_refresh");
 }
 
 export function refreshUsageSoon(): void {

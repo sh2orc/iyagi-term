@@ -182,6 +182,17 @@
 
 .setting-error { margin: 8px 0 0; color: var(--danger); }
 
+/* 스크롤백 메모리 어림 — 컨트롤 아래 작은 안내(2만 줄 초과는 경고색). */
+.setting-scrollback { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.setting-hint { color: var(--fg-muted); font-size: 12px; max-width: 36ch; text-align: right; }
+.setting-hint-warn { color: var(--warn, #d9a441); }
+
+/* 자원 관리 — 컨트롤 옆(아래)에 그 항목의 오류를 붙인다. */
+.setting-resource { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.setting-resource .setting-error { margin: 0; max-width: 36ch; text-align: right; }
+.setting-resource-note { margin: 0 2px 4px; line-height: 1.55; }
+.setting-resource-actions { display: flex; justify-content: flex-end; padding: 14px 2px; }
+
 /* 백그라운드 실행 관리자 재시작(DaemonRestartRow) — 상태 줄 · 확인 문구 · 버튼. */
 .daemon-restart p { margin: 0 0 8px; line-height: 1.5; }
 .daemon-restart-actions { display: flex; gap: 6px; }

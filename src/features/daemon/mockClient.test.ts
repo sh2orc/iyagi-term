@@ -926,6 +926,108 @@ describe("MockDaemonClient session.relief", () => {
   });
 });
 
+// 자원 계약(08 §5·§1): resource.snapshot 본문 모양, 호스트 기본 가드 정책,
+// guard.set_policy 범위 검증, 보이는 세션 보고, 자동 정지 흉내.
+describe("MockDaemonClient resource contract", () => {
+  it("resource.snapshot은 revision·두 압력·살아 있는 워크로드 usage를 싣는다", async () => {
+    const { client, drain } = newMock();
+    const events: Array<{ kind: string; payload: unknown }> = [];
+    client.events.subscribe((event) => events.push(event));
+    const launched = await client.workloadLaunch(shellLaunch("req-res-1"));
+    drain();
+    client.emitResourceSnapshot();
+    drain();
+    const snapshotEvent = events.filter((event) => event.kind === "resource.snapshot").at(-1);
+    const payload = snapshotEvent?.payload as {
+      revision: number;
+      host: { pressure: string; cpu_pressure: string };
+      pressure: string;
+      cpu_pressure: string;
+      usage: Array<{ workload_id: string; cpu_cores: { value: number | null }; resident_bytes: { value: string | null } }>;
+    };
+    expect(payload.revision).toBe((await client.systemSnapshot()).revision);
+    expect(payload.pressure).toBe(payload.host.pressure);
+    expect(payload.cpu_pressure).toBe(payload.host.cpu_pressure);
+    expect(payload.usage.map((entry) => entry.workload_id)).toEqual([launched.workload_id]);
+    expect(typeof payload.usage[0].cpu_cores.value).toBe("number");
+    expect(typeof payload.usage[0].resident_bytes.value).toBe("string");
+  });
+
+  it("스냅샷은 호스트에서 유도한 기본 가드 정책을 함께 준다", async () => {
+    const { client } = newMock();
+    const snapshot = await client.systemSnapshot();
+    // mock 호스트: 논리 코어 12, RAM 32 GiB → cpu 6, rss 8 GiB(상한).
+    expect(snapshot.guard_policy_default).toEqual({
+      auto_suspend: true,
+      cpu_cores_limit: 6,
+      rss_limit_bytes: String(8 * 1024 ** 3),
+      sustain_ms: "20000",
+      rss_sustain_ms: "5000",
+      auto_resume: false,
+    });
+    expect(snapshot.guard_policy).toEqual(snapshot.guard_policy_default);
+  });
+
+  it("guard.set_policy는 데몬과 같은 범위로 검증하고 바뀌었을 때만 revision을 올린다", async () => {
+    const { client } = newMock();
+    const base = (await client.systemSnapshot()).guard_policy;
+    const before = (await client.systemSnapshot()).revision;
+    for (const bad of [
+      { ...base, cpu_cores_limit: 0 },
+      { ...base, cpu_cores_limit: 1025 },
+      { ...base, cpu_cores_limit: 2.5 },
+      { ...base, rss_limit_bytes: String(255 * 1024 * 1024) },
+      { ...base, rss_limit_bytes: String(1024 ** 4 + 1) },
+      { ...base, sustain_ms: "999" },
+      { ...base, rss_sustain_ms: "600001" },
+      { ...base, rss_limit_bytes: "abc" },
+    ]) {
+      await expect(client.guardSetPolicy({ policy: bad })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+    }
+    expect((await client.systemSnapshot()).revision).toBe(before);
+    expect(await client.guardSetPolicy({ policy: base })).toEqual(base);
+    expect((await client.systemSnapshot()).revision).toBe(before);
+    const next = { ...base, cpu_cores_limit: 1024, rss_limit_bytes: String(256 * 1024 * 1024), sustain_ms: "600000" };
+    expect(await client.guardSetPolicy({ policy: next })).toEqual(next);
+    expect((await client.systemSnapshot()).guard_policy).toEqual(next);
+    expect((await client.systemSnapshot()).revision).toBe(before + 1);
+  });
+
+  it("session.focus의 보이는 세션은 살아 있는 것만 기록한다", async () => {
+    const { client, drain } = newMock();
+    const launched = await client.workloadLaunch(shellLaunch("req-res-2"));
+    drain();
+    const sessionId = launched.session_id as string;
+    await client.sessionFocus({ session_id: sessionId, visible_session_ids: [sessionId, "gone"] });
+    expect(client.reportedVisibleSessionIds()).toEqual([sessionId]);
+    await client.sessionFocus({ session_id: null, visible_session_ids: [] });
+    expect(client.reportedVisibleSessionIds()).toEqual([]);
+  });
+
+  it("autoSuspend는 자동 정지(manual=false)를 알리고, silent면 revision만 올린다", async () => {
+    const { client, drain } = newMock();
+    const events: Array<{ kind: string; payload: unknown }> = [];
+    client.events.subscribe((event) => events.push(event));
+    const launched = await client.workloadLaunch(shellLaunch("req-res-3"));
+    drain();
+    events.length = 0;
+    client.autoSuspend(launched.workload_id, "host_memory_pressure");
+    drain();
+    expect(events.map((event) => event.kind)).toEqual(["workload.changed"]);
+    expect((events[0].payload as { guard: unknown }).guard).toMatchObject({
+      kind: "SUSPENDED",
+      reason: "host_memory_pressure",
+      manual: false,
+    });
+    const revision = (await client.systemSnapshot()).revision;
+    events.length = 0;
+    client.autoSuspend(launched.workload_id, "memory_limit", { silent: true });
+    drain();
+    expect(events).toEqual([]);
+    expect((await client.systemSnapshot()).revision).toBe(revision + 1);
+  });
+});
+
 describe("MockDaemonClient gateway policy", () => {
   it("gateway.status는 set_policy로 저장한 정책(전략 포함)을 그대로 보고한다", async () => {
     const { client } = newMock();

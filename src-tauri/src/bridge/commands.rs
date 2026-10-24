@@ -359,14 +359,22 @@ pub async fn system_query_version(
 /// the status-line backup under), while the Z.ai key store is read back by
 /// the daemon under the root it was spawned with (`effective_data_dir`, the
 /// same resolution the `zai_api_key_*` commands write through).
+/// CLI-backed rows are served from a short result cache; `force` (an explicit
+/// user refresh) bypasses it.
 #[tauri::command]
 pub async fn subscription_usage_refresh(
     state: State<'_, BridgeState>,
+    force: Option<bool>,
 ) -> Result<Vec<crate::bridge::subscriptions::ProviderUsage>, RpcError> {
     let hook_data_dir =
         crate::bridge::daemon_manager::default_data_dir().map_err(BridgeError::into_rpc)?;
     let secrets_data_dir = state.effective_data_dir().map_err(BridgeError::into_rpc)?;
-    Ok(crate::bridge::subscriptions::refresh(&hook_data_dir, &secrets_data_dir).await)
+    Ok(crate::bridge::subscriptions::refresh(
+        &hook_data_dir,
+        &secrets_data_dir,
+        force.unwrap_or(false),
+    )
+    .await)
 }
 
 /// Data root of the Z.ai key store: the dir the daemon was started with, so

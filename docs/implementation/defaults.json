@@ -44,7 +44,7 @@
     "stop_grace": 3000,
     "exit_drain": 2000,
     "idle_daemon_exit": 300000,
-    "priority_aging": 30000,
+    "priority_aging": 300000,
     "pressure_recovery": 10000,
     "relief_release_interval": 3000
   },

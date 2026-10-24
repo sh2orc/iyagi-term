@@ -1025,3 +1025,285 @@ fn actor_transient_journal_failure_degrades_then_recovers_in_order() {
     handle.cancel();
     join.join().expect("actor finalizes");
 }
+
+// -- global budget: a refusal is transient, intake resumes ---------------------
+
+/// Journal double whose first `refuse` output appends fail with the global
+/// budget's `GlobalCap`, wrapped the way the daemon's journal sink wraps it.
+struct BudgetRefusingJournal {
+    inner: term_pty::actor::MemJournal,
+    refuse: usize,
+}
+
+impl JournalSink for BudgetRefusingJournal {
+    fn append_output(&mut self, data: &[u8]) -> std::io::Result<u64> {
+        if self.refuse > 0 {
+            self.refuse -= 1;
+            return Err(std::io::Error::other(
+                term_pty::journal::JournalFlowError::GlobalCap { limit: 1 << 20 },
+            ));
+        }
+        self.inner.append_output(data)
+    }
+    fn append_resize(&mut self, cols: u16, rows: u16) -> std::io::Result<u64> {
+        self.inner.append_resize(cols, rows)
+    }
+}
+
+/// A young session refused by a full global budget used to stop reading its
+/// PTY for good (`GlobalCap` was fatal). It now degrades like disk full:
+/// the output waits in the bounded stash, the retry lands it once the
+/// budget frees, and later output keeps flowing.
+#[test]
+fn actor_global_budget_refusal_is_transient_and_intake_resumes() {
+    let Some(fixture) = common::locate_fixture() else {
+        eprintln!("SKIP: term-fixture binary not found (cargo build -p term-fixture)");
+        return;
+    };
+    let pty = Arc::new(spawn_fixture(&fixture, &["echo"]));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let journal = Arc::new(Mutex::new(BudgetRefusingJournal {
+        inner: term_pty::actor::MemJournal::new(),
+        refuse: 2,
+    }));
+    struct Shared(Arc<Mutex<BudgetRefusingJournal>>);
+    impl JournalSink for Shared {
+        fn append_output(&mut self, data: &[u8]) -> std::io::Result<u64> {
+            self.0.lock().expect("journal lock").append_output(data)
+        }
+        fn append_resize(&mut self, cols: u16, rows: u16) -> std::io::Result<u64> {
+            self.0
+                .lock()
+                .expect("journal lock")
+                .append_resize(cols, rows)
+        }
+    }
+    let mut config = SessionActorConfig::new(SessionId::generate(), 80, 24, pty);
+    config.sink = Box::new(CollectSink {
+        events: Arc::clone(&events),
+        blocked: Arc::new(AtomicBool::new(false)),
+    });
+    config.journal = Box::new(Shared(Arc::clone(&journal)));
+    let (handle, join) = start(config);
+
+    handle.write_input("b1", b"budget-one\n").expect("write");
+    let refused = handle.wait_status(Duration::from_secs(10), |s| {
+        s.journal_error
+            .as_deref()
+            .is_some_and(|e| e.contains("budget exhausted"))
+    });
+    assert!(refused.is_some(), "the refusal surfaces as journal_error");
+    let recovered = handle.wait_status(Duration::from_secs(10), |s| s.journal_error.is_none());
+    assert!(recovered.is_some(), "the retry clears the degradation");
+    let wait_for = |needle: &[u8]| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let seen = collect_output(&events.lock().expect("sink lock"));
+            if seen.windows(needle.len()).any(|w| w == needle) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    assert!(
+        wait_for(b"budget-one"),
+        "stashed output lands after the retry"
+    );
+    // Intake never stopped: later output is journaled and delivered.
+    handle.write_input("b2", b"budget-two\n").expect("write");
+    assert!(wait_for(b"budget-two"), "the session keeps reading its PTY");
+    assert_eq!(handle.status().journal_error, None);
+    let records = journal.lock().expect("journal lock").inner.records.clone();
+    let mut last = 0;
+    for record in &records {
+        assert!(record.seq > last, "journal seq stays ordered");
+        last = record.seq;
+    }
+
+    handle.cancel();
+    join.join().expect("actor finalizes");
+}
+
+// -- idle parking and the journal tick deadline -------------------------------
+
+/// Journal double that buffers like the daemon's writer: an append marks
+/// it dirty, and `tick` flushes on a 250 ms cadence (at once after a quiet
+/// spell), reporting the next due time while a tail is buffered.
+#[derive(Default)]
+struct CadenceJournal {
+    inner: term_pty::actor::MemJournal,
+    dirty: bool,
+    last_flush_ms: Option<u64>,
+    ticks: usize,
+    /// (append count at the flush, flush time).
+    flushes: Vec<(usize, u64)>,
+}
+
+impl CadenceJournal {
+    fn appended(&self) -> usize {
+        self.inner.records.len()
+    }
+}
+
+#[derive(Clone, Default)]
+struct SharedCadence(Arc<Mutex<CadenceJournal>>);
+
+impl JournalSink for SharedCadence {
+    fn append_output(&mut self, data: &[u8]) -> std::io::Result<u64> {
+        let mut journal = self.0.lock().expect("journal lock");
+        journal.dirty = true;
+        journal.inner.append_output(data)
+    }
+    fn append_resize(&mut self, cols: u16, rows: u16) -> std::io::Result<u64> {
+        let mut journal = self.0.lock().expect("journal lock");
+        journal.dirty = true;
+        journal.inner.append_resize(cols, rows)
+    }
+    fn tick(&mut self, now_ms: u64) -> Option<u64> {
+        let mut journal = self.0.lock().expect("journal lock");
+        journal.ticks += 1;
+        if !journal.dirty {
+            return None;
+        }
+        let due = journal.last_flush_ms.map_or(0, |last| last + 250);
+        if now_ms >= due {
+            journal.dirty = false;
+            journal.last_flush_ms = Some(now_ms);
+            let appended = journal.appended();
+            journal.flushes.push((appended, now_ms));
+            return None;
+        }
+        Some(due)
+    }
+}
+
+/// The folded flusher: a tail appended inside the cadence window is
+/// flushed at its deadline although nothing else happens — the actor parks
+/// until the tick's due time instead of relying on a flusher thread.
+#[test]
+fn actor_flushes_a_buffered_tail_at_the_tick_deadline() {
+    let Some(fixture) = common::locate_fixture() else {
+        eprintln!("SKIP: term-fixture binary not found (cargo build -p term-fixture)");
+        return;
+    };
+    let pty = Arc::new(spawn_fixture(&fixture, &["echo"]));
+    let journal = SharedCadence::default();
+    let mut config = SessionActorConfig::new(SessionId::generate(), 80, 24, pty);
+    config.journal = Box::new(journal.clone());
+    let (handle, join) = start(config);
+
+    let flushed_through = |records: usize| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let journal = journal.0.lock().expect("journal lock");
+            if journal
+                .flushes
+                .iter()
+                .any(|(appended, _)| *appended >= records)
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            drop(journal);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // The initial size record: flushed on the first tick.
+    assert!(flushed_through(1));
+    handle.write_input("t1", b"tail-one\n").expect("write");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while journal.0.lock().expect("journal lock").appended() < 2 {
+        assert!(Instant::now() < deadline, "echo never journaled");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Whatever the echo appended (possibly inside the cadence window after
+    // the size flush), it reaches a flush on its own.
+    let appended = journal.0.lock().expect("journal lock").appended();
+    assert!(
+        flushed_through(appended),
+        "a buffered tail must be flushed at its tick deadline"
+    );
+    let journal_state = journal.0.lock().expect("journal lock");
+    for pair in journal_state.flushes.windows(2) {
+        assert!(
+            pair[1].1 >= pair[0].1 + 250,
+            "flushes keep the 250 ms cadence: {:?}",
+            journal_state.flushes
+        );
+    }
+    drop(journal_state);
+
+    handle.cancel();
+    join.join().expect("actor finalizes");
+}
+
+/// An idle session's actor parks until its next timer (relaxed exit poll)
+/// instead of polling every 10 ms, and input still echoes at once — every
+/// reader chunk unparks the actor.
+#[test]
+fn actor_idle_session_parks_and_still_echoes_promptly() {
+    let Some(fixture) = common::locate_fixture() else {
+        eprintln!("SKIP: term-fixture binary not found (cargo build -p term-fixture)");
+        return;
+    };
+    let pty = Arc::new(spawn_fixture(&fixture, &["echo"]));
+    let journal = SharedCadence::default();
+    let (tx, rx) = std::sync::mpsc::channel();
+    struct ChannelSink(std::sync::mpsc::Sender<ActorEvent>);
+    impl OutputSink for ChannelSink {
+        fn can_send(&self) -> bool {
+            true
+        }
+        fn emit(&mut self, event: ActorEvent) {
+            let _ = self.0.send(event);
+        }
+    }
+    let mut config = SessionActorConfig::new(SessionId::generate(), 80, 24, pty);
+    config.journal = Box::new(journal.clone());
+    config.sink = Box::new(ChannelSink(tx));
+    let (handle, join) = start(config);
+
+    // Past the 2 s busy window the exit poll relaxes to 250 ms: about 4
+    // rounds per second (the old loop ran ~100).
+    std::thread::sleep(Duration::from_millis(2_500));
+    let before = journal.0.lock().expect("journal lock").ticks;
+    std::thread::sleep(Duration::from_millis(1_000));
+    let rounds = journal.0.lock().expect("journal lock").ticks - before;
+    eprintln!("idle actor rounds in 1 s: {rounds}");
+    assert!(
+        rounds <= 10,
+        "an idle actor must park, not poll: {rounds} rounds in 1 s"
+    );
+
+    while rx.try_recv().is_ok() {}
+    let sent = Instant::now();
+    handle
+        .write_input("idle-1", b"wake-probe\n")
+        .expect("write");
+    let mut bytes = Vec::new();
+    loop {
+        let event = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("echo arrives");
+        if let ActorEventKind::Output(data) = event.kind {
+            bytes.extend_from_slice(&data);
+        }
+        if bytes.windows(10).any(|w| w == b"wake-probe") {
+            break;
+        }
+    }
+    eprintln!("echo from a parked actor: {:?}", sent.elapsed());
+    assert!(
+        sent.elapsed() < Duration::from_secs(1),
+        "a parked actor wakes for output at once, took {:?}",
+        sent.elapsed()
+    );
+
+    handle.cancel();
+    join.join().expect("actor finalizes");
+}

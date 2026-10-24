@@ -12,6 +12,7 @@ export type SettingsGroupId =
   | "missions"
   | "general"
   | "terminal"
+  | "resources"
   | "trackpad"
   | "integrations"
   | "run"
@@ -46,6 +47,7 @@ const group = (id: SettingsGroupId): SettingsGroupDef => ({
 export const SETTINGS_GROUPS: readonly SettingsGroupDef[] = [
   group("general"),
   group("terminal"),
+  group("resources"),
   group("trackpad"),
   group("integrations"),
   group("missions"),
@@ -170,6 +172,25 @@ export const SETTINGS_ITEMS: readonly SettingsItemDef[] = [
   item("customShell", "terminal", ["shell", "셸", "custom", "사용자", "추가"]),
   item("terminateOnClose", "terminal", ["close", "닫기", "종료", "terminate", "확인"]),
   item("quitBehavior", "terminal", ["quit", "exit", "종료", "앱 종료", "트레이", "tray", "백그라운드", "background"]),
+  // 자원 관리(ResourcePanel) — 순서 = 화면 순서. 데몬의 가드 정책(08 §5)과 자동 양보(§2).
+  item("resourceAutoSuspend", "resources", [
+    "guard",
+    "가드",
+    "suspend",
+    "pause",
+    "일시정지",
+    "정지",
+    "memory",
+    "메모리",
+    "resource",
+    "자원",
+  ]),
+  item("resourceRssLimit", "resources", ["memory", "메모리", "ram", "rss", "limit", "한도", "GiB", "자원"]),
+  item("resourceRssSustain", "resources", ["memory", "메모리", "sustain", "지속", "시간", "초"]),
+  item("resourceCpuLimit", "resources", ["cpu", "core", "코어", "limit", "한도", "자원"]),
+  item("resourceCpuSustain", "resources", ["cpu", "hog", "독점", "sustain", "지속", "시간", "초"]),
+  item("resourceAutoResume", "resources", ["resume", "재개", "자동", "auto", "guard", "가드"]),
+  item("resourceAutoYield", "resources", ["yield", "양보", "relief", "완화", "cpu", "pressure", "압력", "priority", "우선순위"]),
   item("tabSwipe", "trackpad", [
     "trackpad",
     "트랙패드",

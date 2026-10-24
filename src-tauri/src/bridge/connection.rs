@@ -12,10 +12,13 @@
 //! * 알 수 없는 RPC error 코드 원문 보존(`RpcRaw`),
 //! * 연결 종료 시 pending 정리.
 
+#[allow(unused_imports)]
 pub use term_client::connection::{
     BridgeError, Connection, HELLO_TIMEOUT, RPC_TIMEOUT, WRITER_QUEUE,
 };
+#[allow(unused_imports)]
 pub use term_client::transport::{BoxedStream, OsTransport, Stream, Transport};
+#[allow(unused_imports)]
 pub use term_client::version::{daemon_is_outdated, restart_would_update};
 
 /// This app build's version id, the same shape the daemon stamps into

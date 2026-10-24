@@ -4,8 +4,9 @@
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use term_contracts::agent_session::{AgentSessionRecord, AgentSessionSource};
-use term_contracts::ids::{RequestId, SessionId, U64String, WorkloadId};
+use term_contracts::ids::{RequestId, ScheduleId, SessionId, U64String, WorkloadId};
 use term_contracts::launch::Priority;
+use term_contracts::schedule::ScheduledCommand;
 use term_contracts::state::WorkloadState;
 use term_contracts::workload::WorkloadRecord;
 
@@ -193,6 +194,57 @@ pub(crate) fn sessions(conn: &Connection) -> StorageResult<Vec<SessionRecord>> {
     )?;
     let rows = stmt
         .query_map([], session_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+// -- scheduled commands ------------------------------------------------------
+
+/// 열 순서는 `SELECT id, session_id, command, fire_at_ms, status, attempts,
+/// created_at_ms, fired_at_ms, reason_code`다(ops의 클레임/조회와 동일).
+pub(crate) fn scheduled_command_row(row: &Row) -> rusqlite::Result<ScheduledCommand> {
+    let id: String = row.get(0)?;
+    let session_id: String = row.get(1)?;
+    let status: String = row.get(4)?;
+    let fire_at_ms: i64 = row.get(3)?;
+    let attempts: i64 = row.get(5)?;
+    let created_at_ms: i64 = row.get(6)?;
+    Ok(ScheduledCommand {
+        schedule_id: ScheduleId::parse(&id).map_err(from_sql_invalid_id)?,
+        session_id: SessionId::parse(&session_id).map_err(from_sql_invalid_id)?,
+        command: row.get(2)?,
+        fire_at_ms: u64::try_from(fire_at_ms).map_err(|_| bad_shape("fire_at_ms"))?,
+        status: scheduled_status_from_str(&status).ok_or_else(|| bad_shape("scheduled status"))?,
+        attempts: u32::try_from(attempts).map_err(|_| bad_shape("attempts"))?,
+        created_at_ms: u64::try_from(created_at_ms).map_err(|_| bad_shape("created_at_ms"))?,
+        fired_at_ms: row
+            .get::<_, Option<i64>>(7)?
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| bad_shape("fired_at_ms"))?,
+        reason_code: row.get(8)?,
+    })
+}
+
+/// 최근 예약(종착 상태 포함)을 최신순으로 `limit`건. 프레임 바이트 예산
+/// 잘라내기는 데몬 디스패치 몫이다.
+pub(crate) fn list_scheduled_commands(
+    conn: &Connection,
+    session_id: Option<&SessionId>,
+    limit: i64,
+) -> StorageResult<Vec<ScheduledCommand>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, command, fire_at_ms, status, attempts, created_at_ms, fired_at_ms, reason_code
+         FROM scheduled_commands
+         WHERE (?1 IS NULL OR session_id = ?1)
+         ORDER BY fire_at_ms DESC, id
+         LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(
+            params![session_id.map(|s| s.as_str()), limit],
+            scheduled_command_row,
+        )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }

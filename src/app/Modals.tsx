@@ -16,6 +16,7 @@ import { ManagedRunDialog as ManagedRunDialogFeature } from "../features/workloa
 import type { SessionSearchResult } from "../generated/SessionSearchResult";
 import { ShellSelectDialog } from "../features/terminal/ShellSelectDialog";
 import { AgentSessionsDialog } from "../features/agentSessions/AgentSessionsDialog";
+import { ScheduleDialog } from "../features/schedule/ScheduleDialog";
 import { AgentIcon } from "../features/terminal/AgentIcon";
 import { workloadListAgent, workloadListTitle } from "../features/workloads/workloadTitle";
 import { MoveTargetDialog } from "./MoveTargetDialog";
@@ -81,6 +82,7 @@ export function ModalHost(props: { platform: Platform }): JSX.Element | null {
         {modal.kind === "managed-run" ? <ManagedRunDialogFeature /> : null}
         {modal.kind === "shell-select" ? <ShellSelectModal platform={props.platform} /> : null}
         {modal.kind === "agent-sessions" ? <AgentSessionsDialog /> : null}
+        {modal.kind === "schedule-command" ? <ScheduleDialog leafId={modal.leafId} /> : null}
         {modal.kind === "resume-agents" ? <ResumeAgentsDialog workloadIds={modal.workloadIds} /> : null}
         {/* 재배치(04-ui §2-5): pane 이동과 탭 합치기는 같은 "대상 탭 고르기" 화면이다. */}
         {modal.kind === "move-pane" || modal.kind === "merge-tab" ? <MoveTargetDialog modal={modal} /> : null}
@@ -143,6 +145,12 @@ function Palette(): JSX.Element {
       { label: t("palette.search"), run: runOnTerminalPage(() => openModal({ kind: "search" })) },
       { label: t("palette.managedRun"), run: () => openModal({ kind: "managed-run" }) },
       { label: t("palette.agentSessions"), run: () => openModal({ kind: "agent-sessions" }) },
+      {
+        label: t("palette.scheduleCommand"),
+        // 대상은 다이얼로그에서 고른다 — 패널 메뉴와 달리 여기는 활성 pane 기본값만 준다.
+        run: () => openModal({ kind: "schedule-command", leafId: focusedLeafId ?? undefined }),
+        keywords: ["schedule", "예약", "timer", "타이머", "at", "cron", "command", "명령"],
+      },
       { label: t("palette.resumeAll"), run: () => controller.dispatchShortcut("resume-all") },
       ...(missionEntry.hidden
         ? []

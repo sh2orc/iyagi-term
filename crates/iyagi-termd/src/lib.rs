@@ -7,8 +7,10 @@
 pub mod agent_model;
 pub mod agent_runtime;
 pub mod agent_session;
+pub mod agent_usage;
 pub mod agent_watch;
 pub mod auth;
+pub mod auto_continue;
 pub mod claude_provider;
 pub mod claude_usage;
 pub mod config;
@@ -30,6 +32,7 @@ pub mod orchestrator;
 pub mod paths;
 pub mod relief;
 pub mod retention;
+pub mod scheduled_commands;
 pub mod scheduler;
 pub mod search_scan;
 mod session_recovery;
@@ -301,6 +304,8 @@ impl Daemon {
         supervisor::spawn_supervised(&state, "telemetry", telemetry_loop::run);
         supervisor::spawn_supervised(&state, "agent-watch", agent_watch::run);
         supervisor::spawn_supervised(&state, "journal-retention", retention::run);
+        supervisor::spawn_supervised(&state, "scheduled-commands", scheduled_commands::run);
+        supervisor::spawn_supervised(&state, "auto-continue", auto_continue::run);
         supervisor::spawn_supervised(&state, "idle-watcher", lifecycle::run_idle_watcher);
         let mission_actor = mission::actor::spawn(Arc::clone(&state));
         // 관측 게이트웨이 수신 루프. `Connection: close` 단발 요청만 다루므로

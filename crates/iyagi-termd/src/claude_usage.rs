@@ -30,6 +30,9 @@ pub fn run(data_dir: &Path) -> i32 {
         if let Err(error) = write_model_cache(data_dir, &payload) {
             eprintln!("iyagi-termd claude-usage: model cache write: {error}");
         }
+        if let Err(error) = write_limits_cache(data_dir, &payload) {
+            eprintln!("iyagi-termd claude-usage: limits cache write: {error}");
+        }
     }
     run_original_statusline(data_dir, input.as_bytes());
     0
@@ -97,10 +100,10 @@ fn write_cache(data_dir: &Path, value: &Value) -> std::io::Result<()> {
     std::fs::rename(tmp, path)
 }
 
-/// 세션별 모델 캐시가 이만큼 쌓이면 오래된 것부터 정리한다.
-const MODEL_CACHE_PRUNE_AT: usize = 256;
+/// 세션별 캐시(claude-model·claude-limits)가 이만큼 쌓이면 오래된 것부터 정리한다.
+const SESSION_CACHE_PRUNE_AT: usize = 256;
 /// 정리 대상: 이 기간 동안 갱신되지 않은 세션 캐시.
-const MODEL_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+const SESSION_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
 
 /// 세션별 모델·effort 스냅숏(`data/claude-model/<session>.json`) — 표시 이름과
 /// effort 수준만 담는다. 내용이 같으면 다시 쓰지 않는다: 데몬은 수정 시각을
@@ -131,7 +134,7 @@ fn write_model_cache(data_dir: &Path, payload: &Value) -> std::io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
-    prune_model_cache(dir);
+    prune_session_cache(dir);
     let value = crate::agent_model::statusline_cache_value(&observation, unix_now_ms());
     let tmp = dir.join(format!("{session_id}.tmp"));
     {
@@ -148,12 +151,64 @@ fn write_model_cache(data_dir: &Path, payload: &Value) -> std::io::Result<()> {
     std::fs::rename(tmp, path)
 }
 
-fn prune_model_cache(dir: &Path) {
+/// 세션별 사용량 한도 스냅숏(`data/claude-limits/<session>.json`) — 이미
+/// 정규화된 `AgentUsageLimits`를 계약 직렬화로 담는다. 모델 캐시와 같은
+/// 규칙: **창 내용**(퍼센트·리셋 시각)이 같으면 다시 쓰지 않는다 — 수정
+/// 시각이 와처의 변경 신호이고, 상태줄은 수시로 도니 `observed_at`까지
+/// 같으면 영영 재기록되지 않는다. `observed_at`은 창 내용이 바뀐 마지막
+/// 순간을 가리킨다. `rate_limits`가 통째로 없으면 파일을 지우지도 쓰지도
+/// 않는다 — 상태줄이 한도를 알려주지 않는 순간들일 뿐이다(리셋이 지나면
+/// 해당 창이 payload에서 빠진다).
+fn write_limits_cache(data_dir: &Path, payload: &Value) -> std::io::Result<()> {
+    let Some(session_id) = crate::agent_usage::session_id_of(payload) else {
+        return Ok(());
+    };
+    if !term_contracts::agent_session::valid_session_id(session_id) {
+        return Ok(());
+    }
+    let Some(limits) = crate::agent_usage::statusline_usage_limits(payload, unix_now_ms()) else {
+        return Ok(());
+    };
+    let path = crate::agent_usage::limits_cache_path(data_dir, session_id);
+    if let Some(previous) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| crate::agent_usage::parse_limits_cache(&text))
+    {
+        if previous.five_hour == limits.five_hour && previous.seven_day == limits.seven_day {
+            return Ok(());
+        }
+    }
+    let Some(dir) = path.parent() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    prune_session_cache(dir);
+    let tmp = dir.join(format!("{session_id}.tmp"));
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        serde_json::to_writer(&mut file, &limits)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
+    std::fs::rename(tmp, path)
+}
+
+fn prune_session_cache(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let entries: Vec<_> = entries.flatten().collect();
-    if entries.len() < MODEL_CACHE_PRUNE_AT {
+    if entries.len() < SESSION_CACHE_PRUNE_AT {
         return;
     }
     let now = std::time::SystemTime::now();
@@ -163,7 +218,7 @@ fn prune_model_cache(dir: &Path) {
             .and_then(|meta| meta.modified())
             .ok()
             .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > MODEL_CACHE_MAX_AGE);
+            .is_some_and(|age| age > SESSION_CACHE_MAX_AGE);
         if stale {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -296,6 +351,91 @@ mod model_cache_tests {
         // 세션 id가 경로를 벗어나려 하면 아무것도 쓰지 않는다.
         let hostile = json!({ "session_id": "../../escape", "model": { "id": "x" } });
         write_model_cache(&dir, &hostile).unwrap();
+        assert!(!dir.join("escape.json").exists());
+        assert!(!dir.join("data").join("escape.json").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod limits_cache_tests {
+    use super::*;
+
+    const SESSION: &str = "6d0d2c32-3575-4e13-a11d-c9dad4cb85e1";
+
+    fn blocked_payload(resets_at: serde_json::Value) -> serde_json::Value {
+        json!({
+            "session_id": SESSION,
+            "cwd": "/private/cwd",
+            "rate_limits": {
+                "five_hour": { "used_percentage": 100, "resets_at": resets_at },
+                "seven_day": { "used_percentage": 42 }
+            }
+        })
+    }
+
+    #[test]
+    fn usage_limits_are_cached_normalized_and_not_rewritten_unchanged() {
+        let dir = std::env::temp_dir().join(format!("claude-usage-limits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // 초 단위 숫자는 ms로 정규화해 저장한다.
+        write_limits_cache(&dir, &blocked_payload(json!(1_790_000_000))).unwrap();
+        let path = crate::agent_usage::limits_cache_path(&dir, SESSION);
+        let parsed =
+            crate::agent_usage::parse_limits_cache(&std::fs::read_to_string(&path).unwrap())
+                .unwrap();
+        assert_eq!(
+            parsed
+                .five_hour
+                .map(|w| (w.used_percent, w.resets_at_unix_ms)),
+            Some((100, Some(1_790_000_000_000)))
+        );
+        assert_eq!(parsed.seven_day.map(|w| w.used_percent), Some(42));
+        assert!(
+            !std::fs::read_to_string(&path).unwrap().contains("/private"),
+            "경로는 저장하지 않는다"
+        );
+
+        // 같은 창 내용은 다시 쓰지 않는다 — observed_at이 매번 달라져도
+        // 창 비교가 재기록을 막는다(수정 시각이 와처의 변경 신호다).
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_limits_cache(&dir, &blocked_payload(json!(1_790_000_000))).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "같은 스냅숏은 다시 쓰지 않는다"
+        );
+
+        // 해제(100% 미만)는 새 스냅숏으로 재기록된다.
+        write_limits_cache(
+            &dir,
+            &json!({
+                "session_id": SESSION,
+                "rate_limits": { "five_hour": { "used_percentage": 40, "resets_at": 1_790_003_600 } }
+            }),
+        )
+        .unwrap();
+        let after =
+            crate::agent_usage::parse_limits_cache(&std::fs::read_to_string(&path).unwrap())
+                .unwrap();
+        assert_eq!(after.five_hour.map(|w| w.used_percent), Some(40));
+        assert!(after.seven_day.is_none());
+
+        // rate_limits가 없는 페이로드는 캐시를 건드리지 않는다.
+        let untouched = std::fs::read_to_string(&path).unwrap();
+        write_limits_cache(&dir, &json!({ "session_id": SESSION, "cwd": "/x" })).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), untouched);
+
+        // 세션 id가 경로를 벗어나려 하면 아무것도 쓰지 않는다.
+        let hostile = blocked_payload(json!(1));
+        let hostile = {
+            let mut value = hostile;
+            value["session_id"] = json!("../../escape");
+            value
+        };
+        write_limits_cache(&dir, &hostile).unwrap();
         assert!(!dir.join("escape.json").exists());
         assert!(!dir.join("data").join("escape.json").exists());
         std::fs::remove_dir_all(&dir).ok();

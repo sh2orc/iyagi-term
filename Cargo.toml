@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "crates/term-contracts",
+    "crates/term-client",
+    "crates/term-integrations",
     "crates/term-core",
     "crates/term-platform",
     "crates/term-pty",
@@ -24,6 +26,10 @@ authors = ["iyagi"]
 # Cross-crate contract layer: every wire/persistence type lives in
 # term-contracts so core/pty/platform/storage never disagree on shapes.
 term-contracts = { path = "crates/term-contracts" }
+# GUI/TUI 공유 클라이언트 계층(T02): wire codec·transport·connection.
+term-client = { path = "crates/term-client" }
+# GUI/TUI 공유 연동 서비스(T13): CLI 탐색·키 저장소·사용량·셸 프로필·hooks.
+term-integrations = { path = "crates/term-integrations" }
 term-core = { path = "crates/term-core" }
 term-platform = { path = "crates/term-platform" }
 term-pty = { path = "crates/term-pty" }

@@ -15,6 +15,10 @@
  * 휠은 앱이 쓰는 일이 거의 없으므로 가로 우위 제스처만 가로채 탭을 넘긴다.
  * 세로 스크롤은 인식기가 소비하지 않으므로(그대로 흘려보낸다) 터미널·목록
  * 스크롤은 mouse tracking 여부와 무관하게 온전히 앱에 전달된다.
+ *
+ * WKWebView가 실어 보내는 손가락 접촉·관성 위상(webkitPhase·
+ * webkitMomentumPhase)도 그대로 인식기에 넘긴다 — 관성 램프업을 새 스와이프로
+ * 오인하는 일을 막는 정확한 경계다.
  */
 
 import {
@@ -22,7 +26,18 @@ import {
   tabSwipeStep,
   type TabSwipeDirection,
   type TabSwipePrefs,
+  type TabSwipeWheelPhase,
 } from "./tabSwipe";
+
+/** WebKit 전용 위상 프로퍼티가 붙은 WheelEvent(WKWebView·Safari). */
+type WebKitWheelEvent = WheelEvent & { webkitPhase?: unknown; webkitMomentumPhase?: unknown };
+
+/** webkitPhase·webkitMomentumPhase 값만 통과시키고 그 외는 undefined(비 WebKit). */
+function webkitPhaseOf(value: unknown): TabSwipeWheelPhase | undefined {
+  return value === "none" || value === "began" || value === "changed" || value === "ended"
+    ? value
+    : undefined;
+}
 
 export interface TabSwipeDeps {
   /** 현재 설정(이벤트마다 읽는다 — 설정 변경이 곧바로 반영된다). */
@@ -57,6 +72,10 @@ export function attachTabSwipe(root: HTMLElement, deps: TabSwipeDeps): () => voi
       deltaY: event.deltaY,
       deltaMode: event.deltaMode,
       timeStamp: event.timeStamp,
+      // WKWebView는 손가락 접촉·관성 위상을 알려 준다. 있으면 쓴다(Chromium
+      // 계열·휠 마우스에는 없다 — 인식기가 예전 추정 규칙으로 돌아간다).
+      phase: webkitPhaseOf((event as WebKitWheelEvent).webkitPhase),
+      momentumPhase: webkitPhaseOf((event as WebKitWheelEvent).webkitMomentumPhase),
     });
     if (recognizer.consumedLastEvent) {
       // 관성 꼬리까지 막는다 — 그러지 않으면 한 번의 스와이프가 xterm 쪽에

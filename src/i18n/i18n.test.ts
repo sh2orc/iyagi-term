@@ -19,6 +19,8 @@ import { monitorSection } from "./sections/monitor";
 import { workloadsSection } from "./sections/workloads";
 import { profilesSection } from "./sections/profiles";
 import { missionsSection } from "./sections/missions";
+import { scheduleSection } from "./sections/schedule";
+import { autoContinueSection } from "./sections/autoContinue";
 
 describe("formatMessage", () => {
   it("substitutes {name} placeholders", () => {
@@ -71,6 +73,8 @@ describe("ko/en key parity (번역 누락 방지)", () => {
     workloads: workloadsSection,
     profiles: profilesSection,
     missions: missionsSection,
+    schedule: scheduleSection,
+    autoContinue: autoContinueSection,
   };
 
   it.each(Object.keys(sections))("%s 섹션의 ko/en 키 집합이 동일하다", (name) => {

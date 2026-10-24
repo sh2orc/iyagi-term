@@ -13,6 +13,7 @@ import { interventionKindKey, selectUnreadCount, useNotificationStore, type Noti
 import { listLeaves } from "../terminal/splitTree";
 import { openMissionTabAndSync } from "../missions/store";
 import { missionNotificationKindKey } from "./missionNotifications";
+import { useController } from "../../app/controllerContext";
 
 export function NotificationBell(): JSX.Element | null {
   const { t } = useI18n();
@@ -50,6 +51,7 @@ function NotificationPanel(props: { onClose: () => void }): JSX.Element {
   const items = useNotificationStore((s) => s.items);
   const setActiveTab = useWorkbenchStore((s) => s.setActiveTab);
   const focusPane = useWorkbenchStore((s) => s.focusPane);
+  const controller = useController();
 
   // AI 작업 알림은 그 작업 탭을 연다(이미 열려 있으면 이동, 상한이면 store가 안내한다).
   const openItem = (item: NotificationItem): void => {
@@ -90,20 +92,49 @@ function NotificationPanel(props: { onClose: () => void }): JSX.Element {
       ) : (
         <ul className="notif-list">
           {items.map((item) => (
-            <li key={item.id} className={`notif-item${item.acknowledged ? "" : " unread"}`}>
+            <li
+              key={item.id}
+              className={`notif-item${item.acknowledged ? "" : " unread"}${
+                item.notificationType === "quota_auto_resume_stale" && item.sessionId !== null
+                  ? " has-action"
+                  : ""
+              }`}
+            >
               <button type="button" onClick={() => openItem(item)} title={item.detail ?? undefined}>
                 <span className="notif-kind">
                   {t(
                     item.kind === "intervention"
-                      ? interventionKindKey(item.interventionKind ?? "notification")
+                      ? item.notificationType === "quota_auto_resume_stale"
+                        ? "notifications.kind.quotaStale"
+                        : interventionKindKey(item.interventionKind ?? "notification")
                       : item.kind === "mission"
                         ? missionNotificationKindKey(item.missionEvent ?? "decision")
-                        : "notifications.kind.finished",
+                        : item.kind === "schedule"
+                          ? "notifications.kind.schedule"
+                          : item.kind === "auto-continue"
+                            ? "notifications.kind.autoContinue"
+                            : "notifications.kind.finished",
                   )}
                 </span>
                 <span className="notif-title">{item.title}</span>
                 <span className="notif-at">{new Date(item.at).toLocaleTimeString()}</span>
               </button>
+              {/* quota 재개 포기(stale): pane이 살아 있을 때만 "재개"를 건넨다.
+                  Enter 전송은 이 클릭이라는 사용자 제스처로만 나간다(§2.1). */}
+              {item.notificationType === "quota_auto_resume_stale" && item.sessionId !== null ? (
+                <button
+                  type="button"
+                  className="notif-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useNotificationStore.getState().acknowledge(item.id);
+                    controller.resumeAgentInPane(item.sessionId ?? "");
+                    props.onClose();
+                  }}
+                >
+                  {t("notifications.action.resume")}
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>

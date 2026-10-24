@@ -38,6 +38,7 @@ export type PaneMenuAction =
   | "move-to"
   | "copy-cwd"
   | "copy-resume"
+  | "schedule-command"
   | "new-mission-here"
   | "restart"
   | "close";
@@ -62,6 +63,7 @@ export const PANE_MENU_ACTIONS: readonly PaneMenuAction[] = [
   "move-to",
   "copy-cwd",
   "copy-resume",
+  "schedule-command",
   "new-mission-here",
   "restart",
   "close",
@@ -204,6 +206,11 @@ export function buildPaneMenu(ctx: PaneMenuContext): ContextMenuEntry[] {
   const info: Section = [];
   if (ctx.cwd) info.push(item("copy-cwd", "copyCwd", { detail: ctx.cwd }));
   if (ctx.resumeCommand) info.push(item("copy-resume", "copyResume", { detail: ctx.resumeCommand }));
+  // 이 터미널에 명령 예약 — 끝난 pane에는 세션이 없으므로 흐리게 둔다(메뉴
+  // 모양은 상황에 따라 바뀌지 않는다). 대화상자가 대상을 다시 고르게 한다.
+  info.push(
+    item("schedule-command", "scheduleCommand", { disabled: ctx.phase === "exited" || ctx.phase === "failed" }),
+  );
   // 이 pane의 저장소로 새 AI 작업 대화상자를 연다. 경로가 없으면 채울 것이 없어 숨기고,
   // 프로덕션 빌드에서 데몬이 프로토콜을 선언하지 않았으면 숨긴다. 그 밖에 쓸 수 없으면
   // 흐리게 두고 툴팁에 사유를 싣는다(`+` 메뉴·팔레트와 같은 판정·사유 — 데몬이 더 새로우면 앱 업데이트).

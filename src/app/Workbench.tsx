@@ -69,6 +69,8 @@ import { CLAUDE_PROVIDER_DAEMON_OUTDATED_KEY, claudeProviderFor } from "../featu
 import { AutonomyToggle } from "../features/workloads/AutonomyToggle";
 import { listenQuitRequested, tauriQuitPort } from "../features/app/quit";
 import { startMissionSync } from "../features/missions/store";
+import { startScheduleSync } from "../features/schedule/scheduleStore";
+import { startAutoContinueSync } from "../features/terminal/autoContinueSync";
 import { setMissionClient } from "../features/missions/clientAccess";
 import { MissionCreateSidebar } from "../features/missions/MissionCreateSidebar";
 import { MissionPage } from "../features/missions/MissionPage";
@@ -267,6 +269,13 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
       setMissionClient(null);
     };
   }, [props.client]);
+
+  // schedule.fired 구독: 예약 목록 캐시 갱신 + 토스트·알림 센터. 구 데몬에서는
+  // 이벤트가 오지 않아 아무 일도 하지 않는다.
+  useEffect(() => startScheduleSync(props.client), [props.client]);
+
+  // auto_continue.changed 구독: 네트워크 끊김 감지/회복 안내(토스트·알림 센터).
+  useEffect(() => startAutoContinueSync(props.client), [props.client]);
 
   // Rust(트레이 "종료"·마지막 창 파괴)가 보낸 종료 요청 → 같은 확인 흐름.
   useEffect(() => {

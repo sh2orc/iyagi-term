@@ -62,7 +62,16 @@ function harness(overrides: Partial<TabSwipePrefs> = {}): Harness {
 
 function wheel(
   target: Element,
-  init: { deltaX?: number; deltaY?: number; deltaMode?: number; at?: number },
+  init: {
+    deltaX?: number;
+    deltaY?: number;
+    deltaMode?: number;
+    at?: number;
+    /** WKWebView가 실어 보내는 손가락 접촉 위상(webkitPhase). */
+    phase?: string;
+    /** WKWebView가 실어 보내는 관성 위상(webkitMomentumPhase). */
+    momentumPhase?: string;
+  },
 ): WheelEvent {
   const event = new WheelEvent("wheel", {
     deltaX: init.deltaX ?? 0,
@@ -72,6 +81,12 @@ function wheel(
     cancelable: true,
   });
   Object.defineProperty(event, "timeStamp", { value: init.at ?? 0, configurable: true });
+  if (init.phase !== undefined) {
+    Object.defineProperty(event, "webkitPhase", { value: init.phase, configurable: true });
+  }
+  if (init.momentumPhase !== undefined) {
+    Object.defineProperty(event, "webkitMomentumPhase", { value: init.momentumPhase, configurable: true });
+  }
   target.dispatchEvent(event);
   return event;
 }
@@ -157,6 +172,36 @@ describe("워크벤치 루트의 wheel 가로채기", () => {
     wheel(screen, { deltaX: -60, at: 112 });
     expect(cycle).toHaveBeenCalledTimes(3);
     expect(cycle).toHaveBeenLastCalledWith("prev");
+    stop();
+  });
+
+  it("WKWebView 위상(webkitPhase·webkitMomentumPhase)을 인식기로 전달한다", () => {
+    // 실제 플릭 한 번: 손가락 감속 → 관성 램프업. 위상이 있으면 관성 중
+    // 잠금이 풀리지 않아 탭은 정확히 하나만 넘는다(tabSwipe.ts).
+    const { screen, cycle, stop } = harness({ sensitivity: "medium" }); // step 78
+    const finger = [30, 70, 110, 90, 40, 12];
+    const momentumTail = [6, 15, 28, 44, 50, 44, 36, 28, 20, 14, 9, 5, 3, 1];
+    let at = 0;
+    finger.forEach((deltaX, index) => {
+      wheel(screen, {
+        deltaX,
+        at,
+        phase: index === 0 ? "began" : index === finger.length - 1 ? "ended" : "changed",
+        momentumPhase: "none",
+      });
+      at += 16;
+    });
+    momentumTail.forEach((deltaX, index) => {
+      wheel(screen, {
+        deltaX,
+        at,
+        phase: "none",
+        momentumPhase: index === 0 ? "began" : index === momentumTail.length - 1 ? "ended" : "changed",
+      });
+      at += 16;
+    });
+    expect(cycle).toHaveBeenCalledTimes(1);
+    expect(cycle).toHaveBeenCalledWith("next");
     stop();
   });
 

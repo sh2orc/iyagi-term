@@ -10,7 +10,12 @@
 
 import { create } from "zustand";
 
-export type NotificationKind = "intervention" | "workload-finished" | "mission";
+export type NotificationKind =
+  | "intervention"
+  | "workload-finished"
+  | "mission"
+  | "schedule"
+  | "auto-continue";
 
 export interface NotificationItem {
   /** 멱등 키(개입: report_id / 완료: workload id + 종료 상태). */
@@ -24,6 +29,8 @@ export interface NotificationItem {
   sessionId: string | null;
   /** 개입 종류(permission/question/stop/notification) — 라벨용. */
   interventionKind?: string;
+  /** CLI가 분류한 알림 종류 원문(예: Claude의 quota_auto_resume_stale) — 액션 노출 판정용. */
+  notificationType?: string | null;
   /** AI 작업 알림(kind "mission")의 작업 id — 클릭하면 그 작업 탭을 연다. */
   missionId?: string;
   /** AI 작업 알림의 사건 종류(결정 필요·확정 대기·실패) — 라벨용. */

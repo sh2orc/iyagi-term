@@ -14,6 +14,8 @@ import { monitorSection } from "./sections/monitor";
 import { workloadsSection } from "./sections/workloads";
 import { profilesSection } from "./sections/profiles";
 import { missionsSection } from "./sections/missions";
+import { scheduleSection } from "./sections/schedule";
+import { autoContinueSection } from "./sections/autoContinue";
 
 registerMessages(appSection);
 // settings는 app 뒤에 등록한다 — 설정 페이지 문구의 정본은 이 섹션이다.
@@ -23,6 +25,8 @@ registerMessages(monitorSection);
 registerMessages(workloadsSection);
 registerMessages(profilesSection);
 registerMessages(missionsSection);
+registerMessages(scheduleSection);
+registerMessages(autoContinueSection);
 
 export {
   detectLanguage,

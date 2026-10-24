@@ -25,6 +25,12 @@ import type { AgentSessionForgetParams } from "../../generated/AgentSessionForge
 import type { AgentSessionForgetResult } from "../../generated/AgentSessionForgetResult";
 import type { AgentSessionListParams } from "../../generated/AgentSessionListParams";
 import type { AgentSessionRecord } from "../../generated/AgentSessionRecord";
+import type { ScheduleCancelParams } from "../../generated/ScheduleCancelParams";
+import type { ScheduleCancelResult } from "../../generated/ScheduleCancelResult";
+import type { ScheduleCreateParams } from "../../generated/ScheduleCreateParams";
+import type { ScheduleCreateResult } from "../../generated/ScheduleCreateResult";
+import type { ScheduleListParams } from "../../generated/ScheduleListParams";
+import type { ScheduledCommand } from "../../generated/ScheduledCommand";
 import type { ArtifactBeginParams } from "../../generated/ArtifactBeginParams";
 import type { ArtifactBeginResult } from "../../generated/ArtifactBeginResult";
 import type { ArtifactCommitParams } from "../../generated/ArtifactCommitParams";
@@ -890,6 +896,7 @@ export class MockDaemonClient implements DaemonClient {
 
   /** 기록된 에이전트 세션(01 §6) — 시험이 seedAgentSessions로 심는다. */
   private agentSessions: AgentSessionRecord[] = [];
+  private scheduledCommands: ScheduledCommand[] = [];
 
   /** 시험 헬퍼: 저장된 행을 통째로 갈아 끼운다(심는 순서는 상관없다). */
   seedAgentSessions(records: readonly AgentSessionRecord[]): void {
@@ -927,6 +934,106 @@ export class MockDaemonClient implements DaemonClient {
     const before = this.agentSessions.length;
     this.agentSessions = this.agentSessions.filter((record) => record.id !== params.id);
     return { forgotten: this.agentSessions.length < before };
+  }
+
+  /**
+   * 예약 명령 만료 펌프. 실제 데몬은 500ms 루프로 만료분을 세션에 쓰지만,
+   * 모의 클라이언트는 시계를 조작하는 시험이 결정적으로 돌도록 명시적으로
+   * 부른다(테스트·개발 하네스 모두). 데몬과 같은 규칙: 만료분을
+   * fire_at_ms 오름차순으로 클레임해 echo shell journal에 쓰고
+   * `schedule.fired`를 흘린다. 없는 세션은 skip("session-gone").
+   */
+  fireDueSchedules(nowMs: number = this.opts.monotonicNow()): number {
+    const due = this.scheduledCommands
+      .filter((record) => record.status === "pending" && record.fire_at_ms <= nowMs)
+      .sort((a, b) => a.fire_at_ms - b.fire_at_ms);
+    let fired = 0;
+    for (const record of due) {
+      record.status = "firing";
+      record.attempts += 1;
+      const session = this.sessions.get(record.session_id);
+      if (!session) {
+        this.finishSchedule(record, "skipped", "session-gone");
+        continue;
+      }
+      const text = record.command.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+      const bytes = new TextEncoder().encode(text.endsWith("\r") ? text : `${text}\r`);
+      this.appendRecord(session, { kind: "output", bytes });
+      this.finishSchedule(record, "fired");
+      fired += 1;
+    }
+    this.scheduleFlush();
+    return fired;
+  }
+
+  private finishSchedule(
+    record: ScheduledCommand,
+    status: "fired" | "failed" | "skipped",
+    reason?: string,
+  ): void {
+    record.status = status;
+    record.fired_at_ms = this.opts.monotonicNow();
+    record.reason_code = reason ?? null;
+    this.emit({
+      kind: "schedule.fired",
+      payload: {
+        schedule_id: record.schedule_id,
+        session_id: record.session_id,
+        outcome: status,
+        reason_code: reason ?? null,
+        command: record.command,
+        fired_at_ms: record.fired_at_ms,
+      },
+    });
+  }
+
+  /** 시험용: 저장된 예약을 주입한다(스토리지 시드 관례). */
+  seedScheduledCommands(records: readonly ScheduledCommand[]): void {
+    this.scheduledCommands = records.map((record) => ({ ...record }));
+  }
+
+  async scheduleCreate(params: ScheduleCreateParams): Promise<ScheduleCreateResult> {
+    const now = this.opts.monotonicNow();
+    const bytes = new TextEncoder().encode(params.command);
+    if (bytes.length === 0 || bytes.length > 4000 || params.command.includes("\0")) {
+      throw new RpcClientError("INVALID_ARGUMENT", "명령은 1..=4000바이트여야 하고 NUL이 없어야 합니다.");
+    }
+    if (params.fire_at_ms <= now || params.fire_at_ms - now > 365 * 24 * 60 * 60 * 1_000) {
+      throw new RpcClientError("INVALID_ARGUMENT", "발사 시각은 미래 1년 안이어야 합니다.");
+    }
+    if (!this.sessions.has(params.session_id)) {
+      throw new RpcClientError("INVALID_ARGUMENT", "알 수 없는 세션입니다.");
+    }
+    const record: ScheduledCommand = {
+      schedule_id: this.opts.uuid(),
+      session_id: params.session_id,
+      command: params.command,
+      fire_at_ms: params.fire_at_ms,
+      status: "pending",
+      attempts: 0,
+      created_at_ms: now,
+      fired_at_ms: null,
+      reason_code: null,
+    };
+    this.scheduledCommands.push(record);
+    return { schedule_id: record.schedule_id };
+  }
+
+  async scheduleList(params: ScheduleListParams = {}): Promise<ScheduledCommand[]> {
+    return this.scheduledCommands
+      .filter((record) => params.session_id == null || record.session_id === params.session_id)
+      .sort((a, b) => b.fire_at_ms - a.fire_at_ms)
+      .slice(0, 200)
+      .map((record) => ({ ...record }));
+  }
+
+  async scheduleCancel(params: ScheduleCancelParams): Promise<ScheduleCancelResult> {
+    const record = this.scheduledCommands.find((r) => r.schedule_id === params.schedule_id);
+    if (!record || record.status !== "pending") return { cancelled: false };
+    record.status = "cancelled";
+    record.fired_at_ms = this.opts.monotonicNow();
+    record.reason_code = null;
+    return { cancelled: true };
   }
 
   async sessionSearch(params: SessionSearchParams): Promise<SessionSearchResult> {

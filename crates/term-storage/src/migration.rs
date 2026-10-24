@@ -41,6 +41,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (4, SCHEMA_0004),
     (5, SCHEMA_0005),
     (6, SCHEMA_0006),
+    (7, SCHEMA_0007),
 ];
 
 const SCHEMA_0001: &str = include_str!("../../../docs/implementation/schema.sql");
@@ -50,6 +51,7 @@ const SCHEMA_0003: &str = include_str!("../migrations/0003_orchestration.sql");
 const SCHEMA_0004: &str = include_str!("../migrations/0004_rate_limit_reset.sql");
 const SCHEMA_0005: &str = include_str!("../migrations/0005_exec_recovery.sql");
 const SCHEMA_0006: &str = include_str!("../migrations/0006_orch_retention.sql");
+const SCHEMA_0007: &str = include_str!("../migrations/0007_scheduled_commands.sql");
 
 pub(crate) fn migrate(conn: &mut Connection) -> StorageResult<()> {
     for &(version, sql) in MIGRATIONS {
@@ -243,10 +245,11 @@ mod tests {
             "lifecycle_events",
             "layouts",
             "orch_missions",
+            "scheduled_commands",
         ] {
             assert!(object_exists(&conn, table), "table {table} missing");
         }
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -254,7 +257,7 @@ mod tests {
         let mut conn = memory();
         migrate(&mut conn).unwrap();
         migrate(&mut conn).unwrap();
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -264,7 +267,7 @@ mod tests {
         let sql = "CREATE INDEX fixture_rate_index ON orch_runs(state); INSERT INTO missing_table VALUES (1);";
         assert!(apply(&mut conn, 6, sql).is_err());
         assert!(!object_exists(&conn, "fixture_rate_index"));
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6, 7]);
         assert!(object_exists(&conn, "orch_run_rate_limit_reset"));
         assert!(object_exists(&conn, "orch_execs_pending"));
     }
@@ -310,7 +313,7 @@ mod tests {
             "table created before the fault must roll back"
         );
         // The connection stays usable and previously applied versions survive.
-        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions(&conn), vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]

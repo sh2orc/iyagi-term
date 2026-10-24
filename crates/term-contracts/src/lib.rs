@@ -17,6 +17,7 @@
 //! use it.
 
 pub mod agent_session;
+pub mod auto_continue;
 pub mod defaults;
 pub mod error;
 pub mod gate;
@@ -28,6 +29,7 @@ pub mod metrics;
 pub mod mission;
 pub mod remote;
 pub mod rpc;
+pub mod schedule;
 pub mod session;
 pub mod snapshot;
 pub mod state;
@@ -37,9 +39,11 @@ pub use agent_session::{
     AgentSessionEvent, AgentSessionForgetParams, AgentSessionForgetResult, AgentSessionListParams,
     AgentSessionRecord, AgentSessionReport, AgentSessionReportResult, AgentSessionSource,
 };
+pub use auto_continue::{AutoContinuePayload, AutoContinueState};
 pub use error::{ErrorCode, RpcError};
 pub use ids::{
-    BootId, ConnectionId, ProcessIdentity, RequestId, SessionId, U64String, ViewId, WorkloadId,
+    BootId, ConnectionId, ProcessIdentity, RequestId, ScheduleId, SessionId, U64String, ViewId,
+    WorkloadId,
 };
 pub use intervention::{InterventionKind, InterventionNotice, InterventionReport};
 pub use launch::{
@@ -54,11 +58,19 @@ pub use rpc::{
     Frame, FrameError, HelloParams, HelloResult, RpcEvent, RpcEventKind, RpcRequest, RpcResponse,
     MAX_FRAME_BYTES,
 };
+pub use schedule::{
+    ScheduleCancelParams, ScheduleCancelResult, ScheduleCreateParams, ScheduleCreateResult,
+    ScheduleFiredPayload, ScheduleListParams, ScheduleListResult, ScheduleOutcome,
+    ScheduledCommand, ScheduledCommandStatus,
+};
 pub use session::{
     AttachAccess, AttachParams, AttachResult, ExitReason, InputParams, ResizeParams, SessionAck,
     SessionExit, SessionOutput, SessionSearchMatch, SessionSearchParams, SessionSearchResult,
     TerminalFrameKind,
 };
-pub use snapshot::{Capabilities, QueueEntry, QueueReason, Snapshot, WorkloadSummary};
+pub use snapshot::{
+    AgentStatus, AgentUsageLimitWindow, AgentUsageLimits, Capabilities, QueueEntry, QueueReason,
+    Snapshot, WorkloadSummary,
+};
 pub use state::{TerminalConnection, WorkloadState};
 pub use workload::{WorkloadDescriptor, WorkloadRecord};

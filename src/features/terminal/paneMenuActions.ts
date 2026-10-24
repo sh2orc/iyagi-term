@@ -161,6 +161,10 @@ export function runPaneMenuAction(
     case "copy-resume":
       if (values.resumeCommand) void controller.copyText(values.resumeCommand);
       break;
+    case "schedule-command":
+      // 예약 대화상자가 입력 초점을 가져간다(기본 대상은 이 pane).
+      useWorkbenchStore.getState().openModal({ kind: "schedule-command", leafId });
+      return;
     case "new-mission-here":
       if (!values.repository) break;
       // 대화상자가 입력 초점을 가져간다.

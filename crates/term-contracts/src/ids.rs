@@ -124,6 +124,13 @@ macro_rules! uuid_newtype {
                 Self::parse(&value)
             }
         }
+
+        impl std::str::FromStr for $name {
+            type Err = IdParseError;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Self::parse(s)
+            }
+        }
     };
 }
 
@@ -157,6 +164,10 @@ uuid_newtype!(
 uuid_newtype!(
     /// OS boot identity; unreliable platforms disable ownership restoration.
     BootId
+);
+uuid_newtype!(
+    /// Scheduled command id (one-shot PTY input at a future time).
+    ScheduleId
 );
 
 /// PID + start token + boot id triple. PID reuse protection: all three must

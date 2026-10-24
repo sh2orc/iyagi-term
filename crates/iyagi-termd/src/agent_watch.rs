@@ -237,6 +237,7 @@ pub fn stamp_command_agent(
                 model: None,
                 effort: None,
                 model_source: None,
+                usage_limits: None,
             });
         }
         (guard.cwd.clone(), guard.session_id.clone())
@@ -343,6 +344,7 @@ fn agent_status_eq(a: &AgentStatus, b: &AgentStatus) -> bool {
         && a.model == b.model
         && a.effort == b.effort
         && a.model_source == b.model_source
+        && a.usage_limits == b.usage_limits
 }
 
 fn tick(state: &Arc<DaemonState>, watched: &mut HashMap<WorkloadId, Watched>) {
@@ -489,6 +491,7 @@ fn tick(state: &Arc<DaemonState>, watched: &mut HashMap<WorkloadId, Watched>) {
                 model: None,
                 effort: None,
                 model_source: None,
+                usage_limits: None,
             };
             match &watch.resolved {
                 Some(resolved) => {
@@ -529,6 +532,15 @@ fn tick(state: &Arc<DaemonState>, watched: &mut HashMap<WorkloadId, Watched>) {
                     }
                 }
             }
+            // 사용량 한도도 같은 규칙: 일시적 읽기 실패로 알던 배지를 지우지
+            // 않는다. 진짜 해제는 캐시가 해제된 창으로 재기록되거나 프로세스가
+            // 끝날 때 온다(clear_agent_status).
+            status.usage_limits = match watch.model.usage_limits() {
+                Some(limits) => Some(limits),
+                None => previous
+                    .filter(|p| p.agent == agent && p.pid == pid)
+                    .and_then(|p| p.usage_limits),
+            };
             let broadcast = !previous.is_some_and(|p| agent_status_eq(p, &status));
             let persist = status.session_id.clone().map(|session_id| {
                 (
@@ -872,6 +884,7 @@ mod tests {
             model: Some("Opus 5 (1M context)".into()),
             effort: Some("xhigh".into()),
             model_source: Some(term_contracts::snapshot::AgentModelSource::StatusLine),
+            usage_limits: None,
         };
         let mut later = base.clone();
         later.detected_at_ms = 99_000;

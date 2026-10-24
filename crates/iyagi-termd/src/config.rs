@@ -36,6 +36,10 @@ pub struct DaemonConfig {
     /// override only ever turns it OFF in dev, or fails to turn it on in
     /// release (O1 ticket O01).
     pub missions_enabled: bool,
+    /// 네트워크 끊김 자동 continue(auto_continue.rs): 세션 출력의 API 연결
+    /// 오류 문구를 감지해 회복되면 `continue`를 보낸다. 사용자가 주문한
+    /// 자동회복이라 기본값은 켬; IYAGI_TEST_CONFIG로 끌 수 있다.
+    pub auto_continue: bool,
     /// 연결당 미완료 `session.input` 완료 상한(ipc.rs). 종류별 독립 예산의
     /// 하나로, resize 예산과 함께 `limits.max_pending_*` 오버라이드로 낮춰
     /// 시험한다(기본 64).
@@ -101,6 +105,7 @@ impl DaemonConfig {
             scheduler_interval: Duration::from_millis(250),
             override_source: None,
             missions_enabled: missions_gate_default(),
+            auto_continue: true,
             max_pending_inputs: 64,
             max_pending_resizes: 64,
         };
@@ -186,6 +191,9 @@ struct OverrideFile {
     /// `relief.auto_yield` initial value (08 §2).
     #[serde(default)]
     relief: ReliefOverride,
+    /// 자동 continue on/off(auto_continue.rs).
+    #[serde(default)]
+    auto_continue: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -314,6 +322,9 @@ impl OverrideFile {
         }
         if let Some(v) = self.relief.auto_yield {
             defaults.relief.auto_yield = v;
+        }
+        if let Some(v) = self.auto_continue {
+            d.auto_continue = v;
         }
         if let Some(v) = self.limits.max_pending_inputs {
             d.max_pending_inputs = v.max(1) as usize;

@@ -15,6 +15,15 @@ import type { AgentSessionForgetParams } from "../../generated/AgentSessionForge
 import type { AgentSessionForgetResult } from "../../generated/AgentSessionForgetResult";
 import type { AgentSessionListParams } from "../../generated/AgentSessionListParams";
 import type { AgentSessionRecord } from "../../generated/AgentSessionRecord";
+import type { ScheduleCancelParams } from "../../generated/ScheduleCancelParams";
+import type { ScheduleCancelResult } from "../../generated/ScheduleCancelResult";
+import type { ScheduleCreateParams } from "../../generated/ScheduleCreateParams";
+import type { ScheduleCreateResult } from "../../generated/ScheduleCreateResult";
+import type { ScheduleId } from "../../generated/ScheduleId";
+import type { ScheduleListParams } from "../../generated/ScheduleListParams";
+import type { ScheduleOutcome } from "../../generated/ScheduleOutcome";
+import type { ScheduledCommand } from "../../generated/ScheduledCommand";
+import type { AutoContinueState } from "../../generated/AutoContinueState";
 import type { ArtifactBeginParams } from "../../generated/ArtifactBeginParams";
 import type { ArtifactBeginResult } from "../../generated/ArtifactBeginResult";
 import type { ArtifactCommitParams } from "../../generated/ArtifactCommitParams";
@@ -177,6 +186,32 @@ export interface MissionChangedPayload {
 }
 
 /**
+ * `schedule.fired` 페이로드: 예약 한 건이 종착점에 다달았다. UI는 토스트·
+ * 알림 센터를 채우고 목록을 다시 가져온다.
+ */
+export interface ScheduleFiredPayload {
+  schedule_id: ScheduleId;
+  session_id: SessionId;
+  outcome: ScheduleOutcome;
+  reason_code?: string | null;
+  command: string;
+  fired_at_ms: number;
+}
+
+/**
+ * `auto_continue.changed` 페이로드: 네트워크 끊김 자동 continue의 무장
+ * 상태가 움직였다. armed는 감지, fired는 `continue` 전송, disarmed는
+ * 감시 해제(사유는 reason).
+ */
+export interface AutoContinueEventPayload {
+  session_id: SessionId;
+  workload_id: WorkloadId;
+  state: AutoContinueState;
+  reason?: string | null;
+  at_ms: number;
+}
+
+/**
  * 롤링 저널의 보존 창보다 뒤처진 view를 데몬이 떼어냈다(02-runner §5).
  * 그 view는 새 epoch로 다시 붙어야 하고, 재생은 `first_seq`부터다.
  */
@@ -203,6 +238,8 @@ export type DaemonEvent = {
   | { kind: "session.replay_required"; payload: ReplayRequiredPayload }
   | { kind: "intervention.reported"; payload: InterventionNotice }
   | { kind: "mission.changed"; payload: MissionChangedPayload }
+  | { kind: "schedule.fired"; payload: ScheduleFiredPayload }
+  | { kind: "auto_continue.changed"; payload: AutoContinueEventPayload }
 );
 
 export type DaemonEventListener = (event: DaemonEvent) => void;
@@ -395,6 +432,16 @@ export interface DaemonClient {
   agentSessionList(params?: AgentSessionListParams): Promise<AgentSessionRecord[]>;
   /** 목록에서 한 건 제거(`agent_session.forget`) — 기록만 지우고 실행은 건드리지 않는다. */
   agentSessionForget(params: AgentSessionForgetParams): Promise<AgentSessionForgetResult>;
+  /**
+   * 예약 명령 만들기(`schedule.create`). 지정 시각에 데몬이 그 세션의
+   * PTY에 명령을 타이핑한다(창을 닫아도 살아 있다). 구 데몬에는 메서드가
+   * 없으므로 호출부는 실패를 흡수한다.
+   */
+  scheduleCreate(params: ScheduleCreateParams): Promise<ScheduleCreateResult>;
+  /** 최근 예약 목록(`schedule.list`) — pending·종착 상태 포함. */
+  scheduleList(params?: ScheduleListParams): Promise<ScheduledCommand[]>;
+  /** pending 예약 취소(`schedule.cancel`). 이미 발사했으면 cancelled: false. */
+  scheduleCancel(params: ScheduleCancelParams): Promise<ScheduleCancelResult>;
   /** 저널 전체 substring 검색(W2 — 스크롤백 밖 과거 출력). */
   sessionSearch(params: SessionSearchParams): Promise<SessionSearchResult>;
   /**

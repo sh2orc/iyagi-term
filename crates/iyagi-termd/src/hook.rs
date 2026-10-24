@@ -301,10 +301,18 @@ fn map_hook_payload(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let cwd = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+    let notification_type = notification_type_field(payload);
 
     let kind = match event {
         "Notification" | "PermissionRequest" => {
-            if looks_like_permission(message) {
+            // quota 재개 계열은 문구에 "allow"·"proceed"가 섞여 나와도
+            // 승인 요청이 아니다 — 문구 휴리스틱보다 CLI가 단 종류를 믿는다.
+            if notification_type
+                .as_deref()
+                .is_some_and(|t| t.starts_with("quota_auto_resume"))
+            {
+                InterventionKind::Notification
+            } else if looks_like_permission(message) {
                 InterventionKind::Permission
             } else {
                 InterventionKind::Notification
@@ -326,9 +334,24 @@ fn map_hook_payload(
         )
     };
 
+    // 세션 단서: 가능하면 CLI 세션 id — 같은 cwd에 파인 여럿이 있을 때
+    // 올바른 pane으로 연결한다. 형식이 어긋난 id는 통째로 버리고 cwd로
+    // 되돌아간다(값을 지어내지 않는다).
+    let agent_session_id = ["session_id", "thread_id", "sessionId"]
+        .iter()
+        .find_map(|key| payload.get(*key).and_then(|v| v.as_str()))
+        .filter(|id| term_contracts::agent_session::valid_session_id(id));
+
     // 멱등 키: 페이로드 내용 해시 — hook 재시도·에이전트 재실행이 같은
-    // 알림을 두 번 띄우지 않게 한다.
-    let report_id = deterministic_id(event, message, cwd);
+    // 알림을 두 번 띄우지 않게 한다. 종류·세션 id까지 넣어 같은 cwd와
+    // 문구를 공유하는 두 세션이 한 알림으로 병합되지 않게 한다.
+    let report_id = deterministic_id(
+        event,
+        message,
+        cwd,
+        notification_type.as_deref(),
+        agent_session_id,
+    );
 
     Ok(InterventionReport {
         report_id,
@@ -339,13 +362,26 @@ fn map_hook_payload(
         } else {
             Some(bound(cwd, 2000))
         },
-        session_hint: if cwd.is_empty() {
-            None
-        } else {
-            Some(bound(cwd, 4096))
-        },
+        session_hint: agent_session_id
+            .map(str::to_string)
+            .or_else(|| (!cwd.is_empty()).then(|| bound(cwd, 4096))),
+        notification_type,
         source: source.to_string(),
     })
+}
+
+/// Notification 페이로드의 `notification_type` — CLI가 분류한 알림 종류
+/// 원문(예: Claude의 `quota_auto_resume_stale`). 어휘는 CLI 것이므로 열거로
+/// 동결하지 않고, 계약이 허용하는 `[a-z0-9_]{1,64}`만 그대로 통과시킨다.
+/// 어긋나면 잘라 쓰지 않고 버린다 — 종류 라벨을 지어내지 않는다.
+fn notification_type_field(payload: &serde_json::Value) -> Option<String> {
+    let text = payload.get("notification_type")?.as_str()?.trim();
+    let valid = !text.is_empty()
+        && text.len() <= term_contracts::intervention::limits::NOTIFICATION_TYPE_MAX
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    valid.then(|| text.to_string())
 }
 
 /// 승인 문구 휴리스틱(라벨링 전용). 원문 키워드만 본다.
@@ -371,10 +407,16 @@ fn bound(text: &str, max: usize) -> String {
     format!("{}…", &text[..end])
 }
 
-fn deterministic_id(event: &str, message: &str, cwd: &str) -> String {
+fn deterministic_id(
+    event: &str,
+    message: &str,
+    cwd: &str,
+    notification_type: Option<&str>,
+    agent_session_id: Option<&str>,
+) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (event, message, cwd).hash(&mut hasher);
+    (event, message, cwd, notification_type, agent_session_id).hash(&mut hasher);
     format!("hook-{:016x}", hasher.finish())
 }
 
@@ -431,6 +473,92 @@ mod tests {
             classify(&payload, "claude", &origin()),
             Action::Intervention(_)
         ));
+    }
+
+    /// quota 재개 계열 알림: CLI가 단 `notification_type`을 통과시키고,
+    /// 문구에 승인 단어가 섞여 있어도 종류는 Notification으로 고정한다.
+    /// 세션 단서는 CLI 세션 id가 된다(같은 cwd 파인 구분).
+    #[test]
+    fn quota_auto_resume_stale_carries_type_and_session_hint() {
+        let payload = serde_json::json!({
+            "hook_event_name": "Notification",
+            "notification_type": "quota_auto_resume_stale",
+            "message": "Auto-resume gave up — press Enter to allow proceeding",
+            "session_id": SESSION,
+            "cwd": "/repo"
+        });
+        let report = map_hook_payload(&payload, CLAUDE_SOURCE).unwrap();
+        assert_eq!(report.kind, InterventionKind::Notification);
+        assert_eq!(
+            report.notification_type.as_deref(),
+            Some("quota_auto_resume_stale")
+        );
+        assert_eq!(report.session_hint.as_deref(), Some(SESSION));
+        // detail은 여전히 cwd.
+        assert_eq!(report.detail.as_deref(), Some("/repo"));
+        assert!(report.validate().is_ok());
+    }
+
+    /// 형식이 어긋난 `notification_type`은 잘라 쓰지 않고 버린다 — 보고
+    /// 자체는 여전히 유효하다(구버전·변형 페이로드 호환). 앞뒤 공백은
+    /// 정리한 뒤 검증한다.
+    #[test]
+    fn invalid_notification_type_is_dropped_not_guessed() {
+        for bad in [
+            "x".repeat(65),
+            "Quota Auto".to_string(),
+            "stale!".to_string(),
+            String::new(),
+        ] {
+            let payload = serde_json::json!({
+                "hook_event_name": "Notification",
+                "notification_type": bad,
+                "message": "waiting",
+                "cwd": "/repo"
+            });
+            let report = map_hook_payload(&payload, CLAUDE_SOURCE).unwrap();
+            assert_eq!(report.notification_type, None, "dropped: {bad:?}");
+            assert!(report.validate().is_ok());
+        }
+        let padded = serde_json::json!({
+            "hook_event_name": "Notification",
+            "notification_type": "  quota_auto_resume_stale  ",
+            "message": "waiting",
+            "cwd": "/repo"
+        });
+        let report = map_hook_payload(&padded, CLAUDE_SOURCE).unwrap();
+        assert_eq!(
+            report.notification_type.as_deref(),
+            Some("quota_auto_resume_stale")
+        );
+    }
+
+    /// 같은 cwd·문구를 공유하는 두 세션은 서로 다른 알림이어야 한다 —
+    /// 멱등 키에 세션 id가 들어가 한쪽이 묻히지 않게 한다.
+    #[test]
+    fn distinct_agent_sessions_do_not_merge_on_shared_cwd() {
+        let mk = |session: &str| {
+            serde_json::json!({
+                "hook_event_name": "Notification",
+                "notification_type": "quota_auto_resume_stale",
+                "message": "waiting",
+                "session_id": session,
+                "cwd": "/repo"
+            })
+        };
+        let a =
+            map_hook_payload(&mk("7db2598e-c360-48fe-a2d5-0240993c9f7a"), CLAUDE_SOURCE).unwrap();
+        let b =
+            map_hook_payload(&mk("8ac36a9f-d471-59af-b3e6-1351aa4adb8b"), CLAUDE_SOURCE).unwrap();
+        assert_ne!(a.report_id, b.report_id);
+        // 세션 id가 없으면 여전히 내용 해시로 멱등.
+        let bare = serde_json::json!({
+            "hook_event_name": "Notification", "message": "waiting", "cwd": "/repo"
+        });
+        assert_eq!(
+            map_hook_payload(&bare, CLAUDE_SOURCE).unwrap().report_id,
+            map_hook_payload(&bare, CLAUDE_SOURCE).unwrap().report_id
+        );
     }
 
     /// `Stop`은 더 이상 개입 알림이 아니다 — 응답이 끝날 때마다 울려

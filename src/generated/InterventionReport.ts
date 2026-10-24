@@ -22,6 +22,12 @@ detail?: string | null,
  */
 session_hint?: string | null, 
 /**
+ * CLI가 분류한 알림 종류 원문(예: Claude의
+ * `quota_auto_resume_stale`). 우리 어휘가 아니라 그쪽 어휘라 열거형으로
+ * 동결하지 않고 검증만 거친 문자열로 통과시킨다.
+ */
+notification_type?: string | null, 
+/**
  * 신호 출처(예: "claude-code-hook"). 상한 64자.
  */
 source: string, };

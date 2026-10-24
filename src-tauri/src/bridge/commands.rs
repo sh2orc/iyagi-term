@@ -51,6 +51,9 @@ pub fn is_allowed_method(method: &str) -> bool {
             | methods::INTERVENTION_LIST
             | methods::AGENT_SESSION_LIST
             | methods::AGENT_SESSION_FORGET
+            | methods::SCHEDULE_CREATE
+            | methods::SCHEDULE_LIST
+            | methods::SCHEDULE_CANCEL
             | methods::RETENTION_SET_LIMIT
             | methods::DAEMON_SHUTDOWN
             | mission_methods::MISSION_CREATE
@@ -548,6 +551,15 @@ mod tests {
         assert!(is_allowed_method(methods::AGENT_SESSION_FORGET));
         assert!(is_allowed_method("agent_session.list"));
         assert!(is_allowed_method("agent_session.forget"));
+        // Scheduled commands: the UI creates, lists, and cancels through the
+        // same control connection — a missing entry silently kills the
+        // feature exactly like the agent-session gap above.
+        assert!(is_allowed_method(methods::SCHEDULE_CREATE));
+        assert!(is_allowed_method(methods::SCHEDULE_LIST));
+        assert!(is_allowed_method(methods::SCHEDULE_CANCEL));
+        assert!(is_allowed_method("schedule.create"));
+        assert!(is_allowed_method("schedule.list"));
+        assert!(is_allowed_method("schedule.cancel"));
         // Reports come from the hook CLI's own connection, never the UI.
         assert!(!is_allowed_method(methods::AGENT_SESSION_REPORT));
         // O1 mission surface (O04): the UI drives missions through the same

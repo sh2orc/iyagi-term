@@ -1571,6 +1571,13 @@ impl term_pty::actor::SessionCleanup for SessionFinalizer {
 /// Terminal finalization: root-exit bookkeeping, DRAINING → terminal,
 /// reservation release, sampler untrack, group teardown, events.
 pub fn finalize_session(state: Arc<DaemonState>, workload_id: WorkloadId, info: TeardownInfo) {
+    // 세션이 끝났다: 이 세션을 향한 pending 예약은 이제 발사할 수 없다.
+    // 지금 건너뛰지 않으면 다음 만료 시각까지 목록에 pending으로 남는다.
+    // 클레임 중(`firing`)인 행은 건드리지 않는다 — 그 시도는 죽는 PTY에
+    // 쓰다가 스스로 종착한다.
+    crate::scheduled_commands::skip_pending_for_session(&state, &info.session_id);
+    // 자동 continue 감시도 같이 걷는다 — 세션이 없으면 무장의 의미가 없다.
+    crate::auto_continue::forget_session(&info.session_id);
     let Some(entry_arc) = state.workload_entry(&workload_id) else {
         // 워크로드가 이미 보관 링에서 밀려났어도(런치 실패 뒤 다른 64개가
         // 먼저 종료한 경우) 세션 쪽 마무리는 해야 한다 — 그러지 않으면

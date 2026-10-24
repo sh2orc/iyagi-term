@@ -503,6 +503,11 @@ impl OutputSink for NotifySink {
         if let ActorEventKind::Resize { cols, rows } = event.kind {
             session.record_resize(event.seq, cols, rows, self.state.now_ms());
         } else {
+            // 살아 있는 출력 청크: 자동 continue의 오류 문구 감지가 여기서
+            // 본다(저널 재생 경로는 sink를 거치지 않아 재감지 오발이 없다).
+            if let ActorEventKind::Output(bytes) = &event.kind {
+                crate::auto_continue::scan_output(&self.state, &session, bytes);
+            }
             session.wake();
         }
     }

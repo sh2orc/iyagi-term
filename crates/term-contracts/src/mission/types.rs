@@ -62,6 +62,13 @@ impl TryFrom<String> for Id {
     }
 }
 
+impl std::str::FromStr for Id {
+    type Err = MissionIdParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
 /// UTC RFC3339 timestamp (wire: string).
 pub type Timestamp = String;
 /// SHA-256 digest: exactly 64 lowercase hex chars (wire: string).

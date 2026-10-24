@@ -1967,6 +1967,36 @@ button.primary {
   background: rgba(97, 175, 239, 0.12);
 }
 
+/* quota 재개 포기(stale) 알림의 행: 본문 버튼 + "재개" 액션 버튼. */
+.notif-item.has-action {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.notif-item.has-action > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 액션 버튼은 명시적 사용자 제스처다 — 보조색으로 눈에 띄게. */
+.notif-action {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 4px 8px;
+  border: 1px solid #4f7ad0;
+  border-radius: 4px;
+  background: rgba(79, 122, 208, 0.16);
+  color: #8fb4f0;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.notif-action:hover {
+  background: rgba(97, 175, 239, 0.28);
+}
+
 .notif-kind {
   color: #8fb4f0;
   white-space: nowrap;
@@ -1993,6 +2023,13 @@ button.primary {
   color: #e08a90;
 }
 
+/* 사용량 한도 카운트다운 — 경고톤이지만 조용히(amber). */
+.tab-badge-usage-limit {
+  border-color: #b38b42;
+  color: #e0c08a;
+  font-variant-numeric: tabular-nums;
+}
+
 
 /* 탭 자원 배지(W2): 살아 있는 에이전트의 CPU·RAM 요약 */
 .tab-usage {
@@ -2015,6 +2052,17 @@ button.primary {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 260px;
+}
+
+/* 사용량 한도 카운트다운(statusLine 관찰값 — 탭 배지와 같은 톤). */
+.pane-usage-limit {
+  color: #e0c08a;
+  font-size: 11px;
+  border: 1px solid #9a8440;
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 최근 종료 세션 요약(W4-3 최소본) */
@@ -2122,6 +2170,18 @@ button.primary {
 :root[data-theme="light"] .pane-intervention-badge {
   border-color: #b39a55;
   color: #7a5f10;
+}
+
+:root[data-theme="light"] .tab-badge-usage-limit,
+:root[data-theme="light"] .pane-usage-limit {
+  border-color: #b39a55;
+  color: #7a5f10;
+}
+
+:root[data-theme="light"] .notif-action {
+  border-color: #1f5cb0;
+  background: rgba(31, 92, 176, 0.1);
+  color: #1f5cb0;
 }
 
 :root[data-theme="light"] .notif-kind {
@@ -2640,4 +2700,83 @@ body.layout-dragging.layout-drop-blocked * {
 .strip-quota-unavailable {
   color: var(--fg-muted);
   font-size: 11px;
+}
+
+/* 예약 명령 대화상자(schedule-command): 폼 + pending 카운트다운/최근 기록. */
+.schedule-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 440px;
+  max-width: 560px;
+}
+
+.schedule-dialog h3,
+.schedule-dialog h4 {
+  margin: 8px 0 0 0;
+}
+
+.schedule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.schedule-field input,
+.schedule-field select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.schedule-quick {
+  display: flex;
+  gap: 6px;
+}
+
+.schedule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.schedule-status {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.schedule-row.schedule-failed .schedule-status,
+.schedule-row.schedule-skipped .schedule-status {
+  color: var(--danger, #d0793c);
+}
+
+.schedule-command {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.schedule-target,
+.schedule-when {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+
+.schedule-cancel {
+  flex: 0 0 auto;
 }

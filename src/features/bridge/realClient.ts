@@ -33,6 +33,13 @@ import type { AgentSessionForgetParams } from "../../generated/AgentSessionForge
 import type { AgentSessionForgetResult } from "../../generated/AgentSessionForgetResult";
 import type { AgentSessionListParams } from "../../generated/AgentSessionListParams";
 import type { AgentSessionRecord } from "../../generated/AgentSessionRecord";
+import type { ScheduleCancelParams } from "../../generated/ScheduleCancelParams";
+import type { ScheduleCancelResult } from "../../generated/ScheduleCancelResult";
+import type { ScheduleCreateParams } from "../../generated/ScheduleCreateParams";
+import type { ScheduleCreateResult } from "../../generated/ScheduleCreateResult";
+import type { ScheduleListParams } from "../../generated/ScheduleListParams";
+import type { ScheduleListResult } from "../../generated/ScheduleListResult";
+import type { ScheduledCommand } from "../../generated/ScheduledCommand";
 import type { SessionFocusParams } from "../../generated/SessionFocusParams";
 import type { SessionFocusResult } from "../../generated/SessionFocusResult";
 import type { SessionReliefParams } from "../../generated/SessionReliefParams";
@@ -500,6 +507,21 @@ export class RealDaemonClient implements DaemonClient {
     return this.rpc<AgentSessionForgetResult>("agent_session.forget", params);
   }
 
+  async scheduleCreate(params: ScheduleCreateParams): Promise<ScheduleCreateResult> {
+    return this.rpc<ScheduleCreateResult>("schedule.create", params);
+  }
+
+  async scheduleList(params: ScheduleListParams = {}): Promise<ScheduledCommand[]> {
+    // 데몬은 ScheduleListResult로 싸서 돌려주지만, 호출부가 배열을
+    // 다루는 게 계약(예: agentSessionList)과 일관된다.
+    const result = await this.rpc<ScheduleListResult>("schedule.list", params);
+    return result.items;
+  }
+
+  async scheduleCancel(params: ScheduleCancelParams): Promise<ScheduleCancelResult> {
+    return this.rpc<ScheduleCancelResult>("schedule.cancel", params);
+  }
+
   // ------------------------------------------------- O1 mission RPCs (O04)
   //
   // Transport only: CAS retries, snapshot paging policy and the
@@ -660,6 +682,16 @@ function toDaemonEvent(envelope: BridgeEventEnvelope): DaemonEvent | null {
       return {
         kind: "mission.changed",
         payload: payload as EventPayload<"mission.changed">,
+      };
+    case "schedule.fired":
+      return {
+        kind: "schedule.fired",
+        payload: payload as EventPayload<"schedule.fired">,
+      };
+    case "auto_continue.changed":
+      return {
+        kind: "auto_continue.changed",
+        payload: payload as EventPayload<"auto_continue.changed">,
       };
     default:
       return null;

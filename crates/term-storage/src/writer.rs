@@ -7,7 +7,8 @@ use std::thread::JoinHandle;
 
 use rusqlite::Connection;
 use term_contracts::agent_session::AgentSessionRecord;
-use term_contracts::ids::{SessionId, WorkloadId};
+use term_contracts::ids::{ScheduleId, SessionId, WorkloadId};
+use term_contracts::schedule::{ScheduledCommand, ScheduledCommandStatus};
 use term_contracts::snapshot::QueueReason;
 use term_contracts::state::WorkloadState;
 use term_contracts::workload::ProcessOwnership;
@@ -137,6 +138,42 @@ pub(crate) enum WriterCommand {
     PruneAgentSessions {
         max_age_days: u32,
         keep_at_most: u32,
+        reply: ReplySender<usize>,
+    },
+    InsertScheduledCommand {
+        record: Box<ScheduledCommand>,
+        reply: ReplySender<()>,
+    },
+    ClaimDueScheduledCommands {
+        now_ms: u64,
+        reply: ReplySender<Vec<ScheduledCommand>>,
+    },
+    RescheduleScheduledAttempt {
+        id: ScheduleId,
+        next_fire_at_ms: u64,
+        reply: ReplySender<()>,
+    },
+    FinishScheduledCommand {
+        id: ScheduleId,
+        status: ScheduledCommandStatus,
+        ended_at_ms: u64,
+        reason_code: Option<String>,
+        reply: ReplySender<()>,
+    },
+    CancelScheduledCommand {
+        id: ScheduleId,
+        now_ms: u64,
+        reply: ReplySender<bool>,
+    },
+    SkipPendingSchedulesForSession {
+        session_id: SessionId,
+        now_ms: u64,
+        reason: String,
+        reply: ReplySender<Vec<ScheduledCommand>>,
+    },
+    SkipStaleScheduledCommands {
+        created_before_ms: u64,
+        now_ms: u64,
         reply: ReplySender<usize>,
     },
     Shutdown {
@@ -346,6 +383,65 @@ fn writer_loop(mut conn: Connection, commands: Receiver<WriterCommand>) {
                     &mut conn,
                     max_age_days,
                     keep_at_most,
+                ));
+            }
+            WriterCommand::InsertScheduledCommand { record, reply } => {
+                let _ = reply.send(ops::insert_scheduled_command(&mut conn, &record));
+            }
+            WriterCommand::ClaimDueScheduledCommands { now_ms, reply } => {
+                let _ = reply.send(ops::claim_due_scheduled_commands(&mut conn, now_ms));
+            }
+            WriterCommand::RescheduleScheduledAttempt {
+                id,
+                next_fire_at_ms,
+                reply,
+            } => {
+                let _ = reply.send(ops::reschedule_scheduled_attempt(
+                    &mut conn,
+                    &id,
+                    next_fire_at_ms,
+                ));
+            }
+            WriterCommand::FinishScheduledCommand {
+                id,
+                status,
+                ended_at_ms,
+                reason_code,
+                reply,
+            } => {
+                let _ = reply.send(ops::finish_scheduled_command(
+                    &mut conn,
+                    &id,
+                    status,
+                    ended_at_ms,
+                    reason_code.as_deref(),
+                ));
+            }
+            WriterCommand::CancelScheduledCommand { id, now_ms, reply } => {
+                let _ = reply.send(ops::cancel_scheduled_command(&mut conn, &id, now_ms));
+            }
+            WriterCommand::SkipPendingSchedulesForSession {
+                session_id,
+                now_ms,
+                reason,
+                reply,
+            } => {
+                let _ = reply.send(ops::skip_pending_schedules_for_session(
+                    &mut conn,
+                    &session_id,
+                    now_ms,
+                    &reason,
+                ));
+            }
+            WriterCommand::SkipStaleScheduledCommands {
+                created_before_ms,
+                now_ms,
+                reply,
+            } => {
+                let _ = reply.send(ops::skip_stale_scheduled_commands(
+                    &mut conn,
+                    created_before_ms,
+                    now_ms,
                 ));
             }
             WriterCommand::Shutdown { reply } => {

@@ -6,7 +6,8 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use term_contracts::agent_session::AgentSessionRecord;
-use term_contracts::ids::{SessionId, WorkloadId};
+use term_contracts::ids::{ScheduleId, SessionId, WorkloadId};
+use term_contracts::schedule::{ScheduledCommand, ScheduledCommandStatus};
 use term_contracts::state::WorkloadState;
 use term_contracts::workload::ProcessOwnership;
 
@@ -697,4 +698,181 @@ struct ProcessOwnershipRaw {
     group_reference: Option<String>,
     coverage: String,
     recorded_at: String,
+}
+
+// -- scheduled commands ------------------------------------------------------
+
+/// 새 예약을 저장한다. 상태는 항상 `pending`으로 시작한다(호출자가
+/// [`ScheduledCommand`]를 pending으로 만들어 넘긴다).
+pub(crate) fn insert_scheduled_command(
+    conn: &mut Connection,
+    record: &ScheduledCommand,
+) -> StorageResult<()> {
+    conn.execute(
+        "INSERT INTO scheduled_commands
+            (id, session_id, command, fire_at_ms, status, attempts, created_at_ms, fired_at_ms, reason_code)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            record.schedule_id.as_str(),
+            record.session_id.as_str(),
+            record.command,
+            record.fire_at_ms as i64,
+            scheduled_status_to_str(ScheduledCommandStatus::Pending),
+            record.attempts as i64,
+            record.created_at_ms as i64,
+            record.fired_at_ms.map(|v| v as i64),
+            record.reason_code,
+        ],
+    )?;
+    Ok(())
+}
+
+/// 만료된 pending을 원자적으로 클레임한다: 하나의 트랜잭션에서 후보를
+/// 읽고 행마다 `pending→firing` 전환을 시도해, **실제로 뒤집힌 행만**
+/// 돌려준다(시도 횟수 `attempts`도 여기서 하나 올린다). 취소는 pending만
+/// 건드리므로 같은 행을 두고 다툴 수 없고, 이미 `firing`인 행은 이 연산이
+/// 다시 집어 오지도 않는다.
+pub(crate) fn claim_due_scheduled_commands(
+    conn: &mut Connection,
+    now_ms: u64,
+) -> StorageResult<Vec<ScheduledCommand>> {
+    let tx = conn.transaction()?;
+    let mut stmt = tx.prepare(
+        "SELECT id, session_id, command, fire_at_ms, status, attempts, created_at_ms, fired_at_ms, reason_code
+         FROM scheduled_commands
+         WHERE status = 'pending' AND fire_at_ms <= ?1
+         ORDER BY fire_at_ms",
+    )?;
+    let candidates = stmt
+        .query_map([now_ms as i64], queries::scheduled_command_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    let mut claimed = Vec::with_capacity(candidates.len());
+    for mut row in candidates {
+        let changed = tx.execute(
+            "UPDATE scheduled_commands
+             SET status = 'firing', attempts = attempts + 1
+             WHERE id = ?1 AND status = 'pending'",
+            params![row.schedule_id.as_str()],
+        )?;
+        if changed > 0 {
+            row.status = ScheduledCommandStatus::Firing;
+            row.attempts += 1;
+            claimed.push(row);
+        }
+    }
+    tx.commit()?;
+    Ok(claimed)
+}
+
+/// 재시도: 클레임한 행을 `pending`으로 되돌려 미래 시각에 다시 만료시킨다.
+/// `firing`이 아닌 행(부팅 스윕 등으로 이미 종착한 행)은 조용히 놔둔다.
+pub(crate) fn reschedule_scheduled_attempt(
+    conn: &mut Connection,
+    id: &ScheduleId,
+    next_fire_at_ms: u64,
+) -> StorageResult<()> {
+    conn.execute(
+        "UPDATE scheduled_commands
+         SET status = 'pending', fire_at_ms = ?2
+         WHERE id = ?1 AND status = 'firing'",
+        params![id.as_str(), next_fire_at_ms as i64],
+    )?;
+    Ok(())
+}
+
+/// 클레임한 행을 종착시킨다(fired/failed/skipped). `ended_at_ms`가
+/// `fired_at_ms` 열로 간다 — 종착에 도달한 시각이라는 뜻에서다.
+pub(crate) fn finish_scheduled_command(
+    conn: &mut Connection,
+    id: &ScheduleId,
+    status: ScheduledCommandStatus,
+    ended_at_ms: u64,
+    reason_code: Option<&str>,
+) -> StorageResult<()> {
+    conn.execute(
+        "UPDATE scheduled_commands
+         SET status = ?2, fired_at_ms = ?3, reason_code = ?4
+         WHERE id = ?1 AND status = 'firing'",
+        params![
+            id.as_str(),
+            scheduled_status_to_str(status),
+            ended_at_ms as i64,
+            reason_code,
+        ],
+    )?;
+    Ok(())
+}
+
+/// 사용자 취소 — pending일 때만 성공한다. 이미 발사했거나 클레임 중이면
+/// false(에러가 아니다).
+pub(crate) fn cancel_scheduled_command(
+    conn: &mut Connection,
+    id: &ScheduleId,
+    now_ms: u64,
+) -> StorageResult<bool> {
+    let changed = conn.execute(
+        "UPDATE scheduled_commands
+         SET status = 'cancelled', fired_at_ms = ?2, reason_code = NULL
+         WHERE id = ?1 AND status = 'pending'",
+        params![id.as_str(), now_ms as i64],
+    )?;
+    Ok(changed > 0)
+}
+
+/// 세션이 끝났을 때 그 세션을 향한 pending을 모두 건너뛰고 **건너뛴 행**
+/// 을 돌려준다(호출자가 `schedule.fired`로 방송한다). 클레임 중(`firing`)
+/// 인 행은 건드리지 않는다 — 그 시도는 스스로 종착한다(죽는 PTY에 쓰다
+/// 실패해 skip/failed가 된다).
+pub(crate) fn skip_pending_schedules_for_session(
+    conn: &mut Connection,
+    session_id: &SessionId,
+    now_ms: u64,
+    reason: &str,
+) -> StorageResult<Vec<ScheduledCommand>> {
+    let tx = conn.transaction()?;
+    let mut stmt = tx.prepare(
+        "SELECT id, session_id, command, fire_at_ms, status, attempts, created_at_ms, fired_at_ms, reason_code
+         FROM scheduled_commands
+         WHERE session_id = ?1 AND status = 'pending'",
+    )?;
+    let candidates = stmt
+        .query_map([session_id.as_str()], queries::scheduled_command_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    let mut skipped = Vec::with_capacity(candidates.len());
+    for mut row in candidates {
+        let changed = tx.execute(
+            "UPDATE scheduled_commands
+             SET status = 'skipped', fired_at_ms = ?2, reason_code = ?3
+             WHERE id = ?1 AND status = 'pending'",
+            params![row.schedule_id.as_str(), now_ms as i64, reason],
+        )?;
+        if changed > 0 {
+            row.status = ScheduledCommandStatus::Skipped;
+            row.fired_at_ms = Some(now_ms);
+            row.reason_code = Some(reason.to_string());
+            skipped.push(row);
+        }
+    }
+    tx.commit()?;
+    Ok(skipped)
+}
+
+/// 부팅 스윕: 이 데몬이 시작되기 전(`created_at_ms < cutoff`)에 만들어진
+/// pending/firing은 전부 건너뛴다. 데몬 재시작은 PTY를 죽이므로 그 세션은
+/// 이 데몬에 없다 — 결과 불명인 자동 재실행 대신 정직하게 skip 처리한다.
+pub(crate) fn skip_stale_scheduled_commands(
+    conn: &mut Connection,
+    created_before_ms: u64,
+    now_ms: u64,
+) -> StorageResult<usize> {
+    let changed = conn.execute(
+        "UPDATE scheduled_commands
+         SET status = 'skipped', fired_at_ms = ?2, reason_code = 'daemon-restart'
+         WHERE created_at_ms < ?1 AND status IN ('pending','firing')",
+        params![created_before_ms as i64, now_ms as i64],
+    )?;
+    Ok(changed)
 }

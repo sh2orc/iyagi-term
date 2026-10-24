@@ -219,6 +219,16 @@ pub enum RpcEventKind {
     /// a snapshot or the event tail). Payload: `{mission_id, latest_seq}`.
     #[serde(rename = "mission.changed")]
     MissionChanged,
+    /// A scheduled command reached its terminal state. Payload:
+    /// [`crate::schedule::ScheduleFiredPayload`].
+    #[serde(rename = "schedule.fired")]
+    ScheduleFired,
+    /// Auto-continue state moved: an API-error phrase was detected in a
+    /// session's output (`armed`), the daemon sent `continue` after the
+    /// network recovered (`fired`), or the watch was dropped (`disarmed`).
+    /// Payload: [`crate::auto_continue::AutoContinuePayload`].
+    #[serde(rename = "auto_continue.changed")]
+    AutoContinueChanged,
 }
 
 /// First control-connection message (must arrive within 2s).
@@ -292,6 +302,9 @@ pub mod methods {
     pub const AGENT_SESSION_LIST: &str = "agent_session.list";
     pub const AGENT_SESSION_FORGET: &str = "agent_session.forget";
     pub const SESSION_SEARCH: &str = "session.search";
+    pub const SCHEDULE_CREATE: &str = "schedule.create";
+    pub const SCHEDULE_LIST: &str = "schedule.list";
+    pub const SCHEDULE_CANCEL: &str = "schedule.cancel";
     pub const GATEWAY_STATUS: &str = "gateway.status";
     pub const GATEWAY_SET_POLICY: &str = "gateway.set_policy";
     pub const DAEMON_SHUTDOWN: &str = "daemon.shutdown";

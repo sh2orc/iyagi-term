@@ -19,6 +19,8 @@ import { useTerminalActivity } from "../features/terminal/activity";
 import { useNotificationStore } from "../features/notifications/notificationStore";
 import { terminalDisplayTitle } from "../features/terminal/shellEnvironment";
 import { agentActivityLabel, resolveAgentActivity, type AgentActivity } from "../features/terminal/agentNames";
+import { tabUsageLimitResetsAt } from "../features/terminal/agentUsage";
+import { UsageLimitBadge } from "../features/terminal/UsageLimitBadge";
 import { formatCores, formatGiB } from "../features/monitor/format";
 import { useMissionStore } from "../features/missions/store";
 import { selectMissionTitle } from "../features/missions/selectors";
@@ -54,6 +56,11 @@ export interface TabItemProps {
   agentActivity?: AgentActivity | null;
   /** 그 에이전트 id(마커 문구용). */
   agentId?: string | null;
+  /**
+   * 사용량 한도 배지 값(terminal 탭): 막힌 pane의 가장 이른 리셋 ms.
+   * null=막혔는데 리셋 시각 모름(정적 배지), undefined=막힌 pane 없음.
+   */
+  usageLimitResetsAt?: number | null;
   /**
    * mission 탭 배지(상태 우선): 결정 필요 N > 확정 대기 > 실패 > 실행 중 N > 완료.
    * terminal 탭에는 없고, 보일 상태가 없으면 null.
@@ -181,6 +188,9 @@ function TerminalTabItem(props: Omit<TabItemProps, "tab"> & { tab: TerminalTab }
   // 타이틀 앞 활동 마커(원시값 둘로 구독 — 위 usage와 같은 이유).
   const activity = useWorkbenchStore((s) => tabAgentActivity(s.panes, root, activeSessions)?.activity ?? null);
   const activityAgent = useWorkbenchStore((s) => tabAgentActivity(s.panes, root, activeSessions)?.agent ?? null);
+  // 사용량 한도 리셋(막힌 pane 중 최소 — undefined=없음, null=시각 모름).
+  // 카운트다운 갱신은 배지 컴포넌트의 공유 티커가 담당한다(탭 전체 재렌더 없음).
+  const usageLimitResetsAt = useWorkbenchStore((s) => tabUsageLimitResetsAt(s.panes, root));
   return (
     <TabItem
       {...props}
@@ -191,6 +201,7 @@ function TerminalTabItem(props: Omit<TabItemProps, "tab"> & { tab: TerminalTab }
       usage={usage}
       agentActivity={activity}
       agentId={activityAgent}
+      usageLimitResetsAt={usageLimitResetsAt}
     />
   );
 }
@@ -274,6 +285,7 @@ export function TabItem({
   usage = null,
   agentActivity = null,
   agentId = null,
+  usageLimitResetsAt = undefined,
   missionBadge = null,
   titleText = null,
   renaming,
@@ -398,6 +410,10 @@ export function TabItem({
             {/* 조용한 배지(W1-3): 사용자가 보고 있는(active) 탭에서는 내비둔다. */}
             {!active && intervention ? (
               <span className="tab-badge tab-badge-intervention" role="status">{t("app.tabIntervention")}</span>
+            ) : null}
+            {/* 사용량 한도 카운트다운 — 보고 있는 탭에도 둔다(pane 헤더와 같은 정보). */}
+            {usageLimitResetsAt !== undefined ? (
+              <UsageLimitBadge resetsAtMs={usageLimitResetsAt} variant="tab" />
             ) : null}
             {!active && queued ? (
               <span className="tab-badge tab-badge-queued" role="status">{t("app.tabQueued")}</span>

@@ -19,6 +19,14 @@ function wheel(patch: Partial<TabSwipeWheelLike> = {}): TabSwipeWheelLike {
   return { deltaX: 0, deltaY: 0, deltaMode: 0, timeStamp: 0, ...patch };
 }
 
+/**
+ * 실제 플릭 한 번의 deltaX 곡선: 손가락이 빨라졌다 느려지고(감속), 손을 떼면
+ * 관성이 0 근처에서 시작해 다시 램프업했다가 줄어든다. 관성 램프업이 "또
+ * 밀었다"로 오인되면 한 번의 플릭이 탭 둘을 넘긴다.
+ */
+const FLICK_FINGER_DELTAS = [30, 70, 110, 90, 40, 12] as const;
+const FLICK_MOMENTUM_DELTAS = [6, 15, 28, 44, 50, 44, 36, 28, 20, 14, 9, 5, 3, 1] as const;
+
 describe("감도 → step(px)", () => {
   it("낮음 130 · 보통 78 · 높음 48", () => {
     expect(TAB_SWIPE_STEP_PX).toEqual({ low: 130, medium: 78, high: 48 });
@@ -171,6 +179,101 @@ describe("deltaMode", () => {
     const r = new TabSwipeRecognizer({ stepPx: 60 });
     expect(r.feed(wheel({ deltaX: 5, deltaMode: 2, timeStamp: 0 }))).toBeNull();
     expect(r.consumedLastEvent).toBe(false);
+  });
+});
+
+describe("WebKit 위상(손가락 접촉·관성)", () => {
+  /** 위상을 실은 이벤트 한 개. */
+  interface PhaseEvent {
+    deltaX: number;
+    phase?: "none" | "began" | "changed" | "ended";
+    momentumPhase?: "none" | "began" | "changed" | "ended";
+  }
+
+  /** 위상을 실은 이벤트 흐름을 16ms 간격으로 먹이고 발동 수를 센다. */
+  function feedFlick(recognizer: TabSwipeRecognizer, events: ReadonlyArray<PhaseEvent>, startAt = 0): number {
+    let fires = 0;
+    events.forEach((e, index) => {
+      if (recognizer.feed(wheel({ ...e, timeStamp: startAt + index * 16 })) !== null) fires += 1;
+    });
+    return fires;
+  }
+
+  /** 손가락(phase) → 관성(momentumPhase) 위상을 붙인 실제 플릭 흐름. */
+  function flickEvents(): PhaseEvent[] {
+    const finger: PhaseEvent[] = FLICK_FINGER_DELTAS.map((deltaX, index) => ({
+      deltaX,
+      phase: index === 0 ? "began" : index === FLICK_FINGER_DELTAS.length - 1 ? "ended" : "changed",
+      momentumPhase: "none" as const,
+    }));
+    const momentum: PhaseEvent[] = FLICK_MOMENTUM_DELTAS.map((deltaX, index) => ({
+      deltaX,
+      phase: "none" as const,
+      momentumPhase: index === 0 ? "began" : index === FLICK_MOMENTUM_DELTAS.length - 1 ? "ended" : "changed",
+    }));
+    return [...finger, ...momentum];
+  }
+
+  it("관성 램프업(작아졌다 다시 커지는 관성)으로는 한 번만 넘긴다", () => {
+    const r = new TabSwipeRecognizer({ stepPx: 78 }); // 보통 감도
+    expect(feedFlick(r, flickEvents())).toBe(1);
+  });
+
+  it("위상이 없으면(Chromium 계열·휠) 예전 추정 규칙을 그대로 쓴다", () => {
+    const r = new TabSwipeRecognizer({ stepPx: 78 });
+    // 위상 없이 같은 곡선을 먹이면 관성 램프업이 renewed로 열려 두 번 넘는다
+    // (macOS WKWebView가 아니면 여전히 발생할 수 있는 자리다).
+    const bare = [...FLICK_FINGER_DELTAS, ...FLICK_MOMENTUM_DELTAS].map((deltaX) => ({ deltaX }));
+    expect(feedFlick(r, bare)).toBe(2);
+  });
+
+  it("관성이 끝나고 손가락이 다시 닿으면(began) 새 제스처로 다시 넘긴다", () => {
+    const r = new TabSwipeRecognizer({ stepPx: 78 });
+    expect(feedFlick(r, flickEvents())).toBe(1);
+    const fires = feedFlick(r, flickEvents(), 500);
+    expect(fires).toBe(1);
+  });
+
+  it("관성 중 다시 밀면(began) 잠금 없이 바로 다음 탭으로 넘긴다", () => {
+    const r = new TabSwipeRecognizer({ stepPx: 78 });
+    // 첫 플릭 발동 직후 — 관성이 아직 흐르는 중에 손가락이 다시 닿는다.
+    expect(feedFlick(r, flickEvents().slice(0, 6))).toBe(1);
+    const repush = [
+      { deltaX: 4, phase: "ended" as const, momentumPhase: "changed" as const },
+      { deltaX: 30, phase: "began" as const, momentumPhase: "none" as const },
+      { deltaX: 70, phase: "changed" as const, momentumPhase: "none" as const },
+      { deltaX: 90, phase: "changed" as const, momentumPhase: "none" as const },
+    ];
+    expect(feedFlick(r, repush, 200)).toBe(1);
+  });
+
+  it("손가락 ended → 쉼 → 관성 began이 200ms를 넘겨도 같은 제스처다", () => {
+    const r = new TabSwipeRecognizer({ stepPx: 78 });
+    const events = flickEvents();
+    // 발동(손가락 구간)만 먹인 뒤 시간 기준을 넘겨 관성을 흘려 넣는다.
+    expect(feedFlick(r, events.slice(0, FLICK_FINGER_DELTAS.length))).toBe(1);
+    let fires = 0;
+    FLICK_MOMENTUM_DELTAS.forEach((deltaX, index) => {
+      // 손가락 ended(=96ms) 뒤 300ms쯤 관성 시작 — gap 200ms를 넘는다.
+      const at = 96 + 300 + index * 16;
+      if (r.feed(wheel({ deltaX, timeStamp: at, phase: "none", momentumPhase: index === 0 ? "began" : "changed" })) !== null) fires += 1;
+    });
+    expect(fires).toBe(0);
+  });
+
+  it("같은 접촉에서 감속 뒤 다시 미는(renewed) 것은 여전히 새 발동이다", () => {
+    const r = new TabSwipeRecognizer({ stepPx: 78 });
+    // 손가락을 떼지 않고(phase changed 유지) 한 번 더 미는 흐름.
+    const events = [
+      { deltaX: 110, phase: "began" as const, momentumPhase: "none" as const },
+      { deltaX: 40, phase: "changed" as const, momentumPhase: "none" as const },
+      { deltaX: 12, phase: "changed" as const, momentumPhase: "none" as const },
+      { deltaX: 6, phase: "changed" as const, momentumPhase: "none" as const },
+      { deltaX: 30, phase: "changed" as const, momentumPhase: "none" as const },
+      { deltaX: 70, phase: "changed" as const, momentumPhase: "none" as const },
+      { deltaX: 90, phase: "changed" as const, momentumPhase: "none" as const },
+    ];
+    expect(feedFlick(r, events)).toBe(2);
   });
 });
 

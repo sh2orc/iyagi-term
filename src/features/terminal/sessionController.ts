@@ -237,9 +237,43 @@ function sameAgentStatus(a: AgentStatus | null, b: AgentStatus | null): boolean 
   for (const key of keys) {
     const left = (a as Record<string, unknown>)[key] ?? null;
     const right = (b as Record<string, unknown>)[key] ?? null;
+    // usage_limits은 중첩 객체라 참조 비교가 매번 실패한다 — 값으로 비교
+    // (데몬 agent_status_eq와 같은 뜻).
+    if (key === "usage_limits") {
+      if (!sameUsageLimits(left, right)) return false;
+      continue;
+    }
     if (left !== right) return false;
   }
   return true;
+}
+
+/** usage_limits 값 비교 — 이벤트마다 새 객체로 오므로 필드별로 본다. */
+function sameUsageLimits(a: unknown, b: unknown): boolean {
+  if (a == null && b == null) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  return (
+    (left.observed_at_unix_ms ?? null) === (right.observed_at_unix_ms ?? null) &&
+    sameUsageLimitWindow(left.five_hour, right.five_hour) &&
+    sameUsageLimitWindow(left.seven_day, right.seven_day)
+  );
+}
+
+function sameUsageLimitWindow(a: unknown, b: unknown): boolean {
+  if (a == null && b == null) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  return (
+    (left.used_percent ?? null) === (right.used_percent ?? null) &&
+    (left.resets_at_unix_ms ?? null) === (right.resets_at_unix_ms ?? null)
+  );
 }
 
 function defaultShellPolicy(): LaunchRequest["policy"] {
@@ -500,6 +534,7 @@ export class SessionController {
           at: notice.reported_at,
           sessionId: this.matchSessionByHint(notice.session_hint ?? null),
           interventionKind: notice.kind,
+          notificationType: notice.notification_type ?? null,
           acknowledged: true, // 이미 사용자가 봤을 수 있는 과거 항목 — 읽음으로 시작
         });
       }
@@ -1335,9 +1370,11 @@ export class SessionController {
       }
       case "intervention.reported": {
         // W1-5: 개입 신호 → 알림센터. 조용한 우선(§2.1): 항목은 항상,
-        // 데스크톱 알림은 "창이 숨겨져 있을 때 + 승인/질문"만.
+        // 데스크톱 알림은 "창이 숨겨져 있을 때 + 승인/질문 또는 quota
+        // 자동 재개 포기(stale — Enter 대기)"만.
         const notice = event.payload;
         const sessionId = this.matchSessionByHint(notice.session_hint ?? null);
+        const quotaStale = notice.notification_type === "quota_auto_resume_stale";
         const added = useNotificationStore.getState().push({
           id: notice.report_id,
           kind: "intervention",
@@ -1346,14 +1383,17 @@ export class SessionController {
           at: notice.reported_at,
           sessionId,
           interventionKind: notice.kind,
+          notificationType: notice.notification_type ?? null,
           acknowledged: false,
         });
         if (
           added &&
-          (notice.kind === "permission" || notice.kind === "question")
+          (notice.kind === "permission" ||
+            notice.kind === "question" ||
+            quotaStale)
         ) {
           maybeDesktopNotify(
-            t(interventionKindKey(notice.kind)),
+            t(quotaStale ? "notifications.kind.quotaStale" : interventionKindKey(notice.kind)),
             notice.title,
           );
         }
@@ -1380,6 +1420,10 @@ export class SessionController {
     const panes = Object.values(useWorkbenchStore.getState().panes);
     const exact = panes.find((pane) => pane.sessionId === hint);
     if (exact) return exact.sessionId;
+    // CLI 세션 id(claude --resume 인자) — 같은 cwd에 파인 여럿이 있을 때
+    // 올바른 pane으로 연결한다. pane.agent는 workload.changed로 실려 온다.
+    const byAgentSession = panes.find((pane) => pane.agent?.session_id === hint);
+    if (byAgentSession) return byAgentSession.sessionId;
     const byCwd = panes.find((pane) => pane.cwd === hint);
     return byCwd?.sessionId ?? null;
   }
@@ -3927,6 +3971,24 @@ export class SessionController {
   focusSessionPane(sessionId: string): void {
     const pane = Object.values(useWorkbenchStore.getState().panes).find((p) => p.sessionId === sessionId);
     if (pane) this.focusLeaf(pane.leafId);
+  }
+
+  /**
+   * quota 자동 재개 포기(stale) 알림의 "재개" 클릭 — 해당 pane으로 이동하고
+   * Enter를 보낸다. 개입 채널 계약(§2.1: 알림만 읽고 PTY에 넣지 않는다)의
+   * 유일한 예외 경로가 아니라 반대편이다: 이 입력은 언제나 이 클릭이라는
+   * 사용자 제스처로만 나간다. live가 아니거나 epoch이 없으면 보내지 않고
+   * 안내만 한다(전송 실패가 조용히 사라지지 않게).
+   */
+  resumeAgentInPane(sessionId: string): boolean {
+    const pane = Object.values(useWorkbenchStore.getState().panes).find(
+      (p) => p.sessionId === sessionId,
+    );
+    if (!pane) return false;
+    this.focusLeaf(pane.leafId);
+    const ok = this.pipelines.get(pane.viewId)?.sendInput("\r") ?? false;
+    if (!ok) this.toast(t("notifications.quotaStale.resumeBlocked"));
+    return ok;
   }
 
   /** 그 pane이 든 탭을 열고 초점을 준다(떠 있는 대화상자는 닫는다). */

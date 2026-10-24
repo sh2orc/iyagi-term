@@ -2,9 +2,10 @@
  * 트랙패드 두 손가락 가로 스와이프 → 탭 전환(제스처 인식기).
  *
  * 이 파일은 DOM을 모른다 — wheel 이벤트에서 뽑은 숫자 네 개(deltaX·deltaY·
- * deltaMode·timeStamp)만 먹고 "다음/이전 탭" 또는 null을 돌려준다. 붙이는
- * 일(리스너·스크롤 가능한 조상 판정)은 tabSwipeDom.ts가 맡는다. 그래서 인식
- * 규칙은 브라우저 없이 시험할 수 있다.
+ * deltaMode·timeStamp)와 WebKit 위상 둘(phase·momentumPhase, 있을 때만)을
+ * 먹고 "다음/이전 탭" 또는 null을 돌려준다. 붙이는 일(리스너·스크롤 가능한
+ * 조상 판정)은 tabSwipeDom.ts가 맡는다. 그래서 인식 규칙은 브라우저 없이
+ * 시험할 수 있다.
  *
  * 한 번의 스와이프는 인접 탭 하나만 넘긴다. 발동 뒤에는 관성 이벤트까지
  * 소비한다. 관성이 줄다가 다시 강해지거나 방향을 바꾸면 새 스와이프로 받는다.
@@ -16,6 +17,17 @@
  *  - 누적이 step을 넘으면 한 번 발동하고 제스처가 끝날 때까지 잠근다.
  *  - 세로 이벤트는 잠금을 풀지 않는다. 작은 관성 흔들림도 무시한다.
  *  - deltaMode: 0 = 픽셀(트랙패드), 1 = 줄(휠) → 16px로 환산, 2 = 페이지 → 무시.
+ *
+ * WebKit(macOS WKWebView)은 wheel 이벤트에 손가락 접촉 위상(webkitPhase)과
+ * 관성 위상(webkitMomentumPhase)을 실어 보낸다. 위상이 있으면 추정 대신
+ * 사실로 판정한다:
+ *  - phase "began"(손가락이 다시 닿음) = 새 제스처. 이동량 변화와 무관하게
+ *    누적·잠금을 되돌린다.
+ *  - 관성 이벤트(momentumPhase !== "none") 중에는 잠금을 절대 풀지 않는다.
+ *    관성은 스스로 강해지거나 방향을 바꾸지 않으므로, 관성 램프업(작아졌다
+ *    다시 커지는 흐름)을 "또 밀었다"로 오인해 한 번의 플릭이 탭 둘을 넘기는
+ *    일이 사라진다. 다시 미는 건 손가락이 닿는 순간(began) 새 제스처가 된다.
+ *  - 위상이 없는 환경(Chromium 계열·휠)은 예전 추정 규칙을 그대로 쓴다.
  *
  * `consumedLastEvent`는 방금 먹인 이벤트를 DOM 층이 preventDefault·
  * stopPropagation 해야 하는지 알려 준다. 가로 제스처가 진행 중(누적이 데드존을
@@ -80,12 +92,19 @@ export interface TabSwipeOptions {
   reverse: boolean;
 }
 
+/** WebKit wheel의 트랙패드 위상 값(webkitPhase·webkitMomentumPhase). */
+export type TabSwipeWheelPhase = "none" | "began" | "changed" | "ended";
+
 /** wheel 이벤트에서 인식기가 쓰는 부분(WheelEvent를 그대로 넣어도 된다). */
 export interface TabSwipeWheelLike {
   deltaX: number;
   deltaY: number;
   deltaMode: number;
   timeStamp: number;
+  /** 손가락 접촉 위상(WheelEvent.webkitPhase, WebKit 전용). 없으면 undefined. */
+  phase?: TabSwipeWheelPhase;
+  /** 관성 위상(WheelEvent.webkitMomentumPhase, WebKit 전용). 없으면 undefined. */
+  momentumPhase?: TabSwipeWheelPhase;
 }
 
 /** 감도 → step(px). 모르는 값은 보통으로 본다. */
@@ -149,11 +168,25 @@ export class TabSwipeRecognizer {
     const deltaX = event.deltaX * scale;
     const deltaY = event.deltaY * scale;
 
+    // 관성 위상("none"이 아니면 관성 꼬리다 — "ended"까지 포함).
+    const momentum = event.momentumPhase !== undefined && event.momentumPhase !== "none";
+
+    // 손가락이 다시 닿으면 새 제스처다. 위상을 아는 한 이동량 추정보다 우선한다.
+    if (event.phase === "began") {
+      this.accumulated = 0;
+      this.fired = false;
+      this.firedDirection = 0;
+      this.peakDelta = 0;
+      this.tailDelta = null;
+    }
+
     // 손을 뗀 시간은 이벤트 흐름 전체로 센다(세로 스크롤이 사이에 껴도).
     const gap =
       this.lastEventAt === null ? Number.POSITIVE_INFINITY : event.timeStamp - this.lastEventAt;
     this.lastEventAt = event.timeStamp;
-    if (gap >= this.options.gestureResetMs) {
+    // 관성은 끊겼다 이어지는 법이 없지만 손가락 ended → 관성 began 사이의 쉼이
+    // 기준을 넘기도 한다. 관성 이벤트는 같은 제스처로 본다(시간 리셋 제외).
+    if (!momentum && gap >= this.options.gestureResetMs) {
       // 입력이 충분히 끊겼으면 이동량 변화와 무관하게 새 제스처다.
       this.accumulated = 0;
       this.fired = false;
@@ -168,6 +201,12 @@ export class TabSwipeRecognizer {
     // 고정 시간마다 잠금을 풀면 긴 관성이 여러 탭을 넘긴다. 대신 감속 뒤
     // 다시 강해지는 입력이나 뚜렷한 방향 반전만 새 스와이프로 받는다.
     if (this.fired) {
+      if (momentum) {
+        // 관성은 스스로 강해지거나 되돌아오지 않는다. 램프업을 "또 밀었다"로
+        // 오인해 탭을 건너뛰는 일이 없도록 잠금을 유지하고 소비만 한다.
+        this.consumed = deltaX !== 0;
+        return null;
+      }
       const magnitude = Math.abs(deltaX);
       const reversed =
         signOf(deltaX) !== this.firedDirection && magnitude >= TAB_SWIPE_DEAD_ZONE_PX;

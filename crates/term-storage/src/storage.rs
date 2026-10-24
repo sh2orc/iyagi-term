@@ -9,8 +9,9 @@ use std::thread::JoinHandle;
 
 use rusqlite::{Connection, OpenFlags};
 use term_contracts::agent_session::AgentSessionRecord;
-use term_contracts::ids::{RequestId, SessionId, WorkloadId};
+use term_contracts::ids::{RequestId, ScheduleId, SessionId, WorkloadId};
 use term_contracts::mission::types::{Id as MissionId, Mission};
+use term_contracts::schedule::{ScheduledCommand, ScheduledCommandStatus};
 use term_contracts::snapshot::QueueReason;
 use term_contracts::state::WorkloadState;
 use term_contracts::workload::{ProcessOwnership, WorkloadRecord};
@@ -320,6 +321,101 @@ impl Storage {
             keep_at_most,
             reply,
         })
+    }
+
+    // -- scheduled commands ---------------------------------------------------
+
+    /// 새 예약을 저장한다. 레코드는 pending 상태로 만들어 넘겨야 한다.
+    pub fn insert_scheduled_command(&self, record: ScheduledCommand) -> StorageResult<()> {
+        self.exec(|reply| WriterCommand::InsertScheduledCommand {
+            record: Box::new(record),
+            reply,
+        })
+    }
+
+    /// 만료된 pending을 클레임한다(`pending→firing` 원자 전환). 취소는
+    /// pending만 건드리므로 같은 행을 두고 다투지 않는다.
+    pub fn claim_due_scheduled_commands(
+        &self,
+        now_ms: u64,
+    ) -> StorageResult<Vec<ScheduledCommand>> {
+        self.exec(|reply| WriterCommand::ClaimDueScheduledCommands { now_ms, reply })
+    }
+
+    /// 재시도: 클레임한 행을 미래 시각에 다시 만료시킨다.
+    pub fn reschedule_scheduled_attempt(
+        &self,
+        id: &ScheduleId,
+        next_fire_at_ms: u64,
+    ) -> StorageResult<()> {
+        self.exec(|reply| WriterCommand::RescheduleScheduledAttempt {
+            id: id.clone(),
+            next_fire_at_ms,
+            reply,
+        })
+    }
+
+    /// 클레임한 행을 종착시킨다(fired/failed/skipped).
+    pub fn finish_scheduled_command(
+        &self,
+        id: &ScheduleId,
+        status: ScheduledCommandStatus,
+        ended_at_ms: u64,
+        reason_code: Option<&str>,
+    ) -> StorageResult<()> {
+        self.exec(|reply| WriterCommand::FinishScheduledCommand {
+            id: id.clone(),
+            status,
+            ended_at_ms,
+            reason_code: reason_code.map(str::to_string),
+            reply,
+        })
+    }
+
+    /// 사용자 취소 — pending일 때만 취소된다.
+    pub fn cancel_scheduled_command(&self, id: &ScheduleId, now_ms: u64) -> StorageResult<bool> {
+        self.exec(|reply| WriterCommand::CancelScheduledCommand {
+            id: id.clone(),
+            now_ms,
+            reply,
+        })
+    }
+
+    /// 세션 종료 훅: 그 세션의 pending을 모두 건너뛰고 건너뛴 행을 돌려준다.
+    pub fn skip_pending_schedules_for_session(
+        &self,
+        session_id: &SessionId,
+        now_ms: u64,
+        reason: &str,
+    ) -> StorageResult<Vec<ScheduledCommand>> {
+        self.exec(|reply| WriterCommand::SkipPendingSchedulesForSession {
+            session_id: session_id.clone(),
+            now_ms,
+            reason: reason.to_string(),
+            reply,
+        })
+    }
+
+    /// 부팅 스윕: 데몬 시작 전에 만들어진 pending/firing을 건너뛴다.
+    pub fn skip_stale_scheduled_commands(
+        &self,
+        created_before_ms: u64,
+        now_ms: u64,
+    ) -> StorageResult<usize> {
+        self.exec(|reply| WriterCommand::SkipStaleScheduledCommands {
+            created_before_ms,
+            now_ms,
+            reply,
+        })
+    }
+
+    /// 최근 예약 목록(최신순, 상한 `limit`건).
+    pub fn list_scheduled_commands(
+        &self,
+        session_id: Option<&SessionId>,
+        limit: i64,
+    ) -> StorageResult<Vec<ScheduledCommand>> {
+        self.read(|conn| queries::list_scheduled_commands(conn, session_id, limit))
     }
 
     /// The reconciliation report from this open (first caller wins; None on

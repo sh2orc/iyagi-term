@@ -1,0 +1,25 @@
+[package]
+name = "term-integrations"
+description = "Shared local integration services: CLI discovery, Z.ai key store/pool, usage capture, shell profiles, hooks JSON"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+term-contracts = { workspace = true }
+term-client = { workspace = true }
+term-secrets = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+time = { version = "0.3.44", features = ["parsing"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

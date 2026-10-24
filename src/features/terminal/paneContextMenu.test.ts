@@ -60,7 +60,7 @@ function fontRow(entries: ContextMenuEntry[]): ContextMenuRow {
 }
 
 describe("buildPaneMenu — 구획과 순서", () => {
-  it("평범한 live pane: 클립보드 · 보기 · 배치 · 탭 재배치 · 닫기", () => {
+  it("평범한 live pane: 클립보드 · 보기 · 배치 · 탭 재배치 · 예약 · 닫기", () => {
     expect(shape(buildPaneMenu(ctx()))).toEqual([
       "copy",
       "paste",
@@ -79,6 +79,8 @@ describe("buildPaneMenu — 구획과 순서", () => {
       "detach",
       "move-to",
       "|",
+      "schedule-command",
+      "|",
       "close",
     ]);
   });
@@ -94,7 +96,7 @@ describe("buildPaneMenu — 구획과 순서", () => {
 
   it("경로·재개 명령은 값이 있을 때만, 전체 값을 detail로", () => {
     const entries = buildPaneMenu(ctx({ cwd: "/work/app", resumeCommand: "claude --resume abc" }));
-    expect(shape(entries).slice(-6)).toEqual(["|", "copy-cwd", "copy-resume", "new-mission-here", "|", "close"]);
+    expect(shape(entries).slice(-7)).toEqual(["|", "copy-cwd", "copy-resume", "schedule-command", "new-mission-here", "|", "close"]);
     expect(item(entries, "copy-cwd")?.detail).toBe("/work/app");
     expect(item(entries, "copy-resume")?.detail).toBe("claude --resume abc");
     const cwdOnly = buildPaneMenu(ctx({ cwd: "/work/app" }));
@@ -109,7 +111,7 @@ describe("buildPaneMenu — 구획과 순서", () => {
       detail: "/work/app",
       disabled: false,
     });
-    expect(shape(inRepo).slice(-4)).toEqual(["copy-cwd", "new-mission-here", "|", "close"]);
+    expect(shape(inRepo).slice(-5)).toEqual(["copy-cwd", "schedule-command", "new-mission-here", "|", "close"]);
     expect(item(buildPaneMenu(ctx({ cwd: "/work/plain" })), "new-mission-here")?.detail).toBe("/work/plain");
     expect(item(buildPaneMenu(ctx()), "new-mission-here")).toBeUndefined();
     expect(item(buildPaneMenu(ctx({ project: "/work/app" })), "new-mission-here")).toBeUndefined();

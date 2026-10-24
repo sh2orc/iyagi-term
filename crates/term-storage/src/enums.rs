@@ -8,6 +8,7 @@
 
 use term_contracts::launch::{Enforcement, LaunchMode};
 use term_contracts::metrics::UsageCoverage;
+use term_contracts::schedule::ScheduledCommandStatus;
 use term_contracts::snapshot::QueueReason;
 use term_contracts::state::WorkloadState;
 use term_contracts::workload::GroupKind;
@@ -146,6 +147,31 @@ pub(crate) fn queue_reason_from_str(s: &str) -> Option<QueueReason> {
     })
 }
 
+// --- ScheduledCommandStatus (scheduled_commands.status CHECK list) ---
+
+pub(crate) fn scheduled_status_to_str(status: ScheduledCommandStatus) -> &'static str {
+    match status {
+        ScheduledCommandStatus::Pending => "pending",
+        ScheduledCommandStatus::Firing => "firing",
+        ScheduledCommandStatus::Fired => "fired",
+        ScheduledCommandStatus::Failed => "failed",
+        ScheduledCommandStatus::Skipped => "skipped",
+        ScheduledCommandStatus::Cancelled => "cancelled",
+    }
+}
+
+pub(crate) fn scheduled_status_from_str(s: &str) -> Option<ScheduledCommandStatus> {
+    Some(match s {
+        "pending" => ScheduledCommandStatus::Pending,
+        "firing" => ScheduledCommandStatus::Firing,
+        "fired" => ScheduledCommandStatus::Fired,
+        "failed" => ScheduledCommandStatus::Failed,
+        "skipped" => ScheduledCommandStatus::Skipped,
+        "cancelled" => ScheduledCommandStatus::Cancelled,
+        _ => return None,
+    })
+}
+
 // --- requests.outcome ---
 
 pub(crate) fn request_outcome_to_str(outcome: crate::types::RequestOutcome) -> &'static str {
@@ -221,6 +247,19 @@ mod tests {
         for r in reasons {
             assert_eq!(queue_reason_from_str(queue_reason_to_str(r)), Some(r));
         }
+        for s in [
+            ScheduledCommandStatus::Pending,
+            ScheduledCommandStatus::Firing,
+            ScheduledCommandStatus::Fired,
+            ScheduledCommandStatus::Failed,
+            ScheduledCommandStatus::Skipped,
+            ScheduledCommandStatus::Cancelled,
+        ] {
+            assert_eq!(
+                scheduled_status_from_str(scheduled_status_to_str(s)),
+                Some(s)
+            );
+        }
     }
 
     #[test]
@@ -254,6 +293,13 @@ mod tests {
             serde_json::to_string(&UsageCoverage::Partial).unwrap(),
             format!("\"{}\"", usage_coverage_to_str(UsageCoverage::Partial))
         );
+        assert_eq!(
+            serde_json::to_string(&ScheduledCommandStatus::Skipped).unwrap(),
+            format!(
+                "\"{}\"",
+                scheduled_status_to_str(ScheduledCommandStatus::Skipped)
+            )
+        );
     }
 
     #[test]
@@ -265,5 +311,7 @@ mod tests {
         assert_eq!(group_kind_from_str("gang"), None);
         assert_eq!(usage_coverage_from_str("full"), None);
         assert_eq!(queue_reason_from_str("WAIT_A_BIT"), None);
+        assert_eq!(scheduled_status_from_str("PENDING"), None);
+        assert_eq!(scheduled_status_from_str("running"), None);
     }
 }

@@ -30,6 +30,34 @@ pub enum AgentModelSource {
     Defaults,
 }
 
+/// 구독 사용량 창 하나의 스냅숏(Claude statusLine `rate_limits` 관찰값).
+/// 퍼센트는 반올림해 0..=100으로 클램프한다 — 게이지·배지 판정에 u8이면
+/// 충분하고 `Eq`를 유지한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentUsageLimitWindow {
+    /// 사용량(반올림, 0..=100).
+    pub used_percent: u8,
+    /// 창이 리셋되는 시각(unix ms). CLI가 알려주지 않으면 없음.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at_unix_ms: Option<u64>,
+}
+
+/// Claude Code 상태줄이 보고한 구독 한도 스냅숏(세션별). 5시간·7일 창 중
+/// 알려진 것만 담는다. 어느 창도 관찰되지 않으면 통째로 없음.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentUsageLimits {
+    /// 5시간 세션 창.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub five_hour: Option<AgentUsageLimitWindow>,
+    /// 7일(주간) 창.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seven_day: Option<AgentUsageLimitWindow>,
+    /// 관찰 시각(unix ms).
+    pub observed_at_unix_ms: u64,
+}
+
 /// 셸 세션 안에서 감지된 AI 코딩 에이전트(claude/codex/opencode) —
 /// 런타임 관찰 결과. 이 구조체 자체는 영속화하지 않고, 세션 id가
 /// 확인되면 `agent_sessions` 표에 별도 행으로 기록한다(02 §8).
@@ -67,6 +95,10 @@ pub struct AgentStatus {
     /// `model`·`effort`의 출처.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_source: Option<AgentModelSource>,
+    /// 상태줄 브리지가 보고한 구독 한도 스냅숏(세션별). statusLine 연동
+    /// 미사용이거나 아직 관찰이 없으면 없음.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_limits: Option<AgentUsageLimits>,
 }
 
 /// Ordered admission outcomes (03 §3). The order is normative.

@@ -235,6 +235,22 @@ pub async fn route(
             let params = request.params.clone();
             run_blocking(move || agent_session_forget(&state, &params).map(Some)).await
         }
+        // 예약 명령: 셋 다 스토리지를 건드린다 — blocking worker 패턴.
+        methods::SCHEDULE_CREATE => {
+            let state = Arc::clone(&state);
+            let params = request.params.clone();
+            run_blocking(move || schedule_create(&state, &params).map(Some)).await
+        }
+        methods::SCHEDULE_LIST => {
+            let state = Arc::clone(&state);
+            let params = request.params.clone();
+            run_blocking(move || schedule_list(&state, &params).map(Some)).await
+        }
+        methods::SCHEDULE_CANCEL => {
+            let state = Arc::clone(&state);
+            let params = request.params.clone();
+            run_blocking(move || schedule_cancel(&state, &params).map(Some)).await
+        }
         methods::RETENTION_SET_LIMIT => retention_set_limit(&state, &request.params).map(Some),
         methods::DAEMON_SHUTDOWN => daemon_shutdown(&state, &request.params).map(Some),
         other => Err(RpcError::new(
@@ -552,6 +568,7 @@ fn agent_session_report(
                     model: None,
                     effort: None,
                     model_source: None,
+                    usage_limits: None,
                 });
             }
         }
@@ -808,6 +825,131 @@ fn agent_session_forget(
 fn encode<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, RpcError> {
     serde_json::to_value(value)
         .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, format!("encode: {e}")))
+}
+
+/// `schedule.create`: 예약을 저장한다. 검증(길이·NUL·시각 창)은 계약이
+/// 하고, 여기서는 대상 세션이 지금 살아 있는지만 본다. 만료까지 사이에
+/// 세션이 끝나면 종료 훅이 pending을 건너뛴다.
+fn schedule_create(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    use term_contracts::ids::ScheduleId;
+    use term_contracts::schedule::{
+        ScheduleCreateParams, ScheduleCreateResult, ScheduledCommand, ScheduledCommandStatus,
+    };
+
+    let params: ScheduleCreateParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            ErrorCode::InvalidArgument,
+            format!("schedule create payload: {e}"),
+        )
+    })?;
+    let now = crate::scheduled_commands::wall_now_ms();
+    params
+        .validate(now)
+        .map_err(|message| RpcError::new(ErrorCode::InvalidArgument, message))?;
+    if state.session(&params.session_id).is_none() {
+        return Err(RpcError::new(
+            ErrorCode::InvalidArgument,
+            "session not found",
+        ));
+    }
+    let record = ScheduledCommand {
+        schedule_id: ScheduleId::generate(),
+        session_id: params.session_id,
+        command: params.command,
+        fire_at_ms: params.fire_at_ms,
+        status: ScheduledCommandStatus::Pending,
+        attempts: 0,
+        created_at_ms: now,
+        fired_at_ms: None,
+        reason_code: None,
+    };
+    state
+        .storage
+        .insert_scheduled_command(record.clone())
+        .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, e.to_string()))?;
+    encode(&ScheduleCreateResult {
+        schedule_id: record.schedule_id,
+    })
+}
+
+/// `schedule.list`: 최근 예약(종착 상태 포함). 개수 상한만으로는 프레임
+/// 예산을 지킬 수 없다(명령 원문이 건당 최대 4 KiB) — 바이트로 한 번 더
+/// 깎는다(`bound_agent_session_list`와 같은 선형 계산).
+fn schedule_list(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    use term_contracts::schedule::limits::LIST_BUDGET_BYTES;
+    use term_contracts::schedule::{ScheduleListParams, ScheduleListResult};
+
+    let params: ScheduleListParams = if params.is_null() {
+        ScheduleListParams { session_id: None }
+    } else {
+        serde_json::from_value(params.clone()).map_err(|e| {
+            RpcError::new(
+                ErrorCode::InvalidArgument,
+                format!("schedule list payload: {e}"),
+            )
+        })?
+    };
+    let mut records = state
+        .storage
+        .list_scheduled_commands(
+            params.session_id.as_ref(),
+            term_contracts::schedule::limits::LIST_ROW_LIMIT,
+        )
+        .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, e.to_string()))?;
+    let requested = records.len();
+    let mut total = "[]".len();
+    let mut fits = 0usize;
+    for record in records.iter() {
+        let Ok(encoded) = serde_json::to_vec(record) else {
+            break;
+        };
+        let with_record = total + usize::from(fits > 0) + encoded.len();
+        if with_record > LIST_BUDGET_BYTES {
+            break;
+        }
+        total = with_record;
+        fits += 1;
+    }
+    records.truncate(fits);
+    if records.len() < requested {
+        tracing::warn!(
+            requested,
+            returned = records.len(),
+            bytes = total,
+            "scheduled command list trimmed to the frame budget"
+        );
+    }
+    encode(&ScheduleListResult { items: records })
+}
+
+/// `schedule.cancel`: pending일 때만 취소된다. 이미 발사했거나 클레임
+/// 중이면 `cancelled: false`(에러가 아니다).
+fn schedule_cancel(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    use term_contracts::schedule::{ScheduleCancelParams, ScheduleCancelResult};
+
+    let params: ScheduleCancelParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            ErrorCode::InvalidArgument,
+            format!("schedule cancel payload: {e}"),
+        )
+    })?;
+    let cancelled = state
+        .storage
+        .cancel_scheduled_command(
+            &params.schedule_id,
+            crate::scheduled_commands::wall_now_ms(),
+        )
+        .map_err(|e| RpcError::new(ErrorCode::DaemonUnavailable, e.to_string()))?;
+    encode(&ScheduleCancelResult { cancelled })
 }
 
 /// `intervention.list` (W1-5): 최근 개입 알림을 오래된 순으로.
@@ -2316,9 +2458,12 @@ mod tests {
             methods::AGENT_SESSION_REPORT,
             methods::AGENT_SESSION_LIST,
             methods::AGENT_SESSION_FORGET,
+            methods::SCHEDULE_CREATE,
+            methods::SCHEDULE_LIST,
+            methods::SCHEDULE_CANCEL,
             methods::DAEMON_SHUTDOWN,
         ];
-        assert_eq!(all.len(), 21, "every spec method is routed");
+        assert_eq!(all.len(), 24, "every spec method is routed");
     }
 }
 

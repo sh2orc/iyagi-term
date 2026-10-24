@@ -34,6 +34,8 @@ import { resumeCommand, sessionDisplayLabel, type AgentResumeInfo } from "../age
 import { abbreviateHome } from "./displayPath";
 import type { AgentStatus } from "../../generated/AgentStatus";
 import { queryGitBranch, type GitBranchInfo } from "./gitBranch";
+import { blockedWindow } from "./agentUsage";
+import { UsageLimitBadge } from "./UsageLimitBadge";
 import { missionEntryState } from "../missions/capability";
 import { openMissionCreate, paneRepositoryHint } from "../missions/entry";
 
@@ -180,6 +182,11 @@ export const TerminalPane = memo(function TerminalPane({ leafId }: PaneProps): J
         </span>
         <GitBranchBadge leafId={leafId} cwd={pane.cwd} />
         {pane.agent ? <AgentBadge agent={pane.agent} /> : null}
+        {/* 사용량 한도 카운트다운(statusLine 관찰값 — 세션별). live에서만:
+            끝난 세션의 한도는 더 의미가 없다. */}
+        {pane.agent && pane.phase === "live" ? (
+          <UsageLimitBadge resetsAtMs={blockedWindow(pane.agent)?.resets_at_unix_ms} variant="pane" />
+        ) : null}
         {pane.agent && pane.phase === "live" && typeof pane.sessionId === "string" ? (
           <LastOutputBadge sessionId={pane.sessionId} />
         ) : null}

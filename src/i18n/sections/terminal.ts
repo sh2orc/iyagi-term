@@ -42,6 +42,7 @@ export const ko = {
   "terminal.pane.aria": "터미널 창 {title}",
   "terminal.pane.close": "터미널 창 닫기",
   "terminal.pane.missionFromAgent": "이 저장소에서 AI 팀에 맡기기…",
+  "terminal.pane.scheduleCommand": "이 터미널에 명령 예약…",
   "terminal.pane.missionFromAgentHint": "현재 대화는 옮겨지지 않습니다. 목표를 새로 적어 주세요.",
   "terminal.pane.flowPaused": "출력 일시 중지",
   // 입력이 닿지 않는 이유(좀비 pane 진단): 자원 가드 일시정지·입력 막힘.
@@ -142,6 +143,7 @@ export const ko = {
   "terminal.contextMenu.moveTo": "다른 탭으로 이동…",
   "terminal.contextMenu.copyCwd": "경로 복사",
   "terminal.contextMenu.copyResume": "재개 명령 복사",
+  "terminal.contextMenu.scheduleCommand": "이 터미널에 명령 예약…",
   "terminal.contextMenu.newMissionHere": "이 폴더에서 AI 작업…",
   "terminal.contextMenu.restart": "다시 시작",
   "terminal.contextMenu.close": "창 닫기",
@@ -216,6 +218,7 @@ export const en: Record<keyof typeof ko, string> = {
   "terminal.pane.aria": "Terminal pane {title}",
   "terminal.pane.close": "Close terminal pane",
   "terminal.pane.missionFromAgent": "Hand this repository to an AI team…",
+  "terminal.pane.scheduleCommand": "Schedule a command here…",
   "terminal.pane.missionFromAgentHint": "The current conversation is not carried over. Write the goal again.",
   "terminal.pane.flowPaused": "Output paused",
   // Why input is not reaching the pane (zombie-pane diagnosis).
@@ -316,6 +319,7 @@ export const en: Record<keyof typeof ko, string> = {
   "terminal.contextMenu.moveTo": "Move to another tab…",
   "terminal.contextMenu.copyCwd": "Copy path",
   "terminal.contextMenu.copyResume": "Copy resume command",
+  "terminal.contextMenu.scheduleCommand": "Schedule a command here…",
   "terminal.contextMenu.newMissionHere": "New AI mission here…",
   "terminal.contextMenu.restart": "Restart",
   "terminal.contextMenu.close": "Close pane",

@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use term_contracts::ids::WorkloadId;
-use term_contracts::snapshot::AgentModelSource;
+use term_contracts::snapshot::{AgentModelSource, AgentUsageLimits};
 use term_platform::proc_scan::ProcessBrief;
 
 use crate::agent_model::{self, ClaudeModelEvent, LaunchModel, ModelObservation};
@@ -126,6 +126,12 @@ pub fn note_input(now_ms: u64, workload_id: &WorkloadId) {
 /// 감시에서 빠진 workload의 입력 기록을 지운다.
 pub fn forget_input(workload_id: &WorkloadId) {
     INPUT_LOG.forget(workload_id);
+}
+
+/// 그 workload에 마지막으로 입력이 전달된 시각(데몬 단조 ms). 자동
+/// continue가 "사용자가 에러 뒤 직접 입력했는가"를 가리는 데 쓴다.
+pub fn last_input_ms(workload_id: &WorkloadId) -> Option<u64> {
+    INPUT_LOG.last(workload_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +300,10 @@ pub struct ModelWatch {
     defaults: Option<ModelObservation>,
     session_id: Option<String>,
     statusline: Option<Cached<Option<(u64, ModelObservation)>>>,
+    /// 세션별 사용량 한도 캐시(`data/claude-limits/<session>.json`) — 상태줄
+    /// 브리지가 창 내용이 바뀔 때만 재기록하므로 스탬프 게이트가 그대로
+    /// 듣는다.
+    limits: Option<Cached<Option<AgentUsageLimits>>>,
     transcript_locator: LogLocator,
     transcript: Option<Cached<Vec<ClaudeModelEvent>>>,
     rollout_locator: LogLocator,
@@ -322,6 +332,7 @@ impl ModelWatch {
             defaults: None,
             session_id: None,
             statusline: None,
+            limits: None,
             transcript_locator: LogLocator::default(),
             transcript: None,
             rollout_locator: LogLocator::default(),
@@ -334,6 +345,12 @@ impl ModelWatch {
     /// 지금 아는 모델·effort와 출처. 한 번도 못 알아냈으면 `None`.
     pub fn current(&self) -> Option<&(ModelObservation, AgentModelSource)> {
         self.current.as_ref()
+    }
+
+    /// 상태줄 브리지가 마지막으로 기록한 사용량 한도 스냅숏(세션별).
+    /// 캐시 파일이 없거나 아직 못 읽었으면 `None`.
+    pub fn usage_limits(&self) -> Option<AgentUsageLimits> {
+        self.limits.as_ref().and_then(|cached| cached.value)
     }
 
     /// [`codex_config_target`]이 이 pane을 골랐을 때 — 바뀐 설정을 즉시 반영한다.
@@ -371,6 +388,7 @@ pub fn refresh(
         // 새 세션(재개·/clear 등) — 세션별 로그 캐시는 버리고 pane 수준 값은 둔다.
         watch.session_id = session_id.map(str::to_string);
         watch.statusline = None;
+        watch.limits = None;
         watch.transcript = None;
         watch.transcript_locator = LogLocator::default();
         watch.rollout = None;
@@ -429,6 +447,13 @@ fn claude_current(
         std::fs::read_to_string(path)
             .ok()
             .and_then(|text| agent_model::parse_statusline_cache(&text))
+    });
+
+    let limits_path = crate::agent_usage::limits_cache_path(&ctx.data_dir, session_id);
+    refresh_cached(&mut watch.limits, &limits_path, |path| {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| crate::agent_usage::parse_limits_cache(&text))
     });
 
     let tick = watch.tick;
@@ -785,6 +810,55 @@ mod tests {
                 Some(AgentModelSource::StatusLine)
             )
         );
+    }
+
+    #[test]
+    fn usage_limits_follow_the_session_cache_and_reset_on_session_change() {
+        use term_contracts::snapshot::AgentUsageLimitWindow;
+
+        let env = Env::new("claude-limits");
+        let ctx = env.ctx();
+        let cwd = "/work/proj";
+        let session = resolved(SESSION, cwd);
+        let mut watch = ModelWatch::started_at(1_000);
+
+        // 캐시가 없으면 한도도 없다.
+        refresh(&ctx, "claude", None, Some(&session), &mut watch);
+        assert!(watch.usage_limits().is_none());
+
+        // 차단 스냅숏이 기록되면 다음 틱에 반영한다.
+        let blocked = AgentUsageLimits {
+            five_hour: Some(AgentUsageLimitWindow {
+                used_percent: 100,
+                resets_at_unix_ms: Some(1_790_000_000_000),
+            }),
+            seven_day: None,
+            observed_at_unix_ms: 5_000,
+        };
+        let cache = crate::agent_usage::limits_cache_path(&ctx.data_dir, SESSION);
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        std::fs::write(&cache, serde_json::to_string(&blocked).unwrap()).unwrap();
+        refresh(&ctx, "claude", None, Some(&session), &mut watch);
+        assert_eq!(watch.usage_limits(), Some(blocked));
+
+        // 해제된 창으로 재기록되면 즉시 따라간다(배지 소거 경로).
+        let cleared = AgentUsageLimits {
+            five_hour: Some(AgentUsageLimitWindow {
+                used_percent: 40,
+                resets_at_unix_ms: Some(1_790_003_600_000),
+            }),
+            seven_day: None,
+            observed_at_unix_ms: 6_000,
+        };
+        std::fs::write(&cache, serde_json::to_string(&cleared).unwrap()).unwrap();
+        refresh(&ctx, "claude", None, Some(&session), &mut watch);
+        assert_eq!(watch.usage_limits(), Some(cleared));
+
+        // 세션이 바뀌면(재개) 세션별 캐시를 버린다 — 새 세션의 캐시가
+        // 나타나기 전까지 알던 값도 없다.
+        let next = resolved("8ac36a9f-d471-59af-b3e6-1351aa4adb8b", cwd);
+        refresh(&ctx, "claude", None, Some(&next), &mut watch);
+        assert!(watch.usage_limits().is_none());
     }
 
     #[test]

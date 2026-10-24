@@ -27,6 +27,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 term-contracts = { workspace = true }
+term-client = { workspace = true }
+term-integrations = { workspace = true }
 term-secrets = { workspace = true }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 time = { version = "0.3.44", features = ["parsing"] }

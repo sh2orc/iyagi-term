@@ -167,6 +167,8 @@ export const ko = {
   "app.tabQueued": "대기 중인 작업이 있습니다",
   "app.tabIntervention": "확인이 필요한 요청이 있습니다",
   "app.tabUsage": "이 탭의 살아 있는 터미널 중 최대 사용량(CPU · RAM). 에이전트가 모델 응답을 기다리는 동안은 CPU가 0에 가깝습니다 — 살아 있어도 <0.1코어로 보일 수 있습니다.",
+  "app.usageLimitBadge": "구독 사용량 한도에 걸렸습니다 — 리셋까지 남은 시간입니다.",
+  "app.usageLimitNoReset": "한도 초과",
 
   // 알림센터(W1-5 최소 버전)
   "notifications.bell": "알림",
@@ -178,9 +180,14 @@ export const ko = {
   "notifications.kind.stop": "응답 종료",
   "notifications.kind.notification": "알림",
   "notifications.kind.finished": "작업 종료",
+  "notifications.kind.schedule": "예약 명령",
+  "notifications.kind.autoContinue": "자동 계속",
   "notifications.kind.missionDecision": "AI 작업 결정 필요",
   "notifications.kind.missionAcceptance": "AI 작업 확정 대기",
   "notifications.kind.missionFailed": "AI 작업 실패",
+  "notifications.kind.quotaStale": "사용량 한도 대기",
+  "notifications.action.resume": "재개 (Enter)",
+  "notifications.quotaStale.resumeBlocked": "세션이 지금 입력을 받을 수 없어 재개하지 못했습니다. pane으로 이동만 했습니다.",
   "notifications.hooksHint": "CLI hooks 연동: iyagi-termd hook 을 CLI의 hook 명령으로 등록하면 승인 요청이 여기에 모입니다. 앱은 CLI 설정 파일을 직접 수정하지 않습니다.",
 
   // 빈 프로젝트 퀵스타트(W1-10): 감지된 CLI 1-클릭 관리 실행.
@@ -192,6 +199,7 @@ export const ko = {
 
   // 최근 에이전트 세션(04-ui §5): 기록을 보여 주기만 하고, 실행은 사용자가 누를 때만.
   "palette.agentSessions": "최근 에이전트 세션…",
+  "palette.scheduleCommand": "명령 예약…",
   "palette.resumeAll": "일시정지 모두 재개",
   "palette.missionNew": "AI 작업: 새로 만들기…",
   "palette.missionList": "AI 작업: 목록…",
@@ -480,6 +488,8 @@ export const en: Record<keyof typeof ko, string> = {
   "app.tabQueued": "Has a queued workload",
   "app.tabIntervention": "Has a request awaiting your input",
   "app.tabUsage": "Peak usage among this tab's live terminals (CPU · RAM). While an agent waits on a model response its CPU is near zero — it can read <0.1 cores even while alive.",
+  "app.usageLimitBadge": "This session hit its subscription usage limit — time until the window resets.",
+  "app.usageLimitNoReset": "Limit reached",
 
   // Notification center (W1-5 minimal)
   "notifications.bell": "Alerts",
@@ -491,9 +501,14 @@ export const en: Record<keyof typeof ko, string> = {
   "notifications.kind.stop": "Response finished",
   "notifications.kind.notification": "Notification",
   "notifications.kind.finished": "Workload finished",
+  "notifications.kind.schedule": "Scheduled command",
+  "notifications.kind.autoContinue": "Auto-continue",
   "notifications.kind.missionDecision": "AI mission needs a decision",
   "notifications.kind.missionAcceptance": "AI mission awaiting confirmation",
   "notifications.kind.missionFailed": "AI mission failed",
+  "notifications.kind.quotaStale": "Usage-limit wait",
+  "notifications.action.resume": "Resume (send Enter)",
+  "notifications.quotaStale.resumeBlocked": "Could not resume — the session is not accepting input right now. Only the pane was focused.",
   "notifications.hooksHint": "CLI hooks: register `iyagi-termd hook` as your CLI's hook command and permission requests land here. The app never edits your CLI config files directly.",
 
   // Empty-project quickstart (W1-10): one-click managed run of a detected CLI.
@@ -505,6 +520,7 @@ export const en: Record<keyof typeof ko, string> = {
 
   // Recent agent sessions (04-ui §5): the list only records; launching stays a user action.
   "palette.agentSessions": "Recent agent sessions…",
+  "palette.scheduleCommand": "Schedule a command…",
   "palette.resumeAll": "Resume all suspended",
   "palette.missionNew": "AI mission: New…",
   "palette.missionList": "AI mission: List…",

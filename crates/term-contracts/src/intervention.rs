@@ -41,6 +41,11 @@ pub struct InterventionReport {
     /// 알림이 속한 세션 단서(cwd·세션 id 후보). UI가 pane 연결에만 쓴다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_hint: Option<String>,
+    /// CLI가 분류한 알림 종류 원문(예: Claude의
+    /// `quota_auto_resume_stale`). 우리 어휘가 아니라 그쪽 어휘라 열거형으로
+    /// 동결하지 않고 검증만 거친 문자열로 통과시킨다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_type: Option<String>,
     /// 신호 출처(예: "claude-code-hook"). 상한 64자.
     pub source: String,
 }
@@ -61,6 +66,7 @@ pub mod limits {
     pub const DETAIL_MAX: usize = 2_000;
     pub const SESSION_HINT_MAX: usize = 4_096;
     pub const SOURCE_MAX: usize = 64;
+    pub const NOTIFICATION_TYPE_MAX: usize = 64;
     /// 데몬이 메모리에 유지하는 최근 개입 수(링).
     pub const RETAINED: usize = 100;
     /// 멱등 중복 판정에 쓰는 report_id 수.
@@ -87,6 +93,16 @@ impl InterventionReport {
                 return Err("session_hint exceeds 4096 chars");
             }
         }
+        if let Some(kind) = &self.notification_type {
+            if kind.is_empty()
+                || kind.len() > NOTIFICATION_TYPE_MAX
+                || !kind
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            {
+                return Err("notification_type must be 1..=64 [a-z0-9_] chars");
+            }
+        }
         if self.source.trim().is_empty() || self.source.len() > SOURCE_MAX {
             return Err("source must be 1..=64 non-space chars");
         }
@@ -105,6 +121,7 @@ mod tests {
             title: "파일 쓰기 승인 요청".into(),
             detail: Some("edit: src/a.ts".into()),
             session_hint: Some("/repo".into()),
+            notification_type: None,
             source: "claude-code-hook".into(),
         }
     }
@@ -113,10 +130,37 @@ mod tests {
     fn valid_report_round_trips_and_omits_optional_fields() {
         let r = report();
         let json = serde_json::to_string(&r).unwrap();
-        assert!(!json.contains("session_hint") || r.session_hint.is_some());
+        assert!(!json.contains("notification_type"));
         let back: InterventionReport = serde_json::from_str(&json).unwrap();
         assert_eq!(back, r);
         assert_eq!(back.kind, InterventionKind::Permission);
+    }
+
+    #[test]
+    fn notification_type_round_trips_when_present() {
+        let mut r = report();
+        r.notification_type = Some("quota_auto_resume_stale".into());
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("quota_auto_resume_stale"));
+        let back: InterventionReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.notification_type.as_deref(),
+            Some("quota_auto_resume_stale")
+        );
+        assert!(back.validate().is_ok());
+    }
+
+    #[test]
+    fn notification_type_rejects_oversize_and_non_lowercase() {
+        let mut r = report();
+        r.notification_type = Some("x".repeat(65));
+        assert!(r.validate().is_err());
+        r.notification_type = Some("Quota Auto".into());
+        assert!(r.validate().is_err());
+        r.notification_type = Some(String::new());
+        assert!(r.validate().is_err());
+        r.notification_type = Some("quota_auto_resume_fired".into());
+        assert!(r.validate().is_ok());
     }
 
     #[test]

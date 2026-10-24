@@ -169,6 +169,34 @@ impl HostSample {
     }
 }
 
+/// 워크로드 하나의 최신 귀속 사용량 요약(`resource.snapshot`에 실린다).
+/// UI의 pane·탭 배지가 쓰는 두 값만 싣는다 — 전체 [`WorkloadUsage`]는
+/// 스냅샷·`workload.changed`가 나른다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkloadUsageBrief {
+    pub workload_id: WorkloadId,
+    pub cpu_cores: Metric<f64>,
+    pub resident_bytes: Metric<U64String>,
+}
+
+/// `resource.snapshot` 이벤트 본문(텔레메트리 틱마다, 1초 주기). `revision`이
+/// UI가 들고 있는 스냅샷보다 크면 그사이 데몬 상태(자동 양보·정지 등)가
+/// 바뀐 것이다 — UI는 스냅샷을 다시 받는다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ResourceSnapshotEvent {
+    pub revision: u64,
+    pub host: HostSample,
+    /// 메모리 압력(히스테리시스 적용). `host.pressure`와 같다.
+    pub pressure: PressureLevel,
+    /// CPU 압력(히스테리시스 적용). `host.cpu_pressure`와 같다.
+    pub cpu_pressure: PressureLevel,
+    /// 살아 있는 워크로드의 최신 귀속 사용량. 구 데몬은 생략한다.
+    #[serde(default)]
+    pub usage: Vec<WorkloadUsageBrief>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

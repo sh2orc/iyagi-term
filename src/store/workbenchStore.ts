@@ -20,12 +20,16 @@ import {
 } from "./workloadMemory";
 import { t } from "../i18n";
 import type { AgentStatus } from "../generated/AgentStatus";
+import type { GuardPolicy } from "../generated/GuardPolicy";
 import type { HostSample } from "../generated/HostSample";
+import type { Metric } from "../generated/Metric";
 import type { QueueEntry } from "../generated/QueueEntry";
 import type { LimitCapability } from "../generated/LimitCapability";
 import type { ReliefPolicy } from "../generated/ReliefPolicy";
 import type { Snapshot } from "../generated/Snapshot";
 import type { WorkloadSummary } from "../generated/WorkloadSummary";
+import type { WorkloadUsage } from "../generated/WorkloadUsage";
+import type { WorkloadUsageBrief } from "../generated/WorkloadUsageBrief";
 import {
   balanceAllAxisGroups,
   balanceAxisGroup,
@@ -119,7 +123,16 @@ export interface PaneMeta {
   relief?: PaneRelief;
   /** 사용자가 이 세션을 자동 완화에서 제외했다(08 §0-3). */
   protected?: boolean;
+  /**
+   * 에이전트 시작 줄(P2-5)에서 차례를 기다리는 중이면 그 이유: "memory"는 호스트
+   * 메모리 여유(CRITICAL 해소)를, "turn"은 동시 시작 상한·시작 간격을 기다린다.
+   * 저장하지 않는다 — 줄은 컨트롤러 수명이다.
+   */
+  pendingStart?: PaneStartWait | null;
 }
+
+/** 시작 줄에서 기다리는 이유(PaneMeta.pendingStart). */
+export type PaneStartWait = "memory" | "turn";
 
 /**
  * pane이 보여 주는 완화 상태(08 §2 `ReliefState`의 UI 표현). 계약의
@@ -239,6 +252,13 @@ export interface WorkbenchState {
   schedulingYield: LimitCapability | null;
   /** 데몬의 현재 완화 정책(08 §2 `relief.auto_yield`). */
   reliefPolicy: ReliefPolicy;
+  /** 데몬의 현재 자원 가드 정책(08 §5). 첫 snapshot 전·구 데몬은 null. */
+  guardPolicy: GuardPolicy | null;
+  /**
+   * 데몬이 이 호스트에서 유도한 기본 가드 정책(설정의 "기본값으로" 기준). 알리지
+   * 않는 구 데몬이면 null — 설정 화면은 계약의 고정 기본값으로 대신한다.
+   */
+  guardPolicyDefault: GuardPolicy | null;
   queueDrawerOpen: boolean;
   graphDrawerOpen: boolean;
   modal: ModalState | null;
@@ -377,15 +397,25 @@ export interface WorkbenchState {
   paneRelief(leafId: string, relief: PaneRelief, isProtected: boolean): void;
   /** 이어서 열 수 있는 에이전트 세션 기록(04-ui §5). null이면 지운다. */
   paneResume(leafId: string, resume: AgentResumeInfo | null): void;
+  /** 시작 줄 대기 표시(P2-5). 같은 값이면 상태를 바꾸지 않는다. */
+  panePendingStart(leafId: string, wait: PaneStartWait | null): void;
   removePaneMeta(leafId: string): void;
 
   // ---- daemon mirror
   setQueue(queue: QueueEntry[]): void;
   upsertWorkload(workload: WorkloadSummary): void;
   setHostSample(sample: HostSample): void;
+  /**
+   * `resource.snapshot`에 실린 워크로드별 최신 사용량(cpu·rss)을 요약에 덧댄다 —
+   * pane·탭 배지가 초 단위로 살아 있게. 값이 같은 항목은 건드리지 않고, 바뀐 것이
+   * 하나도 없으면 상태도 바꾸지 않는다(구독자를 깨우지 않는다). 바뀌었으면 true.
+   */
+  applyUsage(usage: readonly WorkloadUsageBrief[]): boolean;
   applySnapshot(snapshot: Snapshot): void;
   /** `relief.set_policy` 응답을 그대로 반영한다(08 §2 — 데몬이 적용한 값). */
   setReliefPolicy(policy: ReliefPolicy): void;
+  /** `guard.set_policy` 응답을 그대로 반영한다(08 §5 — 데몬이 적용한 값). */
+  setGuardPolicy(policy: GuardPolicy): void;
 
   // ---- chrome
   openModal(modal: ModalState): void;
@@ -419,6 +449,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   // 데몬 기본값(defaults.json relief.auto_yield)과 같게 시작한다 — 첫
   // snapshot이 도착하면 그 값이 정본이다.
   reliefPolicy: { auto_yield: true },
+  guardPolicy: null,
+  guardPolicyDefault: null,
   queueDrawerOpen: false,
   graphDrawerOpen: false,
   modal: null,
@@ -1079,6 +1111,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       return { panes: { ...s.panes, [leafId]: { ...pane, resume } } };
     }),
 
+  panePendingStart: (leafId, wait) =>
+    set((s) => {
+      const pane = s.panes[leafId];
+      if (!pane || (pane.pendingStart ?? null) === wait) return s;
+      return { panes: { ...s.panes, [leafId]: { ...pane, pendingStart: wait } } };
+    }),
+
   removePaneMeta: (leafId) =>
     set((s) => {
       if (!s.panes[leafId]) return s;
@@ -1107,6 +1146,30 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
   setHostSample: (sample) => set({ host: sample }),
 
+  applyUsage: (usage) => {
+    if (usage.length === 0) return false;
+    const s = get();
+    const patched = new Map<string, WorkloadSummary>();
+    for (const brief of usage) {
+      const current = s.workloadById.get(brief.workload_id);
+      if (!current || isFinishedWorkload(current.state)) continue;
+      const before = current.usage ?? null;
+      if (before && sameMetric(before.cpu_cores, brief.cpu_cores) && sameMetric(before.resident_bytes, brief.resident_bytes)) {
+        continue;
+      }
+      patched.set(brief.workload_id, {
+        ...current,
+        usage: before
+          ? { ...before, cpu_cores: brief.cpu_cores, resident_bytes: brief.resident_bytes }
+          : usageFromBrief(brief),
+      });
+    }
+    if (patched.size === 0) return false;
+    const workloads = s.workloads.map((workload) => patched.get(workload.workload_id) ?? workload);
+    set({ workloads, ...reindexWorkloads(workloads) });
+    return true;
+  },
+
   applySnapshot: (snapshot) => {
     const s = get();
     // revision은 전역 증가 — 더 오래된 snapshot은 폐기(01 §4).
@@ -1129,11 +1192,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       // 구 데몬은 두 필드를 보내지 않는다 — 그때는 "양보 불가"와 기본 정책이다.
       schedulingYield: snapshot.capabilities.scheduling_yield ?? null,
       reliefPolicy: snapshot.relief_policy ?? s.reliefPolicy,
+      // 구 데몬은 둘 다(또는 기본 정책만) 보내지 않는다 — 그때는 모른다(null).
+      guardPolicy: snapshot.guard_policy ?? null,
+      guardPolicyDefault: snapshot.guard_policy_default ?? null,
     });
   },
 
   setReliefPolicy: (policy) =>
     set((s) => (s.reliefPolicy.auto_yield === policy.auto_yield ? s : { reliefPolicy: policy })),
+
+  setGuardPolicy: (policy) =>
+    set((s) => (s.guardPolicy && sameGuardPolicyValues(s.guardPolicy, policy) ? s : { guardPolicy: { ...policy } })),
 
   openModal: (modal) =>
     modal.kind === "mission-create"
@@ -1255,6 +1324,44 @@ function focusWithinTab(tabs: TabState[], activeTabId: string | null, focusedLea
  * 작업(종료 오버레이의 사유 표시)은 개수와 무관하게 남긴다.
  */
 export const FINISHED_WORKLOADS_RETAINED = 50;
+
+/** 두 지표가 같은 값인가(값·출처·품질·사유) — 초당 오는 사용량이 같은 값이면 쓰지 않는다. */
+function sameMetric<T>(a: Metric<T>, b: Metric<T>): boolean {
+  return a.value === b.value && a.source === b.source && a.quality === b.quality && a.reason === b.reason;
+}
+
+function sameGuardPolicyValues(a: GuardPolicy, b: GuardPolicy): boolean {
+  return (
+    a.auto_suspend === b.auto_suspend &&
+    a.cpu_cores_limit === b.cpu_cores_limit &&
+    a.rss_limit_bytes === b.rss_limit_bytes &&
+    a.sustain_ms === b.sustain_ms &&
+    a.rss_sustain_ms === b.rss_sustain_ms &&
+    a.auto_resume === b.auto_resume
+  );
+}
+
+/**
+ * 전체 사용량을 아직 모르는 작업(첫 측정 전 요약)에 표본의 두 값만으로 사용량을
+ * 세운다. 나머지 지표는 "측정 안 됨"이고 범위는 부분(partial)이다 — 0으로
+ * 채우지 않는다(01 §3: 모르는 값은 0이 아니다). 다음 스냅샷이 전체 값을 채운다.
+ */
+function usageFromBrief(brief: WorkloadUsageBrief): WorkloadUsage {
+  const missing = <T,>(): Metric<T> => ({ value: null, source: "resource.snapshot", quality: "unavailable", reason: null });
+  return {
+    workload_id: brief.workload_id,
+    cpu_cores: brief.cpu_cores,
+    resident_bytes: brief.resident_bytes,
+    accounted_bytes: missing(),
+    committed_bytes: missing(),
+    read_bytes_per_sec: missing(),
+    write_bytes_per_sec: missing(),
+    network_rx_bytes_per_sec: missing(),
+    network_tx_bytes_per_sec: missing(),
+    process_count: missing(),
+    coverage: "partial",
+  };
+}
 
 /**
  * `workloads` 배열의 파생 인덱스(`workloadById`·`workloadBySession`).

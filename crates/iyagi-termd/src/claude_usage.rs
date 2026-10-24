@@ -73,21 +73,52 @@ fn sanitized_reset(value: Option<&Value>) -> Value {
     }
 }
 
+/// 같은 사용량을 이 시간 안에 다시 관측했으면 캐시를 다시 쓰지 않는다.
+/// 상태 줄은 메시지마다 돌지만 사용량은 드물게 바뀐다 — 실행마다 하던
+/// 임시 파일 쓰기 + rename을 분당 한 번 수준으로 줄인다(`observedAt`은 이
+/// 만큼까지만 늦는다).
+const CACHE_REFRESH_SECS: u64 = 60;
+
+/// 저장된 캐시가 같은 사용량을 [`CACHE_REFRESH_SECS`] 안에 관측한 것인가.
+fn cache_is_fresh(path: &Path, value: &Value) -> bool {
+    let Some(stored) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+    else {
+        return false;
+    };
+    let observed = |value: &Value| value.get("observedAt").and_then(Value::as_u64);
+    match (observed(&stored), observed(value)) {
+        (Some(then), Some(now)) => {
+            stored.get("rateLimits") == value.get("rateLimits")
+                && now.saturating_sub(then) < CACHE_REFRESH_SECS
+        }
+        _ => false,
+    }
+}
+
+// fsync 없이 임시 파일 + rename만 한다: rename이 원자적이라 읽는 쪽은 옛
+// 내용이나 새 내용만 본다. 전원이 나간 직후 남을 수 있는 빈 파일은 캐시
+// 무효로 읽히고 다음 상태 줄 실행이 다시 쓴다. macOS의 `sync_all`은
+// F_FULLFSYNC(드라이브 캐시까지 비움)라 상태 줄 실행마다 수십 ms와 SSD
+// 쓰기를 치렀다.
 fn write_cache(data_dir: &Path, value: &Value) -> std::io::Result<()> {
     let dir = data_dir.join("data");
+    let path = dir.join("subscription-claude.json");
+    if cache_is_fresh(&path, value) {
+        return Ok(());
+    }
     std::fs::create_dir_all(&dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     }
-    let path = dir.join("subscription-claude.json");
     let tmp = dir.join("subscription-claude.tmp");
     {
         let mut file = std::fs::File::create(&tmp)?;
         serde_json::to_writer(&mut file, value)?;
         file.write_all(b"\n")?;
-        file.sync_all()?;
     }
     #[cfg(unix)]
     {
@@ -134,11 +165,11 @@ fn write_model_cache(data_dir: &Path, payload: &Value) -> std::io::Result<()> {
     prune_model_cache(dir);
     let value = crate::agent_model::statusline_cache_value(&observation, unix_now_ms());
     let tmp = dir.join(format!("{session_id}.tmp"));
+    // `write_cache`와 같은 이유로 fsync하지 않는다(임시 파일 + rename).
     {
         let mut file = std::fs::File::create(&tmp)?;
         serde_json::to_writer(&mut file, &value)?;
         file.write_all(b"\n")?;
-        file.sync_all()?;
     }
     #[cfg(unix)]
     {
@@ -247,6 +278,40 @@ mod tests {
     #[test]
     fn ignores_payload_without_rate_limits() {
         assert!(sanitize(&json!({"cwd": "/repo"})).is_none());
+    }
+
+    /// 같은 사용량을 1분 안에 다시 관측하면 캐시를 다시 쓰지 않는다. 사용량이
+    /// 바뀌었거나 저장된 관측이 1분을 넘었으면 다시 쓴다(원자적 rename).
+    #[test]
+    fn unchanged_usage_is_not_rewritten_within_a_minute() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = |used: f64, at: u64| {
+            json!({
+                "observedAt": at,
+                "rateLimits": { "five_hour": { "usedPercentage": used, "resetsAt": null } },
+            })
+        };
+        let path = dir.path().join("data/subscription-claude.json");
+        let stored_at = || {
+            let text = std::fs::read_to_string(&path).expect("cache");
+            serde_json::from_str::<Value>(&text).expect("json")["observedAt"]
+                .as_u64()
+                .expect("observedAt")
+        };
+
+        write_cache(dir.path(), &cache(10.0, 1_000)).unwrap();
+        assert_eq!(stored_at(), 1_000);
+        write_cache(dir.path(), &cache(10.0, 1_030)).unwrap();
+        assert_eq!(stored_at(), 1_000, "same usage within a minute: no write");
+        write_cache(dir.path(), &cache(11.0, 1_031)).unwrap();
+        assert_eq!(stored_at(), 1_031, "changed usage is written at once");
+        write_cache(dir.path(), &cache(11.0, 1_031 + CACHE_REFRESH_SECS)).unwrap();
+        assert_eq!(
+            stored_at(),
+            1_031 + CACHE_REFRESH_SECS,
+            "a stale observation is refreshed"
+        );
+        assert!(!dir.path().join("data/subscription-claude.tmp").exists());
     }
 }
 

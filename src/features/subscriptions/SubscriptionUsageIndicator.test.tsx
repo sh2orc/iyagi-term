@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QuotaGauges } from "./SubscriptionUsageIndicator";
 import { quotaGauges } from "./quotaGauges";
+import { autoRefreshAllowed, SUBSCRIPTION_MIN_GAP_MS, SUBSCRIPTION_POLL_MS } from "./autoRefresh";
 import type { ProviderUsage, UsageWindow } from "./types";
 
 const quotaWindow = (id: string, remainingPercent: number, windowDurationMinutes: number | null): UsageWindow => ({
@@ -104,5 +105,41 @@ describe("Claude model-scoped quota", () => {
     expect(quotaGauges([provider({ provider: "claude", displayName: "Claude", windows: [
       quotaWindow("five_hour", 57, 300),
     ] })])).toEqual([{ provider: "claude", name: "Claude", remaining: 57 }]);
+  });
+});
+
+describe("구독 사용량 자동 갱신 판단(autoRefreshAllowed)", () => {
+  const base = { now: 1_000_000, lastRefreshAt: null, hidden: false, pressure: "NORMAL" as const, minGapMs: 0 };
+
+  it("자동 주기는 5분, 최소 간격은 1분이다(CLI 두 개를 매 분 띄우지 않는다)", () => {
+    expect(SUBSCRIPTION_POLL_MS).toBe(5 * 60_000);
+    expect(SUBSCRIPTION_MIN_GAP_MS).toBe(60_000);
+  });
+
+  it("보이는 창 + NORMAL이면 첫 갱신을 한다 — 압력을 아직 모르면(null) 막지 않는다", () => {
+    expect(autoRefreshAllowed(base)).toBe(true);
+    expect(autoRefreshAllowed({ ...base, pressure: null })).toBe(true);
+  });
+
+  it("창이 숨어 있으면 어떤 자동 갱신도 하지 않는다", () => {
+    expect(autoRefreshAllowed({ ...base, hidden: true })).toBe(false);
+    expect(autoRefreshAllowed({ ...base, hidden: true, pressure: null })).toBe(false);
+  });
+
+  it("메모리 압력이 NORMAL이 아니면 자동 갱신을 건너뛴다", () => {
+    expect(autoRefreshAllowed({ ...base, pressure: "WARNING" })).toBe(false);
+    expect(autoRefreshAllowed({ ...base, pressure: "CRITICAL" })).toBe(false);
+  });
+
+  it("창 복귀·주기 틱은 마지막 갱신(수동 포함) 뒤 1분이 지나야 한다", () => {
+    const last = base.now - 30_000;
+    expect(autoRefreshAllowed({ ...base, lastRefreshAt: last, minGapMs: SUBSCRIPTION_MIN_GAP_MS })).toBe(false);
+    expect(autoRefreshAllowed({
+      ...base,
+      lastRefreshAt: base.now - SUBSCRIPTION_MIN_GAP_MS,
+      minGapMs: SUBSCRIPTION_MIN_GAP_MS,
+    })).toBe(true);
+    // 간격 0(첫 갱신)은 직전 갱신이 있어도 막지 않는다.
+    expect(autoRefreshAllowed({ ...base, lastRefreshAt: base.now, minGapMs: 0 })).toBe(true);
   });
 });

@@ -86,8 +86,21 @@ fn escalate_direct_child(pty: &PtyHandle) {
 /// Default child exit poll interval (spec §2: periodic try_wait, no
 /// permanent per-session wait thread).
 pub const DEFAULT_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-/// Actor idle loop step.
-const LOOP_STEP: Duration = Duration::from_millis(2);
+/// Exit polls relax to this cadence once the session has been quiet for
+/// [`EXIT_POLL_RELAX_AFTER_MS`]. A root exit that closes the pty is still
+/// seen at once (the reader's EOF triggers an immediate poll); only a root
+/// that exits while a descendant keeps the slave open waits for the slower
+/// cadence.
+const IDLE_EXIT_POLL_MS: u64 = 250;
+const EXIT_POLL_RELAX_AFTER_MS: u64 = 2_000;
+/// Longest actor park. Reader output, control messages and cancel unpark
+/// the actor at once, so the park only bounds timer work (exit poll,
+/// journal upkeep): an idle session wakes 4×/s instead of polling at
+/// 100 Hz (06-verification §5 idle target ≤0.02 cores).
+const MAX_PARK_MS: u64 = 250;
+/// Re-check step while a blocked sink holds a backlog: `OutputSink` has no
+/// wake of its own (the daemon's sink never blocks).
+const BLOCKED_SINK_POLL_MS: u64 = 10;
 /// Output quiescence window used to approximate "pty drained": ConPTY never
 /// delivers EOF while the master is open, so after the root exits the actor
 /// waits for this much silence (bounded by `drain_timeout` regardless).
@@ -139,11 +152,15 @@ fn journal_stash_push(
     }
 }
 
-/// Cap and budget failures are deterministic for this session — retrying
-/// would spin forever. Everything else on the write path (I/O, disk full)
-/// can clear on its own. The [`JournalSink`] trait carries `io::Error`, so
-/// the classification downcasts back to the wrapped flow error; a bare
-/// `io::Error` (test doubles) counts as transient.
+/// Session-cap and payload failures are deterministic for this session —
+/// retrying would spin forever. Everything else on the write path can
+/// clear on its own: I/O and disk full, and the global budget, which frees
+/// as live writers trim to their fair share and retention deletes finished
+/// journals (a young session with nothing of its own to trim used to stop
+/// reading its PTY for good on `GlobalCap`). The [`JournalSink`] trait
+/// carries `io::Error`, so the classification downcasts back to the
+/// wrapped flow error; a bare `io::Error` (test doubles) counts as
+/// transient.
 fn journal_error_is_fatal(error: &std::io::Error) -> bool {
     error
         .get_ref()
@@ -152,7 +169,6 @@ fn journal_error_is_fatal(error: &std::io::Error) -> bool {
             matches!(
                 flow,
                 crate::journal::JournalFlowError::SessionCap { .. }
-                    | crate::journal::JournalFlowError::GlobalCap { .. }
                     | crate::journal::JournalFlowError::PayloadTooLarge { .. }
             )
         })
@@ -168,6 +184,16 @@ pub trait JournalSink: Send {
     fn append_output(&mut self, data: &[u8]) -> std::io::Result<u64>;
     /// Append a resize record; returns the record seq.
     fn append_resize(&mut self, cols: u16, rows: u16) -> std::io::Result<u64>;
+    /// Upkeep on the actor's clock, called once per loop round (the 250 ms
+    /// flush cadence, so a final partial burst reaches the file even after
+    /// output stops; budget housekeeping). Returns when the next call is due
+    /// on the same clock while buffered records wait for the cadence — the
+    /// actor parks until then — and `None` when nothing is buffered. The
+    /// default buffers nothing.
+    fn tick(&mut self, now_ms: u64) -> Option<u64> {
+        let _ = now_ms;
+        None
+    }
 }
 
 /// In-memory journal used by tests and as the pre-I07 default. The first
@@ -908,8 +934,10 @@ pub fn start(
             let mut announced_running = false;
             let reader_rx = reader_rx;
             let mut last_byte_ms = clock.now_ms();
+            // Last reader/control activity: exit polls keep the configured
+            // cadence while the session is busy and relax when it goes quiet.
+            let mut last_activity_ms = last_byte_ms;
             let mut reader_channel_empty = true;
-            let mut idle_rounds: u32 = 0;
             // Owned-descendant count, refreshed on the exit-poll cadence
             // while draining (a full process-table walk on macOS — polling
             // it every loop step burned a core per draining session).
@@ -933,9 +961,10 @@ pub fn start(
                     });
                 }
                 Err(e) => {
-                    // Same degradation rules as the read loop: caps stop
-                    // intake for good; transient failures stash the initial
-                    // size record and retry it before any output.
+                    // Same degradation rules as the read loop: the session
+                    // cap stops intake for good; transient failures (disk
+                    // full, the global budget) stash the initial size record
+                    // and retry it before any output.
                     if journal_error_is_fatal(&e) {
                         journal_fatal = true;
                     } else {
@@ -983,9 +1012,19 @@ pub fn start(
                 }
 
                 // 3. Exit polling (parameterized try_wait; no wait thread).
+                //    The configured cadence while the session is busy or
+                //    draining; a quiet session relaxes to IDLE_EXIT_POLL_MS.
                 let now_ms = clock.now_ms();
                 if now_ms >= next_exit_poll_ms {
-                    next_exit_poll_ms = now_ms + exit_poll_interval.as_millis().max(1) as u64;
+                    let busy = drain_started_ms.is_some()
+                        || now_ms.saturating_sub(last_activity_ms) < EXIT_POLL_RELAX_AFTER_MS;
+                    let interval = exit_poll_interval.as_millis().max(1) as u64;
+                    let interval = if busy {
+                        interval
+                    } else {
+                        interval.max(IDLE_EXIT_POLL_MS)
+                    };
+                    next_exit_poll_ms = now_ms + interval;
                     if !root_exited {
                         match pty.poll_exit() {
                             Ok(Some(status)) => {
@@ -1010,11 +1049,12 @@ pub fn start(
                 // 4. Reader bytes: journal first, then pending emit. Paused
                 //    when the pending buffer is over budget (backpressure
                 //    chain: actor -> bounded channel -> reader -> pty OS
-                //    buffer). A cap/budget journal failure stops intake
-                //    entirely; a transient one (I/O, disk full) degrades to
-                //    a bounded stash with retried, ordered flushes — a
-                //    disk-full cascade must not freeze every session
-                //    permanently (02-runner §5 keeps the root running).
+                //    buffer). A session-cap journal failure stops intake
+                //    entirely; a transient one (I/O, disk full, the global
+                //    budget) degrades to a bounded stash with retried,
+                //    ordered flushes — a disk-full cascade or a full global
+                //    budget must not freeze a session permanently
+                //    (02-runner §5 keeps the root running).
                 if journal_fatal {
                     reader_eof = true;
                 }
@@ -1070,12 +1110,17 @@ pub fn start(
                                 );
                             }
                         }
-                        Ok(LoopInput::Eof) => reader_eof = true,
+                        Ok(LoopInput::Eof) | Err(TryRecvError::Disconnected) => {
+                            reader_eof = true;
+                            // The pty hung up — usually the root just exited:
+                            // poll for it now rather than at the next (maybe
+                            // relaxed) exit-poll slot.
+                            next_exit_poll_ms = 0;
+                        }
                         Err(TryRecvError::Empty) => {
                             reader_channel_empty = true;
                             break;
                         }
-                        Err(TryRecvError::Disconnected) => reader_eof = true,
                     }
                 }
 
@@ -1171,6 +1216,13 @@ pub fn start(
                     }
                 }
 
+                // 5b. Journal upkeep on the actor clock: the 250 ms flush
+                //     cadence (a final partial burst still reaches the file
+                //     after output stops) and budget housekeeping. Ahead of
+                //     the emit, so the delivery pump usually finds this
+                //     round's records on disk already.
+                let flush_due = journal.tick(clock.now_ms());
+
                 // 6. Emit as far as the sink allows. The journal already has
                 //    every record, so a blocked sink only lags the cursor.
                 while sink.can_send() {
@@ -1200,6 +1252,10 @@ pub fn start(
                 //    would otherwise expire and finalize `kill()` a live
                 //    root two seconds after the cap.
                 let drain_trigger = root_exited || (reader_eof && journal_err.is_none());
+                // Next drain timer (owned-group poll, quiescence, drain
+                // timeout), only the ones still ahead — a passed one must
+                // not turn the park into a spin.
+                let mut drain_wake_at: Option<u64> = None;
                 if drain_trigger {
                     let now = clock.now_ms();
                     if drain_started_ms.is_none() {
@@ -1208,7 +1264,20 @@ pub fn start(
                         loop_shared.update_status(|s| s.lifecycle = SessionLifecycle::Draining);
                     }
                     if now >= next_owned_poll_ms {
-                        next_owned_poll_ms = now + exit_poll_interval.as_millis().max(1) as u64;
+                        // Inside the drain window, or while output still
+                        // flows, the configured cadence; a quiet root-exited
+                        // session waiting out long-lived descendants
+                        // (RUNNING, 02-runner §5) relaxes like the exit poll.
+                        let interval = exit_poll_interval.as_millis().max(1) as u64;
+                        let waiting_long = now.saturating_sub(drain_started_ms.unwrap_or(now))
+                            >= drain_timeout.as_millis() as u64
+                            && now.saturating_sub(last_activity_ms) >= EXIT_POLL_RELAX_AFTER_MS;
+                        next_owned_poll_ms = now
+                            + if waiting_long {
+                                interval.max(IDLE_EXIT_POLL_MS)
+                            } else {
+                                interval
+                            };
                         if let Some(count) = descendants.try_owned_alive() {
                             owned_alive_known = Some(count);
                         }
@@ -1243,30 +1312,64 @@ pub fn start(
                     if (drained || timed_out) && group_empty {
                         break;
                     }
+                    let mut next = next_owned_poll_ms;
+                    if !reader_eof && !quiet {
+                        next = next.min(last_byte_ms.saturating_add(DRAIN_QUIESCENCE_MS));
+                    }
+                    if !timed_out {
+                        let started = drain_started_ms.unwrap_or(now);
+                        next = next.min(started.saturating_add(drain_timeout.as_millis() as u64));
+                    }
+                    drain_wake_at = Some(next);
                 }
 
-                // Idle backoff: an idle session's loop relaxes from 2 ms to
-                // 10 ms polling (8 idle shells at 500 Hz each dominated the
-                // daemon's idle CPU; 06-verification §5 target ≤0.02 cores).
-                // Any activity — reader bytes, control message, pending sink
-                // backlog, drain phase — returns the loop to full speed.
-                // A successfully drained channel is empty even during a
-                // continuous redraw. Count bytes processed this round, not
-                // just bytes left over, or a busy session backs off to 10ms.
-                let activity = reader_seen || control_seen || !pending.is_empty();
-                idle_rounds = if activity {
-                    0
-                } else {
-                    idle_rounds.saturating_add(1)
-                };
-                let step = if idle_rounds >= 8 {
-                    Duration::from_millis(10)
-                } else {
-                    LOOP_STEP
-                };
-                // Reader output and control messages wake the actor immediately.
-                // The park permit retains wakes arriving just before this call.
-                std::thread::park_timeout(step);
+                // 8. Park until the next timer. Reader output, control
+                //    messages and cancel unpark the actor at once (the park
+                //    permit keeps a wake that lands just before this call),
+                //    so a long park costs no output latency — it replaces
+                //    the old 2/10 ms polling (100 Hz per idle session). Only
+                //    timer work needs a deadline: exit poll, coalesced
+                //    resize, degraded-journal retry, journal flush cadence,
+                //    drain timers, and a blocked sink's backlog.
+                let now = clock.now_ms();
+                if reader_seen || control_seen {
+                    last_activity_ms = now;
+                }
+                let mut wake_at = now.saturating_add(MAX_PARK_MS);
+                if !root_exited {
+                    wake_at = wake_at.min(next_exit_poll_ms);
+                }
+                if let Some(fire_at) = coalescer.next_fire_ms() {
+                    wake_at = wake_at.min(fire_at);
+                }
+                if journal_err.is_some() && !journal_fatal {
+                    wake_at = wake_at.min(journal_retry_at_ms);
+                }
+                if let Some(due) = flush_due {
+                    wake_at = wake_at.min(due);
+                }
+                if let Some(drain_at) = drain_wake_at {
+                    wake_at = wake_at.min(drain_at);
+                }
+                if !pending.is_empty() {
+                    wake_at = wake_at.min(now.saturating_add(BLOCKED_SINK_POLL_MS));
+                }
+                // A round that stopped draining at the pending cap left
+                // reader chunks queued; once the sink took the backlog, go
+                // around at once instead of trusting the reader's wake.
+                let journal_paused_now =
+                    journal_err.is_some() && !journal_fatal && now < journal_retry_at_ms;
+                if !reader_channel_empty
+                    && !reader_eof
+                    && !journal_paused_now
+                    && pending_bytes < OUTPUT_HIGH_BYTES
+                {
+                    wake_at = now;
+                }
+                let park_ms = wake_at.saturating_sub(now);
+                if park_ms > 0 {
+                    std::thread::park_timeout(Duration::from_millis(park_ms));
+                }
             }
 
             // ------------------------------------------------------------------

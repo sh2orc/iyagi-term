@@ -117,17 +117,85 @@ async fn agent_program(
 /// The two only differ while a `--data-dir` override is in play; the
 /// frontend never passes one today, but the split keeps each reader pinned
 /// to the dir its writer uses.
-pub async fn refresh(hook_data_dir: &Path, secrets_data_dir: &Path) -> Vec<ProviderUsage> {
-    let codex_path = agent_program("codex", &CODEX_PATH).await;
+///
+/// The CLI-backed readers serve cached results ([`cached_probe`]): the
+/// status bar refreshes every 60 s, and each refresh used to start two Node
+/// CLIs (`codex app-server`, `claude --print`). `force` (the popover's
+/// refresh action) skips the cache but still shares a probe already in
+/// flight.
+pub async fn refresh(
+    hook_data_dir: &Path,
+    secrets_data_dir: &Path,
+    force: bool,
+) -> Vec<ProviderUsage> {
     let (codex, claude, zai) = tokio::join!(
-        read_codex(codex_path),
-        read_claude(hook_data_dir),
+        read_codex(force),
+        read_claude(hook_data_dir, force),
         read_zai(secrets_data_dir)
     );
     vec![codex, claude, zai]
 }
 
-async fn read_codex(program: Option<String>) -> ProviderUsage {
+/// 공급자 탐침 결과 캐시 한 칸: (관측 시각, 결과). 탐침하는 동안 잠금을
+/// 쥐어 동시 호출(상태 바 폴링·팝오버·창 복귀)이 탐침 하나를 나눈다.
+type ProbeSlot<T> = tokio::sync::Mutex<Option<(Instant, T)>>;
+
+/// Codex 성공 결과를 다시 쓰는 시간. 사용량 창은 분 단위로 움직이고,
+/// 상태 바는 1분마다 묻는다 — 5분이면 CLI 실행이 1/5로 준다.
+const CODEX_READY_TTL: Duration = Duration::from_secs(5 * 60);
+/// Codex 실패(로그인 필요·CLI 없음·시간 초과)를 다시 쓰는 시간. 사용자가
+/// 무언가 하기 전까지는 매번 같은 답이라 길게 둔다(팝오버 새로고침은
+/// `force`로 건너뛴다).
+const CODEX_FAILURE_TTL: Duration = Duration::from_secs(30 * 60);
+/// Claude CLI 탐침 결과(성공·실패)를 다시 쓰는 시간. 실패는 훅 캐시
+/// 파일로 보강하므로(매번 새로 읽는다) 길게 둘 필요가 없다.
+const CLAUDE_TTL: Duration = Duration::from_secs(5 * 60);
+
+static CODEX_USAGE: ProbeSlot<ProviderUsage> = tokio::sync::Mutex::const_new(None);
+
+/// 캐시된 결과가 `ttl` 안이면 그대로, 아니면 `probe`를 돌려 새로 담는다.
+/// `force`는 캐시를 건너뛰지만, 이 호출이 잠금을 기다리는 동안 다른 호출이
+/// 끝낸 탐침(이 호출보다 나중에 관측된 결과)은 강제 갱신이라도 나눈다 —
+/// 동시 호출은 언제나 탐침 하나로 묶인다.
+async fn cached_probe<T, Fut>(
+    slot: &ProbeSlot<T>,
+    force: bool,
+    ttl: impl Fn(&T) -> Duration,
+    probe: impl FnOnce() -> Fut,
+) -> T
+where
+    T: Clone,
+    Fut: std::future::Future<Output = T>,
+{
+    let requested = Instant::now();
+    let mut cached = slot.lock().await;
+    if let Some((observed, value)) = cached.as_ref() {
+        let landed_while_waiting = *observed >= requested;
+        if landed_while_waiting || (!force && observed.elapsed() < ttl(value)) {
+            return value.clone();
+        }
+    }
+    let value = probe().await;
+    *cached = Some((Instant::now(), value.clone()));
+    value
+}
+
+fn codex_ttl(usage: &ProviderUsage) -> Duration {
+    if usage.status == "ready" {
+        CODEX_READY_TTL
+    } else {
+        CODEX_FAILURE_TTL
+    }
+}
+
+async fn read_codex(force: bool) -> ProviderUsage {
+    cached_probe(&CODEX_USAGE, force, codex_ttl, || async {
+        probe_codex(agent_program("codex", &CODEX_PATH).await).await
+    })
+    .await
+}
+
+async fn probe_codex(program: Option<String>) -> ProviderUsage {
     let Some(program) = program else {
         return ProviderUsage::unavailable("codex", "Codex", "cli_not_found");
     };
@@ -160,8 +228,8 @@ async fn codex_transaction(program: &str) -> Result<ProviderUsage, &'static str>
             command.env("PATH", path);
         }
     }
-    // Runs every 60 s from a GUI-subsystem app: without CREATE_NO_WINDOW a
-    // console would flash on each refresh (Windows).
+    // Runs periodically from a GUI-subsystem app: without CREATE_NO_WINDOW a
+    // console would flash on each probe (Windows).
     super::system::hide_console(&mut command);
     let mut child = command.spawn().map_err(|_| "cli_start_failed")?;
     let mut stdin = child.stdin.take().ok_or("cli_start_failed")?;
@@ -335,31 +403,29 @@ fn parse_codex(response: &Value, account_plan: Option<&str>) -> Option<ProviderU
 
 // Coalesce concurrent refreshes, including failures, so opening the popover cannot
 // repeatedly launch a CLI or hammer the subscription endpoint. Store normalized data only.
-static CLAUDE_USAGE: tokio::sync::Mutex<Option<(Instant, Result<ProviderUsage, &'static str>)>> =
+static CLAUDE_USAGE: ProbeSlot<Result<ProviderUsage, &'static str>> =
     tokio::sync::Mutex::const_new(None);
 
-async fn read_claude(data_dir: &Path) -> ProviderUsage {
-    let mut cached = CLAUDE_USAGE.lock().await;
-    let result = if let Some((_, result)) = cached
-        .as_ref()
-        .filter(|(at, _)| at.elapsed() < Duration::from_secs(60))
-    {
-        result.clone()
-    } else {
-        let result = match agent_program("claude", &CLAUDE_PATH).await {
-            Some(program) => {
-                match tokio::time::timeout(Duration::from_secs(8), claude_transaction(&program))
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(_) => Err("timeout"),
+async fn read_claude(data_dir: &Path, force: bool) -> ProviderUsage {
+    let result = cached_probe(
+        &CLAUDE_USAGE,
+        force,
+        |_| CLAUDE_TTL,
+        || async {
+            match agent_program("claude", &CLAUDE_PATH).await {
+                Some(program) => {
+                    match tokio::time::timeout(Duration::from_secs(8), claude_transaction(&program))
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(_) => Err("timeout"),
+                    }
                 }
+                None => Err("cli_not_found"),
             }
-            None => Err("cli_not_found"),
-        };
-        *cached = Some((Instant::now(), result.clone()));
-        result
-    };
+        },
+    )
+    .await;
     match result {
         Ok(usage) => usage,
         Err(reason) => {
@@ -901,6 +967,60 @@ mod tests {
             .windows
             .iter()
             .all(|w| (0.0..=100.0).contains(&w.remaining_percent)));
+    }
+
+    fn usage(status: &'static str) -> ProviderUsage {
+        let mut usage = ProviderUsage::unavailable("codex", "Codex", "no_data");
+        usage.status = status;
+        usage
+    }
+
+    /// 결과 캐시: TTL 안의 갱신은 CLI를 다시 띄우지 않고, `force`(팝오버의
+    /// 새로고침)는 건너뛰며, TTL이 지나면 다시 묻는다.
+    #[tokio::test]
+    async fn cached_probe_reuses_fresh_results_until_forced_or_expired() {
+        let slot: ProbeSlot<u32> = tokio::sync::Mutex::const_new(None);
+        let probes = std::sync::atomic::AtomicU32::new(0);
+        let probe = || async { probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1 };
+        let long = |_: &u32| Duration::from_secs(300);
+        assert_eq!(cached_probe(&slot, false, long, probe).await, 1);
+        assert_eq!(cached_probe(&slot, false, long, probe).await, 1, "cached");
+        assert_eq!(cached_probe(&slot, true, long, probe).await, 2, "forced");
+        assert_eq!(cached_probe(&slot, false, long, probe).await, 2);
+        let expired = |_: &u32| Duration::ZERO;
+        assert_eq!(cached_probe(&slot, false, expired, probe).await, 3);
+    }
+
+    /// 동시 호출은 탐침 하나를 나눈다 — 강제 갱신이라도 기다리는 동안 끝난
+    /// 탐침의 결과를 받는다(팝오버를 여닫는 사이 CLI가 겹쳐 뜨지 않는다).
+    #[tokio::test]
+    async fn concurrent_callers_share_one_in_flight_probe() {
+        let slot: ProbeSlot<u32> = tokio::sync::Mutex::const_new(None);
+        let probes = std::sync::atomic::AtomicU32::new(0);
+        let probe = || async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        };
+        let ttl = |_: &u32| Duration::from_secs(300);
+        let (a, b, c) = tokio::join!(
+            cached_probe(&slot, true, ttl, probe),
+            cached_probe(&slot, true, ttl, probe),
+            cached_probe(&slot, false, ttl, probe),
+        );
+        assert_eq!((a, b, c), (1, 1, 1));
+        assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// Codex 실패(로그인 필요 등)는 성공보다 오래(30분) 재사용한다.
+    #[test]
+    fn codex_failures_are_cached_longer_than_results() {
+        assert_eq!(codex_ttl(&usage("ready")), Duration::from_secs(5 * 60));
+        assert_eq!(codex_ttl(&usage("error")), Duration::from_secs(30 * 60));
+        assert_eq!(
+            codex_ttl(&usage("unavailable")),
+            Duration::from_secs(30 * 60)
+        );
+        assert_eq!(CLAUDE_TTL, Duration::from_secs(5 * 60));
     }
 
     #[test]

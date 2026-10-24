@@ -536,6 +536,13 @@ impl ResizeCoalescer {
         self.pending.as_ref().map(|p| (p.cols, p.rows))
     }
 
+    /// When the pending resize becomes eligible for [`ResizeCoalescer::poll`]
+    /// (`None` with nothing pending). The actor parks until this deadline
+    /// instead of polling the coalescer on a fixed step.
+    pub fn next_fire_ms(&self) -> Option<u64> {
+        self.pending.as_ref().map(|p| p.fire_at_ms)
+    }
+
     /// Last applied dimensions (None before the first fire).
     pub fn last_applied(&self) -> Option<(u16, u16)> {
         self.last_applied
@@ -782,6 +789,30 @@ mod tests {
         // Pending duplicate -> skipped.
         assert_eq!(c.submit(90, 30), ResizeSubmit::Queued);
         assert_eq!(c.submit(90, 30), ResizeSubmit::Skipped);
+    }
+
+    /// The actor parks until `next_fire_ms` instead of polling on a fixed
+    /// step: the deadline is the window boundary a coalesced follow-up waits
+    /// for, and it disappears once the resize was taken.
+    #[test]
+    fn next_fire_ms_reports_the_coalescing_deadline() {
+        let clock = Arc::new(ManualClock::new(1_000));
+        let mut c = ResizeCoalescer::new(clock.clone());
+        assert_eq!(c.next_fire_ms(), None, "nothing pending");
+        c.submit(80, 24);
+        assert_eq!(c.next_fire_ms(), Some(1_000), "after idle: due at once");
+        assert_eq!(c.poll(), Some((80, 24)));
+        assert_eq!(c.next_fire_ms(), None);
+        clock.advance(4);
+        c.submit(100, 30);
+        assert_eq!(
+            c.next_fire_ms(),
+            Some(1_016),
+            "a follow-up waits for the window boundary"
+        );
+        clock.advance(12);
+        assert_eq!(c.poll(), Some((100, 30)));
+        assert_eq!(c.next_fire_ms(), None);
     }
 
     #[test]

@@ -21,6 +21,7 @@ import { getManagedRunDeps } from "../features/workloads/managedRunDeps";
 import { GeneralPanel } from "../features/settings/GeneralPanel";
 import { TerminalPanel } from "../features/settings/TerminalPanel";
 import { TrackpadPanel } from "../features/settings/TrackpadPanel";
+import { ResourcePanel } from "../features/settings/ResourcePanel";
 import { ShortcutsPanel } from "../features/settings/ShortcutsPanel";
 import { MissionSettings } from "../features/missions/MissionSettings";
 import { IntegrationPanel } from "../features/settings/IntegrationPanel";
@@ -36,7 +37,10 @@ import { useWorkbenchStore } from "../store/workbenchStore";
 import { useI18n, useI18nStore } from "../i18n";
 import "./settings.css";
 
-/** 일반·터미널 그룹의 값만 되돌린다 — 실행 프로필과 사용자 셸은 그대로 둔다. */
+/**
+ * 일반·터미널·자원 관리 그룹의 값만 되돌린다 — 실행 프로필과 사용자 셸은 그대로 둔다.
+ * 자원 정책 변경분이 지워지면 컨트롤러가 데몬도 호스트 기본값으로 되돌린다.
+ */
 function resetDeclarativeSettings(): void {
   usePreferences.getState().resetAll();
   useI18nStore.getState().setLanguage(null);
@@ -179,6 +183,7 @@ export function SettingsPage({ client, platform }: { client: DaemonClient; platf
         <div className="settings-content" ref={contentRef}>
           {panel("general", <GeneralPanel client={client} />)}
           {panel("terminal", <TerminalPanel platform={platform} />)}
+          {panel("resources", <ResourcePanel />)}
           {panel("trackpad", <TrackpadPanel />)}
           {panel("run", (
             <ManagedRunDialog client={client} probe={probe} platform={platform} capabilities={capabilities}

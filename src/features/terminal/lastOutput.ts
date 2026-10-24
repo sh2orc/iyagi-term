@@ -57,43 +57,72 @@ export function staleClass(elapsedMs: number): string {
   return "";
 }
 
-const TICK_MS = 5000;
+export const NOW_TICK_MS = 5000;
 const nowListeners = new Set<() => void>();
 let ticker: ReturnType<typeof setInterval> | null = null;
+/** 모듈 하나가 거는 표시 관찰자(첫 구독자가 걸고 마지막 구독자가 뗀다). */
+let visibilityWatched = false;
 
+function documentHidden(): boolean {
+  return typeof document !== "undefined" && document.hidden;
+}
+
+function notifyNow(): void {
+  for (const listener of nowListeners) listener();
+}
+
+/** 구독자가 있고 창이 보일 때만 돈다 — 숨은 창의 배지를 5초마다 다시 그릴 이유가 없다. */
 function startTicker(): void {
-  if (ticker !== null) return;
-  ticker = setInterval(() => {
-    for (const listener of nowListeners) listener();
-  }, TICK_MS);
+  if (ticker !== null || nowListeners.size === 0 || documentHidden()) return;
+  ticker = setInterval(notifyNow, NOW_TICK_MS);
 }
 
 function stopTicker(): void {
-  if (ticker === null || nowListeners.size > 0) return;
+  if (ticker === null) return;
   clearInterval(ticker);
   ticker = null;
+}
+
+/** 숨으면 티커를 멈추고, 다시 보이면 곧바로 한 번 맞춘 뒤 다시 돌린다. */
+function onVisibilityChange(): void {
+  if (documentHidden()) {
+    stopTicker();
+    return;
+  }
+  notifyNow();
+  startTicker();
+}
+
+/**
+ * 공유 티커 구독(useNow의 바탕 — 시험도 이 경로를 쓴다). 첫 구독자가 티커와
+ * 표시 관찰자를 함께 켜고, 돌려준 해제 함수로 마지막 구독자가 빠지면 둘 다 끈다.
+ */
+export function subscribeNow(listener: () => void): () => void {
+  nowListeners.add(listener);
+  if (!visibilityWatched && typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    visibilityWatched = true;
+  }
+  startTicker();
+  return () => {
+    nowListeners.delete(listener);
+    if (nowListeners.size > 0) return;
+    stopTicker();
+    if (visibilityWatched && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
+    visibilityWatched = false;
+  };
 }
 
 /**
  * 지금 시각. 경과 배지는 시간 자체에 따라 바뀌므로 주기적 재계산이
  * 필요한데, pane마다 인터벌을 두면 창 수만큼 타이머가 는다 — 하나의 공유
- * 타이머로 묶고, 구독자가 없으면 끈다. 창이 다시 보이면 곧바로 맞춘다.
+ * 타이머로 묶고, 구독자가 없거나 창이 숨어 있으면 끈다. 창이 다시 보이면
+ * 곧바로 맞춘다.
  */
 export function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const listener = () => setNow(Date.now());
-    nowListeners.add(listener);
-    startTicker();
-    const onVisibility = () => {
-      if (!document.hidden) setNow(Date.now());
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      nowListeners.delete(listener);
-      stopTicker();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
+  useEffect(() => subscribeNow(() => setNow(Date.now())), []);
   return now;
 }

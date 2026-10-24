@@ -27,9 +27,11 @@ export function agentSessionActions(deps: AgentSessionActionDeps) {
     /**
      * 끝난 세션: 기록된 cwd에서 새 pane으로 이어서 연다.
      *
-     * 실행이 끝날 때까지 기다린 뒤에만 닫는다 — 실패하면 대화상자를 열어
-     * 둔 채 사유를 보여 준다(컨트롤러가 스스로 토스트를 띄우는 경우도
-     * 있지만, 예외가 올라오면 여기서도 알린다).
+     * 실행이 끝나거나(바로 띄울 수 있을 때) 시작 줄에 자리를 잡을 때까지만
+     * 기다린 뒤 닫는다 — 줄에서 기다리게 되면 컨트롤러가 pane을 "기다리는 중"으로
+     * 만들고 곧바로 돌아오므로 메모리 여유를 기다리며 대화상자가 멈추지 않는다.
+     * 실패하면 대화상자를 열어 둔 채 사유를 보여 준다(컨트롤러가 스스로 토스트를
+     * 띄우는 경우도 있지만, 예외가 올라오면 여기서도 알린다).
      */
     async resume(record: AgentSessionRecord): Promise<void> {
       const info = resumeInfoFrom(record);

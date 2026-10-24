@@ -1,12 +1,21 @@
-//! 프로세스 트리 열거(에이전트 감지 지원): 루트 PID들의 자손을 한 번의
-//! sysinfo 패스로 모은다. 자원 계량(`telemetry`)과 달리 이름/argv만 필요하므로
-//! 갱신 종류를 cmd/exe로 제한해 틱 비용을 줄인다. 소유권 판정이나 종료
-//! 신호에는 쓰지 않는다 — 그것은 `group` 백엔드의 책임이다.
+//! 프로세스 트리 열거(에이전트 감지·셸 관측): 루트 PID들의 자손을 한 번의
+//! 패스로 모은다. 소유권 판정이나 종료 신호에는 쓰지 않는다 — 그것은
+//! `group` 백엔드의 책임이다.
+//!
+//! macOS·Linux는 [`crate::native_proc`]의 공유 스냅샷(pid·ppid·시작 시각·
+//! 이름만)을 쓰고, argv·실행 경로는 트리 멤버에 대해서만 프로세스마다 한 번
+//! 읽어 캐시한다. Windows는 sysinfo 패스를 그대로 쓴다.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use term_contracts::ids::ProcessIdentity;
+
+/// 같은 틱의 소비자들(셸 관측·에이전트 감시·그룹 멤버 열거)이 스캔 한 번을
+/// 나눠 쓰는 최대 나이.
+pub const SHARED_SCAN_MAX_AGE: Duration = Duration::from_millis(900);
 
 /// 열거된 프로세스 한 개(감지 매칭에 필요한 필드만).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,9 +51,126 @@ fn descendant_pids(root: Pid, children: &BTreeMap<Pid, Vec<Pid>>) -> Vec<Pid> {
 static SYSTEM: Mutex<Option<System>> = Mutex::new(None);
 
 /// 각 루트 PID에 대해 (루트 포함) 관찰된 자손 트리를 돌려준다.
-/// 루트가 이미 없으면 그 항목은 빈 벡트다. 한 번의 프로세스 갱신으로
+/// 루트가 이미 없으면 그 항목은 빈 벡트다. 한 번의 스캔(공유 스냅샷)으로
 /// 모든 루트를 처리한다.
 pub fn scan_process_trees(root_pids: &[u32]) -> HashMap<u32, Vec<ProcessBrief>> {
+    if root_pids.is_empty() {
+        return HashMap::new();
+    }
+    match snapshot_covering(root_pids, SHARED_SCAN_MAX_AGE) {
+        Some(snapshot) => native_trees(&snapshot, root_pids),
+        None => sysinfo_trees(root_pids),
+    }
+}
+
+/// 최대 나이 안의 공유 스냅샷 — 단, 요청한 루트가 그 스냅샷에 없으면(찍은
+/// 뒤에 생긴 프로세스) 한 번 새로 찍는다. 호출자는 살아 있는 루트만 넘기므로
+/// 추가 스캔은 드물다.
+fn snapshot_covering(
+    root_pids: &[u32],
+    max_age: Duration,
+) -> Option<std::sync::Arc<crate::native_proc::Snapshot>> {
+    let snapshot = crate::native_proc::snapshot(max_age)?;
+    if max_age.is_zero() || root_pids.iter().all(|pid| snapshot.get(*pid).is_some()) {
+        return Some(snapshot);
+    }
+    crate::native_proc::snapshot(Duration::ZERO)
+}
+
+/// 루트별 관찰 트리의 신원(argv 없이). 집행 경로(정지·양보)는
+/// `max_age = Duration::ZERO`로 새로 찍은 스냅샷을 쓴다. 루트가 없으면 빈
+/// 목록이다.
+pub fn scan_tree_identities(
+    root_pids: &[u32],
+    max_age: Duration,
+) -> HashMap<u32, Vec<ProcessIdentity>> {
+    if root_pids.is_empty() {
+        return HashMap::new();
+    }
+    match snapshot_covering(root_pids, max_age) {
+        Some(snapshot) => root_pids
+            .iter()
+            .map(|&root| {
+                let tree = snapshot
+                    .descendants(root)
+                    .into_iter()
+                    .filter_map(|pid| snapshot.identity(pid))
+                    .collect();
+                (root, tree)
+            })
+            .collect(),
+        None => sysinfo_trees(root_pids)
+            .into_iter()
+            .map(|(root, tree)| {
+                let identities = tree
+                    .into_iter()
+                    .filter_map(|brief| crate::identity::process_identity(brief.pid))
+                    .collect();
+                (root, identities)
+            })
+            .collect(),
+    }
+}
+
+/// 트리 멤버의 실행 경로·argv 캐시((pid, 시작 토큰, 이름) → 값). 프로세스마다
+/// 한 번만 읽고, 스냅샷에서 사라진 항목은 버린다. 이름이 키에 드는 이유: exec는
+/// 시작 시각을 바꾸지 않는다 — fork 직후 exec 전에 한 번 읽히면(셸의 argv) 그
+/// 값이 프로세스 수명 내내 남아 에이전트 감지가 영영 놓친다. exec는 이름을
+/// 바꾸므로(`zsh` → `node`) 그때 다시 읽는다.
+type DetailCache = HashMap<(u32, String, String), (Option<String>, Vec<String>)>;
+static DETAILS: Mutex<Option<DetailCache>> = Mutex::new(None);
+
+fn native_trees(
+    snapshot: &crate::native_proc::Snapshot,
+    root_pids: &[u32],
+) -> HashMap<u32, Vec<ProcessBrief>> {
+    let mut guard = DETAILS.lock().unwrap_or_else(|p| p.into_inner());
+    trees_with_details(guard.get_or_insert_with(HashMap::new), snapshot, root_pids)
+}
+
+fn trees_with_details(
+    cache: &mut DetailCache,
+    snapshot: &crate::native_proc::Snapshot,
+    root_pids: &[u32],
+) -> HashMap<u32, Vec<ProcessBrief>> {
+    cache.retain(|(pid, token, name), _| {
+        snapshot
+            .get(*pid)
+            .is_some_and(|entry| &entry.start_token == token && &entry.name == name)
+    });
+    root_pids
+        .iter()
+        .map(|&root| {
+            let tree = snapshot
+                .descendants(root)
+                .into_iter()
+                .filter_map(|pid| {
+                    let entry = snapshot.get(pid)?;
+                    let (exe, cmd) = cache
+                        .entry((pid, entry.start_token.clone(), entry.name.clone()))
+                        .or_insert_with(|| {
+                            (
+                                crate::native_proc::exe_path(pid),
+                                crate::native_proc::argv(pid).unwrap_or_default(),
+                            )
+                        })
+                        .clone();
+                    Some(ProcessBrief {
+                        pid,
+                        ppid: entry.ppid,
+                        name: entry.name.clone(),
+                        exe,
+                        cmd,
+                    })
+                })
+                .collect();
+            (root, tree)
+        })
+        .collect()
+}
+
+/// sysinfo 패스(Windows, 또는 네이티브 목록을 읽지 못했을 때).
+fn sysinfo_trees(root_pids: &[u32]) -> HashMap<u32, Vec<ProcessBrief>> {
     let mut out: HashMap<u32, Vec<ProcessBrief>> = HashMap::with_capacity(root_pids.len());
     if root_pids.is_empty() {
         return out;
@@ -278,25 +404,68 @@ mod tests {
             .spawn()
             .expect("spawn sh");
         // sh -c는 곧바로 exec할 수 있으니 이름이 아닌 구조로 확인한다:
-        // 루트 아래 자식이 하나 이상 있거나, 루트 자체가 sleep이다.
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        let trees = scan_process_trees(&[sh.id()]);
-        let tree = trees.get(&sh.id()).expect("tree");
-        // Reap our child even if an observation assertion fails. On macOS a
-        // cached process name can remain `bash` after exec while exe/cmd are
-        // refreshed; the current executable is valid evidence of exec'd sleep.
-        let _ = sh.kill();
-        let _ = sh.wait();
-        assert!(!tree.is_empty());
-        assert!(
+        // 루트 아래 자식이 하나 이상 있거나, 루트 자체가 sleep이다. 스캔은
+        // 최대 900 ms 묵은 공유 스냅샷을 쓰고(다른 시험이 exec 전에 찍었을
+        // 수 있다), 부하가 크면 exec 자체도 늦다 — 정해진 한 번이 아니라
+        // 기한 안에서 다시 본다.
+        let execd_or_forked = |tree: &[ProcessBrief]| {
             tree.len() > 1
                 || tree[0].name == "sleep"
                 || tree[0].exe.as_deref().is_some_and(|exe| {
                     std::path::Path::new(exe)
                         .file_name()
                         .is_some_and(|name| name == "sleep")
-                }),
+                })
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let tree = loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let tree = scan_process_trees(&[sh.id()])
+                .remove(&sh.id())
+                .unwrap_or_default();
+            if tree.is_empty() || execd_or_forked(&tree) || std::time::Instant::now() > deadline {
+                break tree;
+            }
+        };
+        // Reap our child even if an observation assertion fails.
+        let _ = sh.kill();
+        let _ = sh.wait();
+        assert!(!tree.is_empty());
+        assert!(
+            execd_or_forked(&tree),
             "expected a descendant or exec'd sleep, got {tree:?}"
+        );
+    }
+
+    /// exec는 시작 시각을 바꾸지 않는다: exec 전에 읽힌 argv(셸의 것)가
+    /// exec 뒤에도 남으면 에이전트 감지가 그 프로세스를 영영 놓친다. 이름이
+    /// 바뀌면 캐시 항목이 버려지고 새 argv를 읽는다.
+    #[test]
+    fn exec_with_a_new_name_refreshes_the_cached_argv() {
+        use crate::native_proc::{ProcEntry, Snapshot};
+        let me = std::process::id();
+        let entry = |name: &str| ProcEntry {
+            pid: me,
+            ppid: 1,
+            start_token: "token".into(),
+            start_epoch_ms: 0,
+            uid: 0,
+            name: name.into(),
+        };
+        let stale = (Some("/bin/zsh".to_string()), vec!["zsh".to_string()]);
+        let mut cache = DetailCache::new();
+        cache.insert((me, "token".into(), "zsh".into()), stale.clone());
+
+        let zsh = Snapshot::from_entries(vec![entry("zsh")]);
+        let before = trees_with_details(&mut cache, &zsh, &[me]);
+        assert_eq!(before[&me][0].cmd, stale.1, "같은 이름이면 캐시를 쓴다");
+
+        let node = Snapshot::from_entries(vec![entry("node")]);
+        let after = trees_with_details(&mut cache, &node, &[me]);
+        assert_ne!(after[&me][0].cmd, stale.1, "이름이 바뀌면 다시 읽는다");
+        assert!(
+            !cache.contains_key(&(me, "token".into(), "zsh".into())),
+            "exec 전 항목은 버려진다"
         );
     }
 }

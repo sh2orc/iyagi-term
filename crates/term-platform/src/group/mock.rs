@@ -361,11 +361,13 @@ impl super::ResourcePlatform for MockPlatform {
                 applied: targets.saturating_sub(1),
                 failed: targets.min(1),
                 skipped_reused,
+                skipped_denied: 0,
             }),
             MockScheduling::Ok => Ok(SchedulingOutcome {
                 applied: targets,
                 failed: 0,
                 skipped_reused,
+                skipped_denied: 0,
             }),
         }
     }
@@ -555,7 +557,8 @@ mod tests {
             SchedulingOutcome {
                 applied: 1,
                 failed: 0,
-                skipped_reused: 1
+                skipped_reused: 1,
+                skipped_denied: 0
             },
             "a reused pid is skipped, never changed"
         );

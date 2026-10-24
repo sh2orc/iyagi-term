@@ -36,6 +36,8 @@ import type { AgentStatus } from "../../generated/AgentStatus";
 import { queryGitBranch, type GitBranchInfo } from "./gitBranch";
 import { missionEntryState } from "../missions/capability";
 import { openMissionCreate, paneRepositoryHint } from "../missions/entry";
+import { isFinishedWorkload } from "../../store/workloadState";
+import type { GuardReason } from "../../generated/GuardReason";
 
 interface PaneProps {
   leafId: string;
@@ -129,6 +131,8 @@ export const TerminalPane = memo(function TerminalPane({ leafId }: PaneProps): J
   const onResume = (resume: AgentResumeInfo) => {
     void controller.resumeAgentSession(resume, { leafId });
   };
+  // 시작 줄(P2-5)에서 기다리는 pane을 지금 띄운다 — 압력·간격을 건너뛴다.
+  const onStartNow = () => controller.startPendingNow(leafId);
   // 오른쪽 클릭의 주인(rightClickRouting): 기본은 메뉴, 마우스 보고 중인 앱에는 Shift+오른쪽 클릭만.
   const rightClickGoesToApp = (shiftKey: boolean) =>
     rightClickRouting(controller.paneMouseTrackingActive(leafId), shiftKey) === "app";
@@ -191,6 +195,7 @@ export const TerminalPane = memo(function TerminalPane({ leafId }: PaneProps): J
         {flowPaused ? <span className="pane-flow">{t("terminal.pane.flowPaused")}</span> : null}
         <ReliefBadges pane={pane} />
         <InputHealthBadges pane={pane} />
+        <GuardWarningBadge pane={pane} />
         {pane.replayTrimmedBytes ? (
           <span
             className="pane-replay-trimmed"
@@ -251,6 +256,7 @@ export const TerminalPane = memo(function TerminalPane({ leafId }: PaneProps): J
           onNewShell={onNewShell}
           onClose={onClose}
           onResume={onResume}
+          onStartNow={onStartNow}
         />
       </div>
       {menuAnchor ? (
@@ -367,6 +373,44 @@ function InputHealthBadges({ pane }: { pane: PaneMeta }): JSX.Element | null {
       ) : null}
     </>
   );
+}
+
+/**
+ * 가드 경고(08 §5 `guard_warning`): 보고 있거나 보호한 세션이 한도를 넘었거나
+ * 메모리 압력의 주범이라 정지 대신 경고 중이다. 원인 하나를 문자열로 구독한다
+ * (스냅샷마다 새 객체가 와도 헤더가 다시 그려지지 않게). 끝난 작업은 보이지 않는다.
+ */
+function GuardWarningBadge({ pane }: { pane: PaneMeta }): JSX.Element | null {
+  const { t } = useI18n();
+  const reason = useWorkbenchStore((s): GuardReason | null => {
+    const workload = pane.workloadId !== null
+      ? s.workloadById.get(pane.workloadId)
+      : pane.sessionId !== null
+        ? s.workloadBySession.get(pane.sessionId)
+        : undefined;
+    if (!workload || isFinishedWorkload(workload.state)) return null;
+    return workload.guard_warning ?? null;
+  });
+  if (!reason) return null;
+  return (
+    <span className="pane-guard-warning" role="status" title={t(guardWarningDetailKey(reason))}>
+      {t(reason === "cpu_limit" ? "terminal.pane.guardWarning.cpu" : "terminal.pane.guardWarning.memory")}
+    </span>
+  );
+}
+
+/** 가드 경고 원인별 설명 문구 키. */
+function guardWarningDetailKey(reason: GuardReason): string {
+  switch (reason) {
+    case "host_memory_pressure":
+      return "terminal.pane.guardWarning.hostMemoryDetail";
+    case "memory_limit":
+      return "terminal.pane.guardWarning.memoryLimitDetail";
+    case "cpu_limit":
+      return "terminal.pane.guardWarning.cpuLimitDetail";
+    default:
+      return "terminal.pane.guardWarning.detail";
+  }
 }
 
 /** 폴링 결과가 같으면 상태를 갈아 끼우지 않는다(4초마다 헤더 리렌더 방지). */
@@ -518,9 +562,34 @@ function PaneOverlay(props: {
   onNewShell: () => void;
   onClose: () => void;
   onResume: (resume: AgentResumeInfo) => void;
+  /** 시작 줄에서 기다리는 pane을 지금 띄운다. */
+  onStartNow?: () => void;
 }): JSX.Element | null {
   const { t } = useI18n();
-  const { pane, focused, onRetry, onNewShell, onClose, onResume } = props;
+  const { pane, focused, onRetry, onNewShell, onClose, onResume, onStartNow } = props;
+  if (pane.pendingStart) {
+    // 에이전트 시작 줄(P2-5)에서 차례를 기다린다: 이유와 "지금 시작"을 보인다 —
+    // 끝난 자리의 "이어서 열기" 대신(이미 열기로 했다).
+    return (
+      <div
+        className={`pane-overlay pane-overlay-waiting${pane.phase === "exited" ? " pane-overlay-exited" : ""}`}
+        role="status"
+      >
+        {pane.resume ? (
+          <p className="pane-resume-title">{t("terminal.resume.title", { agent: agentDisplayName(pane.resume.agent) })}</p>
+        ) : null}
+        <p>{t(pane.pendingStart === "memory" ? "terminal.resume.waitingMemory" : "terminal.resume.waitingTurn")}</p>
+        <div className="overlay-actions">
+          <button type="button" className="primary" onClick={onStartNow}>
+            {t("terminal.resume.startNow")}
+          </button>
+          <button type="button" onClick={onClose}>
+            {t("terminal.overlay.close")}
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (pane.phase === "starting") {
     return (
       <div className="pane-overlay" role="status">

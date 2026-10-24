@@ -166,6 +166,11 @@ export const ko = {
   "app.tabFinished": "끝난 터미널이 있습니다",
   "app.tabQueued": "대기 중인 작업이 있습니다",
   "app.tabIntervention": "확인이 필요한 요청이 있습니다",
+  // 자동 개입 표식: 자원 가드가 스스로 정지시켰거나 CPU 압력으로 양보시킨 창이 있는 탭.
+  "app.tabRelief.suspended": "정지",
+  "app.tabRelief.suspendedTitle": "자원 가드가 자동으로 일시정지한 창이 있습니다",
+  "app.tabRelief.yielded": "양보",
+  "app.tabRelief.yieldedTitle": "CPU 압력으로 자동 양보 중인 창이 있습니다",
   "app.tabUsage": "이 탭의 살아 있는 터미널 중 최대 사용량(CPU · RAM). 에이전트가 모델 응답을 기다리는 동안은 CPU가 0에 가깝습니다 — 살아 있어도 <0.1코어로 보일 수 있습니다.",
 
   // 알림센터(W1-5 최소 버전)
@@ -178,6 +183,11 @@ export const ko = {
   "notifications.kind.stop": "응답 종료",
   "notifications.kind.notification": "알림",
   "notifications.kind.finished": "작업 종료",
+  "notifications.kind.autoSuspended": "자동 일시정지",
+  "notifications.resource.suspended": "{title} 일시정지됨",
+  "notifications.resource.resume": "재개",
+  "notifications.resource.protect": "보호",
+  "notifications.resource.protectTitle": "이 세션을 자동 양보·일시정지에서 빼고 지금 재개합니다",
   "notifications.kind.missionDecision": "AI 작업 결정 필요",
   "notifications.kind.missionAcceptance": "AI 작업 확정 대기",
   "notifications.kind.missionFailed": "AI 작업 실패",
@@ -479,6 +489,10 @@ export const en: Record<keyof typeof ko, string> = {
   "app.tabFinished": "Has finished terminals",
   "app.tabQueued": "Has a queued workload",
   "app.tabIntervention": "Has a request awaiting your input",
+  "app.tabRelief.suspended": "Paused",
+  "app.tabRelief.suspendedTitle": "The resource guard paused a pane in this tab",
+  "app.tabRelief.yielded": "Yielded",
+  "app.tabRelief.yieldedTitle": "A pane in this tab is yielding under CPU pressure",
   "app.tabUsage": "Peak usage among this tab's live terminals (CPU · RAM). While an agent waits on a model response its CPU is near zero — it can read <0.1 cores even while alive.",
 
   // Notification center (W1-5 minimal)
@@ -491,6 +505,11 @@ export const en: Record<keyof typeof ko, string> = {
   "notifications.kind.stop": "Response finished",
   "notifications.kind.notification": "Notification",
   "notifications.kind.finished": "Workload finished",
+  "notifications.kind.autoSuspended": "Auto-paused",
+  "notifications.resource.suspended": "{title} paused",
+  "notifications.resource.resume": "Resume",
+  "notifications.resource.protect": "Protect",
+  "notifications.resource.protectTitle": "Exclude this session from automatic yielding and pausing, and resume it now",
   "notifications.kind.missionDecision": "AI mission needs a decision",
   "notifications.kind.missionAcceptance": "AI mission awaiting confirmation",
   "notifications.kind.missionFailed": "AI mission failed",

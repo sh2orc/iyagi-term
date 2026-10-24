@@ -31,7 +31,6 @@ import type { BindingProbeResult } from "../../generated/BindingProbeResult";
 import type { BindingSaveParams } from "../../generated/BindingSaveParams";
 import type { BindingSaveResult } from "../../generated/BindingSaveResult";
 import type { ErrorCode } from "../../generated/ErrorCode";
-import type { HostSample } from "../../generated/HostSample";
 import type { InputParams } from "../../generated/InputParams";
 import type { InputResult } from "../../generated/InputResult";
 import type { LaunchPolicy } from "../../generated/LaunchPolicy";
@@ -61,6 +60,7 @@ import type { MutationResult } from "../../generated/MutationResult";
 import type { Priority } from "../../generated/Priority";
 import type { ProcessIdentity } from "../../generated/ProcessIdentity";
 import type { QueueEntry } from "../../generated/QueueEntry";
+import type { ResourceSnapshotEvent } from "../../generated/ResourceSnapshotEvent";
 import type { RequestId } from "../../generated/RequestId";
 import type { RuntimeDetectResult } from "../../generated/RuntimeDetectResult";
 import type { ResizeParams } from "../../generated/ResizeParams";
@@ -194,7 +194,12 @@ export type DaemonEvent = {
 } & (
   | { kind: "workload.changed"; payload: WorkloadSummary }
   | { kind: "queue.changed"; payload: QueueChangedPayload }
-  | { kind: "resource.snapshot"; payload: HostSample }
+  /**
+   * 텔레메트리 틱(1초)마다 오는 호스트 표본 + 데몬 revision + 워크로드별 최신
+   * 사용량(구 데몬은 usage를 빼고 보낸다 — 전송층이 빈 배열로 채운다).
+   * `host.pressure`·`host.cpu_pressure`는 히스테리시스를 거친 값으로 맞춰 온다.
+   */
+  | { kind: "resource.snapshot"; payload: ResourceSnapshotEvent }
   | { kind: "session.output"; payload: SessionOutput }
   | { kind: "session.resize_applied"; payload: ResizeAppliedPayload }
   | { kind: "session.flow_blocked"; payload: FlowBlockedPayload }

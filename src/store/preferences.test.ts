@@ -42,6 +42,8 @@ describe("sanitizePreferences", () => {
         gatewayObservability: true,
         gatewayBlocked: true,
         gatewayPoolStrategy: "fill_first",
+        resourceGuardOverrides: { cpu_cores_limit: 4, auto_resume: true },
+        reliefAutoYield: false,
         baseFontSize: 16,
         terminateOnClose: true,
         quitBehavior: "keep",
@@ -66,6 +68,8 @@ describe("sanitizePreferences", () => {
       gatewayObservability: true,
       gatewayBlocked: true,
       gatewayPoolStrategy: "fill_first",
+      resourceGuardOverrides: { cpu_cores_limit: 4, auto_resume: true },
+      reliefAutoYield: false,
       baseFontSize: 16,
       terminateOnClose: true,
       quitBehavior: "keep",
@@ -197,6 +201,8 @@ describe("preferences store", () => {
     usePreferences.getState().setGatewayObservability(true);
     usePreferences.getState().setGatewayBlocked(true);
     usePreferences.getState().setGatewayPoolStrategy("fill_first");
+    usePreferences.getState().setResourceGuardOverrides({ rss_limit_bytes: "3221225472", sustain_ms: "30000" });
+    usePreferences.getState().setReliefAutoYield(false);
     usePreferences.getState().setShortcutOverride("paste", { code: "KeyG", ctrl: true, meta: false, shift: true });
     usePreferences.getState().setTabSwipe({ sensitivity: "high", wrap: true });
     expect(JSON.parse([...values.values()][0]).state).toEqual({
@@ -207,6 +213,8 @@ describe("preferences store", () => {
       gatewayObservability: true,
       gatewayBlocked: true,
       gatewayPoolStrategy: "fill_first",
+      resourceGuardOverrides: { rss_limit_bytes: "3221225472", sustain_ms: "30000" },
+      reliefAutoYield: false,
       agentBackgrounds: true,
       agentBackgroundColors: {
         claude: "#e0521f",
@@ -254,6 +262,70 @@ describe("preferences store", () => {
       reverse: false,
       wrap: true,
     });
+    expect(usePreferences.getState().resourceGuardOverrides).toEqual({
+      rss_limit_bytes: "3221225472",
+      sustain_ms: "30000",
+    });
+    expect(usePreferences.getState().reliefAutoYield).toBe(false);
+  });
+});
+
+describe("자원 정책 사용자 변경분(resourceGuardOverrides · reliefAutoYield)", () => {
+  afterEach(() => usePreferences.setState({ ...DEFAULT_PREFERENCES }));
+
+  it("기본은 변경분 없음·데몬 기본값 따름이다 — 이 설정이 없던 저장값도 그렇다", () => {
+    expect(DEFAULT_PREFERENCES.resourceGuardOverrides).toEqual({});
+    expect(DEFAULT_PREFERENCES.reliefAutoYield).toBeNull();
+    expect(sanitizePreferences({}).resourceGuardOverrides).toEqual({});
+    expect(sanitizePreferences({}).reliefAutoYield).toBeNull();
+  });
+
+  it("데몬이 받아들이는 항목만 남기고 범위 밖·모르는 키·타입이 어긋난 값은 버린다", () => {
+    expect(
+      sanitizePreferences({
+        resourceGuardOverrides: {
+          cpu_cores_limit: 1024,
+          rss_limit_bytes: String(256 * 1024 * 1024),
+          sustain_ms: "600000",
+          rss_sustain_ms: "1000",
+          auto_suspend: false,
+          auto_resume: true,
+          bogus: 1,
+        },
+      }).resourceGuardOverrides,
+    ).toEqual({
+      cpu_cores_limit: 1024,
+      rss_limit_bytes: String(256 * 1024 * 1024),
+      sustain_ms: "600000",
+      rss_sustain_ms: "1000",
+      auto_suspend: false,
+      auto_resume: true,
+    });
+    expect(
+      sanitizePreferences({
+        resourceGuardOverrides: {
+          cpu_cores_limit: 0,
+          rss_limit_bytes: String(255 * 1024 * 1024),
+          sustain_ms: "999",
+          rss_sustain_ms: 5000,
+          auto_suspend: "yes",
+        },
+      }).resourceGuardOverrides,
+    ).toEqual({});
+    expect(sanitizePreferences({ resourceGuardOverrides: [1, 2] }).resourceGuardOverrides).toEqual({});
+    expect(sanitizePreferences({ reliefAutoYield: "false" }).reliefAutoYield).toBeNull();
+    expect(sanitizePreferences({ reliefAutoYield: true }).reliefAutoYield).toBe(true);
+  });
+
+  it("setter도 같은 정리를 거치고, 되돌리기는 기본값(변경분 없음)으로 간다", () => {
+    usePreferences.getState().setResourceGuardOverrides({ cpu_cores_limit: 2, sustain_ms: "1" });
+    expect(usePreferences.getState().resourceGuardOverrides).toEqual({ cpu_cores_limit: 2 });
+    usePreferences.getState().setReliefAutoYield(false);
+    expect(usePreferences.getState().reliefAutoYield).toBe(false);
+    usePreferences.getState().setReliefAutoYield(null);
+    expect(usePreferences.getState().reliefAutoYield).toBeNull();
+    usePreferences.getState().resetPreference("resourceGuardOverrides");
+    expect(usePreferences.getState().resourceGuardOverrides).toEqual({});
   });
 });
 

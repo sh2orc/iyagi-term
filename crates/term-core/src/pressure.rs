@@ -7,9 +7,16 @@
 //! 신호(`force_critical`)가 잡는다. `< 12%` → WARNING; else NORMAL.
 //! Hysteresis: worsening requires 2 consecutive worse samples; recovery to
 //! NORMAL requires `available/T >= 10%` **and** `available >= S` sustained
-//! for `timing_ms.pressure_recovery` (default 10 s). A native memory-pressure
-//! critical signal raises CRITICAL immediately
-//! ([`PressureTracker::force_critical`]).
+//! for `timing_ms.pressure_recovery` (default 10 s). CRITICAL steps down to
+//! WARNING once the raw sample has left CRITICAL for the same window — 진입선
+//! (1 GiB)과 NORMAL 회복선(S)이 멀어 그 사이에서 CRITICAL이 풀리지 않고 가드가
+//! 계속 얼리던 래치를 없앤다.
+//!
+//! 커널 신호([`KernelMemorySignal`]): critical이면 즉시 CRITICAL이고 신호가
+//! 남아 있는 동안 어떤 회복도 없다(macOS는 가용 정의가 넉넉해 페이지 수만
+//! 보면 커널 위기 중에도 10초 만에 "회복"했다). warn이 지속되면
+//! ([`KERNEL_WARN_SUSTAIN_SAMPLES`]) WARNING 수준으로 보고, warn인 동안은
+//! NORMAL로 돌아가지 않는다.
 //!
 //! Staleness is admission's business, not pressure's: a stale sample simply
 //! is not fed here, while admission returns `WAIT_TELEMETRY` for it. All math
@@ -20,6 +27,25 @@ use term_contracts::metrics::PressureLevel;
 
 use crate::admission::host_reserve_bytes;
 use crate::clock::Clock;
+
+/// 커널의 메모리 압력 판정(플랫폼이 읽어 넘긴다 — 이 크레이트는 OS를 모른다).
+/// macOS `kern.memorystatus_vm_pressure_level`(1/2/4), Linux PSI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KernelMemorySignal {
+    /// 읽을 수 없다(미지원 플랫폼·권한·파싱 실패). 행동하지 않는다.
+    #[default]
+    Unknown,
+    Normal,
+    /// 압축·스왑이 일하기 시작했다. 흔하므로 지속될 때만 WARNING으로 본다.
+    Warn,
+    /// jetsam/OOM 기준의 위기.
+    Critical,
+}
+
+/// 커널 warn이 이만큼 연속(1초 틱 기준 10초)이어야 WARNING 수준으로 본다.
+/// macOS에서 warn은 흔하고 잠깐씩 오간다 — 한두 틱으로 반응하면 완화가
+/// 비포커스 전부를 양보시켰다 풀기를 반복한다.
+pub const KERNEL_WARN_SUSTAIN_SAMPLES: u32 = 10;
 
 /// Thresholds from `defaults.json` (`admission.*`, `timing_ms.pressure_recovery`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +140,11 @@ pub struct PressureTracker<C: Clock> {
     worse_streak: u32,
     /// When the current stretch of sustained-good samples started.
     recovery_since_ms: Option<u64>,
+    /// CRITICAL에서 원시 분류가 CRITICAL을 벗어난(커널 critical도 아닌)
+    /// 구간이 시작된 시각 — 같은 창이 지나면 WARNING으로 내려간다.
+    critical_exit_since_ms: Option<u64>,
+    /// 연속된 커널 warn 샘플 수.
+    kernel_warn_streak: u32,
 }
 
 impl<C: Clock> PressureTracker<C> {
@@ -125,6 +156,8 @@ impl<C: Clock> PressureTracker<C> {
             pending_worse: None,
             worse_streak: 0,
             recovery_since_ms: None,
+            critical_exit_since_ms: None,
+            kernel_warn_streak: 0,
         }
     }
 
@@ -136,24 +169,56 @@ impl<C: Clock> PressureTracker<C> {
         self.level
     }
 
-    /// Feed one host memory sample; returns the effective level.
-    ///
-    /// * Worsening flips only after 2 consecutive worse-than-current samples
-    ///   (the pending level is the worst seen in the streak).
-    /// * Any non-worse sample clears the worsening streak.
-    /// * Recovery to NORMAL needs the sustained-good condition held for
-    ///   `recovery_sustain_ms` of monotonic time. The spec defines no
-    ///   intermediate CRITICAL→WARNING recovery path, so none exists here.
-    /// * `None` (unknown/unavailable measurement) holds the current level but
-    ///   breaks the recovery stretch: sustained goodness must be observed.
+    /// Feed one host memory sample without a kernel signal; returns the
+    /// effective level. [`Self::update_with_kernel`] with `Unknown`.
     pub fn update(&mut self, total_bytes: u64, available_bytes: Option<u64>) -> PressureLevel {
+        self.update_with_kernel(total_bytes, available_bytes, KernelMemorySignal::Unknown)
+    }
+
+    /// Feed one host memory sample and the kernel's own verdict; returns the
+    /// effective level.
+    ///
+    /// * Kernel critical raises CRITICAL immediately and blocks every recovery
+    ///   path while it lasts.
+    /// * Worsening flips only after 2 consecutive worse-than-current samples
+    ///   (the pending level is the worst seen in the streak). A kernel warn
+    ///   held for [`KERNEL_WARN_SUSTAIN_SAMPLES`] counts as a WARNING sample.
+    /// * Any non-worse sample clears the worsening streak.
+    /// * Recovery to NORMAL needs the sustained-good condition (and no kernel
+    ///   warn) held for `recovery_sustain_ms` of monotonic time.
+    /// * CRITICAL steps down to WARNING when the raw sample has stayed out of
+    ///   CRITICAL for the same window (NORMAL wins when both complete).
+    /// * `None` (unknown/unavailable measurement) holds the current level but
+    ///   breaks the recovery stretches: sustained goodness must be observed.
+    pub fn update_with_kernel(
+        &mut self,
+        total_bytes: u64,
+        available_bytes: Option<u64>,
+        kernel: KernelMemorySignal,
+    ) -> PressureLevel {
+        if kernel == KernelMemorySignal::Warn {
+            self.kernel_warn_streak = self.kernel_warn_streak.saturating_add(1);
+        } else {
+            self.kernel_warn_streak = 0;
+        }
+        if kernel == KernelMemorySignal::Critical {
+            self.force_critical();
+            return self.level;
+        }
         let Some(available) = available_bytes else {
             self.recovery_since_ms = None;
+            self.critical_exit_since_ms = None;
             return self.level;
         };
-        let raw = self.config.classify(total_bytes, available);
+        let mut raw = self.config.classify(total_bytes, available);
+        if self.kernel_warn_streak >= KERNEL_WARN_SUSTAIN_SAMPLES
+            && rank(raw) < rank(PressureLevel::Warning)
+        {
+            raw = PressureLevel::Warning;
+        }
         if rank(raw) > rank(self.level) {
             self.recovery_since_ms = None;
+            self.critical_exit_since_ms = None;
             let pending = match self.pending_worse {
                 Some(p) if rank(p) >= rank(raw) => p,
                 _ => raw,
@@ -165,38 +230,51 @@ impl<C: Clock> PressureTracker<C> {
                 self.worse_streak = 0;
                 self.pending_worse = None;
             }
-        } else {
-            self.worse_streak = 0;
-            self.pending_worse = None;
-            if self.level != PressureLevel::Normal
-                && self.config.recovery_satisfied(total_bytes, available)
-            {
-                let now = self.clock.now_ms();
-                match self.recovery_since_ms {
-                    None => self.recovery_since_ms = Some(now),
-                    Some(start) if now.saturating_sub(start) >= self.config.recovery_sustain_ms => {
-                        self.level = PressureLevel::Normal;
-                        self.recovery_since_ms = None;
-                    }
-                    Some(_) => {}
-                }
-            } else {
+            return self.level;
+        }
+        self.worse_streak = 0;
+        self.pending_worse = None;
+        let now = self.clock.now_ms();
+        let window = self.config.recovery_sustain_ms;
+        // NORMAL 회복: 비율·예비량 게이트 + 커널 warn 아님.
+        let normal_ok = self.level != PressureLevel::Normal
+            && kernel != KernelMemorySignal::Warn
+            && self.config.recovery_satisfied(total_bytes, available);
+        if normal_ok {
+            let start = *self.recovery_since_ms.get_or_insert(now);
+            if now.saturating_sub(start) >= window {
+                self.level = PressureLevel::Normal;
                 self.recovery_since_ms = None;
+                self.critical_exit_since_ms = None;
+                return self.level;
             }
+        } else {
+            self.recovery_since_ms = None;
+        }
+        // CRITICAL → WARNING: 원시 분류가 CRITICAL을 벗어난 채 같은 창이 지났다.
+        if self.level == PressureLevel::Critical && raw != PressureLevel::Critical {
+            let start = *self.critical_exit_since_ms.get_or_insert(now);
+            if now.saturating_sub(start) >= window {
+                self.level = PressureLevel::Warning;
+                self.critical_exit_since_ms = None;
+            }
+        } else {
+            self.critical_exit_since_ms = None;
         }
         self.level
     }
 
     /// Native memory-pressure critical signal: raise to CRITICAL immediately
     /// (spec `03-resources.md` §3). Level-triggered contract: a persistent
-    /// native signal must re-invoke this on every event; because recovery
-    /// needs 10 s of sustained-good samples afterwards, one call effectively
-    /// pins CRITICAL for at least the recovery window.
+    /// native signal must re-invoke this on every event — every call resets
+    /// the recovery windows, so recovery starts only after the signal stops
+    /// ([`Self::update_with_kernel`] does this from the kernel verdict).
     pub fn force_critical(&mut self) {
         self.level = PressureLevel::Critical;
         self.worse_streak = 0;
         self.pending_worse = None;
         self.recovery_since_ms = None;
+        self.critical_exit_since_ms = None;
     }
 }
 
@@ -491,15 +569,22 @@ mod tests {
             t.update(T16, Some(4 * GIB));
         }
         // A bad-but-not-worse sample (NORMAL raw yet under the reserve S, so
-        // the recovery gate fails) breaks the good stretch.
+        // the recovery gate fails) breaks the NORMAL stretch — but the raw
+        // sample is still out of CRITICAL, so the step-down window (started
+        // at the first good sample, +2 s) keeps running.
         clock.advance(1_000);
         assert_eq!(t.update(T16, Some(2_500_000_000)), PressureLevel::Critical);
-        // Window restarts at the next good sample: 10 samples inside the
-        // window, the 11th (>= 10 s later) recovers.
-        for _ in 0..10 {
+        // NORMAL window restarts at the next good sample (+8 s). The
+        // step-down completes first (+12 s): WARNING, not NORMAL yet.
+        for _ in 0..4 {
             clock.advance(1_000);
             assert_eq!(t.update(T16, Some(4 * GIB)), PressureLevel::Critical);
         }
+        for _ in 0..6 {
+            clock.advance(1_000);
+            assert_eq!(t.update(T16, Some(4 * GIB)), PressureLevel::Warning);
+        }
+        // +18 s: the restarted NORMAL window (from +8 s) completes.
         clock.advance(1_000);
         assert_eq!(t.update(T16, Some(4 * GIB)), PressureLevel::Normal);
     }
@@ -508,7 +593,7 @@ mod tests {
     fn recovery_also_requires_available_ge_reserve() {
         let (mut t, clock) = tracker();
         // 4 GiB host: S = 2 GiB floor; 25% = 1 GiB. 1.5 GiB free is 37.5%
-        // (percent gate passes) but below S -> recovery NOT satisfied.
+        // (percent gate passes) but below S -> NORMAL recovery NOT satisfied.
         let small = 4 * GIB;
         t.update(small, Some(300 * 1024 * 1024));
         clock.advance(1_000);
@@ -516,17 +601,131 @@ mod tests {
             t.update(small, Some(300 * 1024 * 1024)),
             PressureLevel::Critical
         );
-        for _ in 0..20 {
+        // The raw sample left CRITICAL: after the 10 s window the level steps
+        // down to WARNING (it used to stay latched at CRITICAL while the
+        // guard kept freezing), and holds WARNING while below S.
+        for _ in 0..10 {
             clock.advance(1_000);
             assert_eq!(t.update(small, Some(3 * GIB / 2)), PressureLevel::Critical);
         }
-        // Above S the window starts and completes after 10 s.
         for _ in 0..10 {
             clock.advance(1_000);
-            assert_eq!(t.update(small, Some(2 * GIB)), PressureLevel::Critical);
+            assert_eq!(t.update(small, Some(3 * GIB / 2)), PressureLevel::Warning);
+        }
+        // Above S the NORMAL window starts and completes after 10 s.
+        for _ in 0..10 {
+            clock.advance(1_000);
+            assert_eq!(t.update(small, Some(2 * GIB)), PressureLevel::Warning);
         }
         clock.advance(1_000);
         assert_eq!(t.update(small, Some(2 * GIB)), PressureLevel::Normal);
+    }
+
+    #[test]
+    fn critical_holds_while_the_raw_sample_stays_critical() {
+        let (mut t, clock) = tracker();
+        t.update(T16, Some(500 * 1024 * 1024));
+        clock.advance(1_000);
+        assert_eq!(
+            t.update(T16, Some(500 * 1024 * 1024)),
+            PressureLevel::Critical
+        );
+        // Still under the 1 GiB floor: no step-down, however long.
+        for _ in 0..30 {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update(T16, Some(900 * 1024 * 1024)),
+                PressureLevel::Critical
+            );
+        }
+    }
+
+    #[test]
+    fn kernel_critical_raises_at_once_and_blocks_every_recovery() {
+        let (mut t, clock) = tracker();
+        // Plenty of available pages (macOS counts active+inactive+free), yet
+        // the kernel says critical: CRITICAL immediately, no 2-sample wait.
+        assert_eq!(
+            t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Critical),
+            PressureLevel::Critical
+        );
+        // While the kernel keeps saying critical, neither NORMAL nor the
+        // step-down can complete — it used to "recover" after 10 s and flap.
+        for _ in 0..30 {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Critical),
+                PressureLevel::Critical
+            );
+        }
+        // Kernel back to normal: the ordinary 10 s window applies.
+        for _ in 0..10 {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Normal),
+                PressureLevel::Critical
+            );
+        }
+        clock.advance(1_000);
+        assert_eq!(
+            t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Normal),
+            PressureLevel::Normal
+        );
+    }
+
+    #[test]
+    fn kernel_warn_counts_only_when_sustained_and_blocks_normal() {
+        let (mut t, clock) = tracker();
+        let warn = KernelMemorySignal::Warn;
+        // Brief warns (common on macOS) do nothing.
+        for _ in 0..(KERNEL_WARN_SUSTAIN_SAMPLES - 1) {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update_with_kernel(T16, Some(12 * GIB), warn),
+                PressureLevel::Normal
+            );
+        }
+        // One normal sample resets the streak.
+        clock.advance(1_000);
+        assert_eq!(
+            t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Normal),
+            PressureLevel::Normal
+        );
+        // A sustained warn becomes a WARNING sample; the usual 2-sample rule
+        // then flips the level.
+        for _ in 0..KERNEL_WARN_SUSTAIN_SAMPLES {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update_with_kernel(T16, Some(12 * GIB), warn),
+                PressureLevel::Normal
+            );
+        }
+        clock.advance(1_000);
+        assert_eq!(
+            t.update_with_kernel(T16, Some(12 * GIB), warn),
+            PressureLevel::Warning
+        );
+        // Good pages but the kernel still warns: no NORMAL recovery.
+        for _ in 0..30 {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update_with_kernel(T16, Some(12 * GIB), warn),
+                PressureLevel::Warning
+            );
+        }
+        // Warn clears: 10 s later NORMAL.
+        for _ in 0..10 {
+            clock.advance(1_000);
+            assert_eq!(
+                t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Normal),
+                PressureLevel::Warning
+            );
+        }
+        clock.advance(1_000);
+        assert_eq!(
+            t.update_with_kernel(T16, Some(12 * GIB), KernelMemorySignal::Normal),
+            PressureLevel::Normal
+        );
     }
 
     #[test]

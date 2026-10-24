@@ -14,9 +14,11 @@
 //! window → KILL, and a signal is never delivered to a PID whose recorded
 //! identity no longer matches (PID reuse).
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::io;
 use std::sync::{Arc, Mutex};
+
+use std::time::Duration;
 
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use term_contracts::ids::ProcessIdentity;
@@ -28,6 +30,7 @@ use super::{
     SchedulingTier, StopPhase,
 };
 use crate::identity;
+use crate::native_proc::{self, Snapshot};
 
 const SOURCE: &str = "sysinfo.tree";
 
@@ -45,12 +48,16 @@ impl MacosTreePlatform {
         }
     }
 
-    fn refresh(&self) -> io::Result<std::sync::MutexGuard<'_, System>> {
+    /// 측정용 sysinfo 갱신 — 관찰한 멤버 pid만(예전에는 매번 전체 프로세스를
+    /// cpu·메모리·디스크까지 갱신했고, macOS sysinfo는 그때마다 모든 프로세스의
+    /// argv·env를 읽었다).
+    fn refresh_members(&self, pids: &[u32]) -> io::Result<std::sync::MutexGuard<'_, System>> {
         // A panic inside the lock must not disable observation for the
         // daemon's lifetime (owned_alive → 0, cancel unable to signal).
         let mut system = self.system.lock().unwrap_or_else(|p| p.into_inner());
+        let list: Vec<Pid> = pids.iter().map(|pid| Pid::from_u32(*pid)).collect();
         system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
+            ProcessesToUpdate::Some(&list),
             true,
             ProcessRefreshKind::nothing()
                 .with_cpu() // usage + accumulated time
@@ -58,6 +65,14 @@ impl MacosTreePlatform {
                 .with_disk_usage(),
         );
         Ok(system)
+    }
+
+    /// 트리 구조(pid·ppid·시작 시각)만 담은 네이티브 스냅샷. 집행 경로(종료·
+    /// 양보·정지·비었는지)는 `Duration::ZERO`로 새로 찍고, 계량용 멤버
+    /// 열거는 같은 틱의 공유 스냅샷을 쓴다.
+    fn topology(&self, max_age: Duration) -> io::Result<Arc<Snapshot>> {
+        native_proc::snapshot(max_age)
+            .ok_or_else(|| io::Error::other("process inventory unavailable"))
     }
 }
 
@@ -117,33 +132,10 @@ fn root_of(inner: &MacGroupInner) -> io::Result<ProcessIdentity> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no helper attached yet"))
 }
 
-/// PIDs of the observed tree (root included) under the refreshed inventory.
-fn observed_tree(system: &System, root_pid: u32) -> Vec<u32> {
-    let root = Pid::from_u32(root_pid);
-    if system.process(root).is_none() {
-        return Vec::new(); // root gone
-    }
-    let mut children: HashMap<Pid, Vec<Pid>> = HashMap::new();
-    for (pid, process) in system.processes() {
-        if let Some(parent) = process.parent() {
-            children.entry(parent).or_default().push(*pid);
-        }
-    }
-    let mut seen = std::collections::HashSet::from([root]);
-    let mut out = vec![root_pid];
-    let mut queue: VecDeque<Pid> = VecDeque::from([root]);
-    while let Some(pid) = queue.pop_front() {
-        if let Some(kids) = children.get(&pid) {
-            for kid in kids {
-                if !seen.insert(*kid) {
-                    continue;
-                }
-                queue.push_back(*kid);
-                out.push(kid.as_u32());
-            }
-        }
-    }
-    out
+/// PIDs of the observed tree (root included) in the inventory snapshot;
+/// empty when the root is gone.
+fn observed_tree(snapshot: &Snapshot, root_pid: u32) -> Vec<u32> {
+    snapshot.descendants(root_pid)
 }
 
 /// Observe the root and previously verified descendants whose identities
@@ -153,7 +145,7 @@ fn observed_tree(system: &System, root_pid: u32) -> Vec<u32> {
 /// anchor — it never anchors a subtree and never aborts the scan. Unobserved
 /// escapes remain outside this backend's coverage (§7).
 fn anchored_tree(
-    system: &System,
+    snapshot: &Snapshot,
     inner: &MacGroupInner,
     root: &ProcessIdentity,
 ) -> io::Result<Vec<u32>> {
@@ -172,7 +164,7 @@ fn anchored_tree(
             Ok(Some(live)) if live.same_process(&anchor) => {
                 // a sysinfo omission cannot erase a verified live anchor
                 observed.insert(anchor.pid);
-                observed.extend(observed_tree(system, anchor.pid));
+                observed.extend(observed_tree(snapshot, anchor.pid));
             }
             Ok(_) => {} // gone (ESRCH/zombie): anchors nothing
             Err(_) => {
@@ -369,8 +361,9 @@ impl super::ResourcePlatform for MacosTreePlatform {
         }
         let inner = tree_inner(group)?;
         let root = root_of(inner)?;
-        let system = self.refresh()?;
-        let observed = anchored_tree(&system, inner, &root)?;
+        let topology = self.topology(crate::proc_scan::SHARED_SCAN_MAX_AGE)?;
+        let observed = anchored_tree(&topology, inner, &root)?;
+        let system = self.refresh_members(&observed)?;
 
         let mut resident = 0u64;
         let mut cpu_ms = 0u64;
@@ -459,8 +452,8 @@ impl super::ResourcePlatform for MacosTreePlatform {
         }
         let inner = tree_inner(group)?;
         let root = root_of(inner)?;
-        let system = self.refresh()?;
-        let observed = anchored_tree(&system, inner, &root)?;
+        let topology = self.topology(crate::proc_scan::SHARED_SCAN_MAX_AGE)?;
+        let observed = anchored_tree(&topology, inner, &root)?;
         let (verified, _reused, _gone, unverifiable) = verify_members(inner, root.pid, &observed)?;
         if verified.is_empty() && unverifiable > 0 {
             // Unreadable members are omitted (never guessed), but an empty
@@ -481,11 +474,10 @@ impl super::ResourcePlatform for MacosTreePlatform {
         }
         let inner = tree_inner(group)?;
         let root = root_of(inner)?;
-        let system = self.refresh()?;
-        let observed = anchored_tree(&system, inner, &root)?;
+        let topology = self.topology(Duration::ZERO)?;
+        let observed = anchored_tree(&topology, inner, &root)?;
         // Unverifiable members are never signalled on the bare pid.
         let (verified, reused, _gone, _unverifiable) = verify_members(inner, root.pid, &observed)?;
-        drop(system);
         let sig = match phase {
             StopPhase::Grace => libc::SIGTERM,
             StopPhase::Force => libc::SIGKILL,
@@ -515,10 +507,11 @@ impl super::ResourcePlatform for MacosTreePlatform {
         scheduling::set_process_scheduling(&members, tier)
     }
 
-    /// 08 §5: 일시정지/재개. 양보와 같은 멤버십·신원 규율을 쓴다.
+    /// 08 §5: 일시정지/재개. 양보와 같은 멤버십·신원 규율을 쓰고, 정지는
+    /// 훑기와 신호 사이에 fork된 자식까지 재훑기로 멈춘다.
     fn suspend_owned(&self, group: &GroupHandle) -> io::Result<SchedulingOutcome> {
-        let members = self.verified_members(group, "suspend")?;
-        scheduling::set_process_suspend(&members, true)
+        scheduling::suspend_walked(|| self.verified_members(group, "suspend"))
+            .map(|(outcome, _)| outcome)
     }
 
     fn resume_owned(&self, group: &GroupHandle) -> io::Result<SchedulingOutcome> {
@@ -532,8 +525,8 @@ impl super::ResourcePlatform for MacosTreePlatform {
         }
         let inner = tree_inner(group)?;
         let root = root_of(inner)?;
-        let system = self.refresh()?;
-        let observed = anchored_tree(&system, inner, &root)?;
+        let topology = self.topology(Duration::ZERO)?;
+        let observed = anchored_tree(&topology, inner, &root)?;
         if observed.is_empty() {
             return Ok(true);
         }
@@ -558,10 +551,9 @@ impl MacosTreePlatform {
         }
         let inner = tree_inner(group)?;
         let root = root_of(inner)?;
-        let system = self.refresh()?;
-        let observed = anchored_tree(&system, inner, &root)?;
+        let topology = self.topology(Duration::ZERO)?;
+        let observed = anchored_tree(&topology, inner, &root)?;
         let (verified, reused, _gone, _unverifiable) = verify_members(inner, root.pid, &observed)?;
-        drop(system);
         if !reused.is_empty() {
             tracing::debug!(?reused, "skipped reused pids during {what}");
         }
@@ -787,7 +779,7 @@ mod tests {
     /// longer prove.
     #[test]
     fn unreadable_anchor_stays_observed_without_a_subtree() {
-        let system = System::new();
+        let system = Snapshot::from_entries(Vec::new());
         let inner = MacGroupInner::default();
         let root = identity::process_identity(std::process::id()).expect("self identity");
         inner

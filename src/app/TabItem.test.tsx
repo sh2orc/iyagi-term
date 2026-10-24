@@ -7,7 +7,10 @@
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 import { t } from "../i18n";
-import { TabItem, missionTabBadgeText, type TabItemProps } from "./TabItem";
+import { TabItem, missionTabBadgeText, tabAutoRelief, type TabAutoRelief, type TabItemProps } from "./TabItem";
+import { makeLeaf, type SplitNode } from "../features/terminal/splitTree";
+import type { PaneMeta } from "../store/workbenchStore";
+import type { WorkloadSummary } from "../generated/WorkloadSummary";
 import type { MissionTabBadge } from "../features/missions/missionStatus";
 import type { TabState } from "../store/workbenchStore";
 
@@ -195,5 +198,68 @@ describe("TabItem mission badge", () => {
 
   it("보일 상태가 없으면 배지를 그리지 않는다", () => {
     expect(renderBadge(null)).not.toContain("tab-badge-mission");
+  });
+});
+
+describe("TabItem 자동 개입 표식(정지·양보)", () => {
+  function renderRelief(relief: TabAutoRelief | null, active = false): string {
+    return renderToString(
+      <TabItem
+        tab={tab}
+        index={0}
+        tabCount={2}
+        active={active}
+        relief={relief}
+        renaming={false}
+        onSelect={noop}
+        onClose={noop}
+        onCloseAll={noop}
+        onRenameStart={noop}
+        onRenameCommit={noop}
+        onRenameCancel={noop}
+      />,
+    );
+  }
+
+  it("다른 탭에 자동 정지·양보된 창이 있으면 작은 배지와 툴팁을 단다(보고 있는 탭은 조용히)", () => {
+    expect(renderRelief("suspended")).toContain("tab-badge tab-badge-relief tab-badge-relief-suspended");
+    expect(renderRelief("suspended")).toContain(t("app.tabRelief.suspendedTitle"));
+    expect(renderRelief("yielded")).toContain(t("app.tabRelief.yielded"));
+    expect(renderRelief("suspended", true)).not.toContain("tab-badge-relief");
+    expect(renderRelief(null)).not.toContain("tab-badge-relief");
+  });
+
+  function paneOf(leafId: string, workloadId: string, overrides: Partial<PaneMeta> = {}): PaneMeta {
+    return {
+      leafId, viewId: `view-${leafId}`, sessionId: `s-${leafId}`, workloadId, title: "zsh", cwd: "/w",
+      phase: "live", error: null, usage: null, flowBlocked: false, ...overrides,
+    };
+  }
+
+  function workloadOf(id: string, guard: WorkloadSummary["guard"]): WorkloadSummary {
+    return {
+      workload_id: id, session_id: `s-${id}`, mode: "shell", state: "RUNNING", priority: 1, title: "zsh", cwd: "/w",
+      program: "/bin/zsh", reservation_bytes: "0", cpu_slots: 1, enforcement: "observe", root_exited: false,
+      cancel_requested: false, connection: "attached", relief: { kind: "NONE" }, guard, guard_warning: null, protected: false,
+    };
+  }
+
+  it("가드의 자동 정지가 자동 양보보다 먼저이고, 사용자가 직접 한 정지·양보는 세지 않는다", () => {
+    const root: SplitNode = {
+      kind: "split", id: "sp", axis: "row", ratio: 0.5,
+      first: makeLeaf("a", "view-a", "s-a"),
+      second: makeLeaf("b", "view-b", "s-b"),
+    };
+    const auto = { kind: "SUSPENDED" as const, since_ms: "1", reason: "memory_limit" as const, manual: false, partial: false };
+    const manual = { ...auto, manual: true };
+    const yielded = { kind: "YIELDED" as const, sinceMs: 1, manual: false, partial: false };
+    const state = (guardA: WorkloadSummary["guard"], reliefB: PaneMeta["relief"]) => ({
+      panes: { a: paneOf("a", "wa"), b: paneOf("b", "wb", { relief: reliefB }) },
+      workloadById: new Map([["wa", workloadOf("wa", guardA)], ["wb", workloadOf("wb", { kind: "NONE" })]]),
+    });
+    expect(tabAutoRelief(state({ kind: "NONE" }, { kind: "NONE" }), root)).toBeNull();
+    expect(tabAutoRelief(state({ kind: "NONE" }, yielded), root)).toBe("yielded");
+    expect(tabAutoRelief(state(auto, yielded), root)).toBe("suspended");
+    expect(tabAutoRelief(state(manual, { ...yielded, manual: true }), root)).toBeNull();
   });
 });

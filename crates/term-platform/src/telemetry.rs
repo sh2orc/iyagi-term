@@ -20,7 +20,16 @@ pub mod ring;
 pub mod sampler;
 
 pub use cadence::CadenceGate;
-pub use kernel_pressure::kernel_memory_critical;
+pub use kernel_pressure::kernel_memory_pressure;
+
+/// 호스트 물리 메모리 총량(바이트). 데몬 기동 때 한 번 — 가드 기본 한도를
+/// 호스트에 맞춰 유도하는 데 쓴다. 읽지 못하면 `None`.
+pub fn physical_memory_total_bytes() -> Option<u64> {
+    let mut system = sysinfo::System::new();
+    system.refresh_memory_specifics(sysinfo::MemoryRefreshKind::nothing().with_ram());
+    let total = system.total_memory();
+    (total > 0).then_some(total)
+}
 pub use pressure::classify_pressure;
 pub use rates::{counter_delta_rate, Delta};
 pub use ring::SampleRing;

@@ -80,14 +80,18 @@ pub enum SchedulingTier {
 /// process: those are never touched and never reported as an error
 /// (01-contracts §1 pid-reuse defence).
 ///
-/// The three counters do not have to add up to the member count: a process
-/// that exited between the identity check and the OS call is neither applied
-/// nor failed — it is no longer a member.
+/// The counters do not have to add up to the member count: a process that
+/// exited between the identity check and the OS call is neither applied nor
+/// failed — it is no longer a member.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SchedulingOutcome {
     pub applied: usize,
     pub failed: usize,
     pub skipped_reused: usize,
+    /// Verified members the OS refused with `EPERM` — typically a setuid
+    /// helper (`sudo`, `ssh-agent`) running under another uid. Retrying never
+    /// succeeds, so they are reported but do not make the outcome partial.
+    pub skipped_denied: usize,
 }
 
 impl SchedulingOutcome {
@@ -95,6 +99,16 @@ impl SchedulingOutcome {
     /// this as `partial` and the caller retries on the next tick (08 §2).
     pub fn is_partial(&self) -> bool {
         self.failed > 0
+    }
+}
+
+/// Folds a follow-up pass (a re-walk that caught late forks) into the first.
+impl std::ops::AddAssign for SchedulingOutcome {
+    fn add_assign(&mut self, more: Self) {
+        self.applied += more.applied;
+        self.failed += more.failed;
+        self.skipped_reused += more.skipped_reused;
+        self.skipped_denied += more.skipped_denied;
     }
 }
 

@@ -12,14 +12,13 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::Duration;
 
 use base64::Engine;
 use term_contracts::ids::{ConnectionId, SessionId, ViewId, WorkloadId};
 use term_contracts::session::{AttachAccess, SessionOutput, TerminalFrameKind};
 use term_contracts::U64String;
-use term_core::Clock as _;
 use term_platform::ResourcePlatform;
 use term_pty::actor::{ActorEvent, ActorEventKind, JournalSink, OutputSink};
 use term_pty::flow::{FlowController, FlowTransition, SentRecord};
@@ -97,14 +96,14 @@ pub struct SessionEntry {
     pub wake_cv: Condvar,
     /// `wake()`가 `wait()`보다 먼저 도착해도 잃지 않는다 — 조건 변수는
     /// 상태가 없어 exit 판정과 `wait_timeout` 사이의 wake가 사라지면
-    /// attach 직후 첫 재생이 최대 200 ms 늦는다.
+    /// 새 레코드 배달이 펌프의 안전망 대기(1초)만큼 늦는다.
     pub wake_pending: AtomicBool,
     /// Stop flag for the pump (session registry removal / daemon shutdown).
     pub pump_stop: AtomicBool,
     /// Whether a delivery-pump thread is currently running. The pump exits
-    /// when the last view detaches AND the actor finalized; a later attach
-    /// (e.g. replaying a finished session's journal) restarts it via
-    /// [`ensure_pump`].
+    /// when the last view detaches (live or finished session); a later
+    /// attach — a pane reopening, or replaying a finished session's journal
+    /// — restarts it via [`ensure_pump`].
     pub pump_alive: AtomicBool,
     /// Serializes the pump exit-decision with `ensure_pump` respawns.
     /// Lock order: pump_ctl → views (never the reverse).
@@ -127,6 +126,23 @@ impl SessionEntry {
         self.wake_pending.store(true, Ordering::Release);
         self.wake_cv.notify_all();
         drop(guard);
+    }
+
+    /// 새 레코드 알림: 붙은 뷰가 있을 때만 펌프를 깨운다. 뷰가 없으면 배달할
+    /// 곳도, 펌프 스레드도 없다(마지막 뷰가 떠나면 펌프가 빠져나가고 attach가
+    /// [`ensure_pump`]로 다시 띄운다). 알림을 잃지 않는 이유: `last_seq`는 이
+    /// 검사 전에 기록되고, attach는 뷰를 넣은 *뒤* 깨운다 — 뷰 잠금이 둘의
+    /// 순서를 정하므로 이 검사가 뷰를 못 봤다면 attach의 wake가 이 레코드를
+    /// 덮는다.
+    pub fn wake_if_viewed(&self) {
+        let viewed = !self
+            .views
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty();
+        if viewed {
+            self.wake();
+        }
     }
 
     /// Wait for pump work or timeout. A wake that landed since the last
@@ -157,7 +173,7 @@ impl SessionEntry {
         }
         drop(ring);
         self.resize_notify.notify_waiters();
-        self.wake();
+        self.wake_if_viewed();
     }
 
     /// 배달용 저널 읽기가 실패했다 — 연속 실패의 시작을 기록하고(첫 실패면
@@ -185,26 +201,31 @@ impl SessionEntry {
 // ---------------------------------------------------------------------------
 // Actor wiring adapters
 
-/// Journal sink writing the MTJ1 file and periodically syncing SQLite
-/// session progress (`last_seq`, `journal_bytes`) — the DB gets metadata,
-/// never PTY bytes (spec §5).
+/// Journal sink writing the MTJ1 file. SQLite gets the session progress
+/// (`last_seq`, `journal_bytes`) once, when the writer closes — the DB gets
+/// metadata, never PTY bytes (spec §5).
 ///
-/// The writer is shared behind a mutex so a per-session flusher thread can
-/// drive the 250 ms flush cadence even when appends stop arriving (a final
-/// partial burst must still reach the delivery pump, which reads the file).
+/// The writer is shared behind a mutex: the actor drives the 250 ms flush
+/// cadence through [`JournalSink::tick`] (it parks until a buffered tail is
+/// due, so a final partial burst still reaches the file after appends
+/// stop), and the delivery pump flushes on demand when it catches up to a
+/// buffered tail ([`JournalInner::flush_now`]).
 pub struct SharedJournal {
     inner: Arc<Mutex<JournalInner>>,
 }
+
+/// 공정 몫 확인 주기(actor 시계). 전역 예산 잠금을 라운드마다 잡지 않는다.
+const FAIR_SHARE_CHECK_MS: u64 = 250;
 
 pub struct JournalInner {
     writer: JournalWriter,
     storage: Arc<Storage>,
     session_id: SessionId,
-    last_progress_ms: u64,
-    /// Last (seq, bytes) actually persisted — idle sessions must not
-    /// fsync identical progress rows every 250 ms (idle-CPU target,
-    /// 06-verification §5).
-    last_persisted: (u64, u64),
+    /// flush가 실패하는 중인가. 디스크가 가득 찬 동안 같은 경고를 tick마다
+    /// 쌓지 않고 실패의 시작과 회복만 남긴다(예전엔 세션마다 초당 10줄).
+    flush_failing: bool,
+    /// 다음 공정 몫 확인 시각(actor 시계, [`FAIR_SHARE_CHECK_MS`] 간격).
+    next_share_check_ms: u64,
     finished: bool,
 }
 
@@ -246,14 +267,11 @@ impl SharedJournal {
         let tracker = writer
             .tracker()
             .expect("rolling journal publishes a segment tracker");
-        let inner = Arc::new(Mutex::new(JournalInner {
+        let inner = Arc::new(Mutex::new(JournalInner::new(
             writer,
-            storage: Arc::clone(&state.storage),
-            session_id: session_id.clone(),
-            last_progress_ms: 0,
-            last_persisted: (0, 0),
-            finished: false,
-        }));
+            Arc::clone(&state.storage),
+            session_id.clone(),
+        )));
         Ok((
             SharedJournal {
                 inner: Arc::clone(&inner),
@@ -264,27 +282,32 @@ impl SharedJournal {
     }
 }
 
+// append는 버퍼에 쌓기만 한다. flush 캐이던스는 actor가 자기 시계로
+// `tick`을 불러 굴린다 — 예전에는 append마다 호출 시점에 새로 만든
+// 시계(늘 ~0 ms)로 캐이던스를 재 쓸모가 없었고, 그 몫을 세션마다 100 ms로
+// 깨어나는 flusher 스레드가 메웠다.
 impl JournalSink for SharedJournal {
     fn append_output(&mut self, data: &[u8]) -> std::io::Result<u64> {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let now = term_core::MonotonicClock::new().now_ms();
-        let seq = inner
+        inner
             .writer
             .append_output(data)
-            .map_err(std::io::Error::other)?;
-        inner.tick(now);
-        Ok(seq)
+            .map_err(std::io::Error::other)
     }
 
     fn append_resize(&mut self, cols: u16, rows: u16) -> std::io::Result<u64> {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let now = term_core::MonotonicClock::new().now_ms();
-        let seq = inner
+        inner
             .writer
             .append_resize(cols, rows)
-            .map_err(std::io::Error::other)?;
-        inner.tick(now);
-        Ok(seq)
+            .map_err(std::io::Error::other)
+    }
+
+    fn tick(&mut self, now_ms: u64) -> Option<u64> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .tick(now_ms)
     }
 }
 
@@ -328,6 +351,10 @@ impl<J: JournalSink> JournalSink for RedactingJournal<J> {
 
     fn append_resize(&mut self, cols: u16, rows: u16) -> std::io::Result<u64> {
         self.inner.append_resize(cols, rows)
+    }
+
+    fn tick(&mut self, now_ms: u64) -> Option<u64> {
+        self.inner.tick(now_ms)
     }
 }
 
@@ -374,37 +401,83 @@ pub(crate) fn redact_chunk<'a>(
 }
 
 impl JournalInner {
-    /// Immediate flush for the interactive delivery path: the pump calls
-    /// this when a live view needs records that are still buffered.
-    pub fn flush_now(&mut self) {
-        if let Err(e) = self.writer.flush_now() {
-            tracing::warn!(session = %self.session_id, error = %e, "journal flush_now failed");
+    pub(crate) fn new(writer: JournalWriter, storage: Arc<Storage>, session_id: SessionId) -> Self {
+        JournalInner {
+            writer,
+            storage,
+            session_id,
+            flush_failing: false,
+            next_share_check_ms: 0,
+            finished: false,
         }
     }
 
-    /// Rate-limited flush + DB progress sync (250 ms cadence each).
-    fn tick(&mut self, now_ms: u64) {
-        if let Err(e) = self.writer.flush_tick(now_ms) {
-            tracing::warn!(session = %self.session_id, error = %e, "journal flush failed");
+    /// Immediate flush for the interactive delivery path: the pump calls
+    /// this when a live view needs records that are still buffered.
+    pub fn flush_now(&mut self) {
+        let result = self.writer.flush_now();
+        self.note_flush(result.map(|()| true));
+    }
+
+    /// actor 시계의 upkeep — actor 루프가 [`JournalSink::tick`]으로 라운드마다
+    /// 부른다. 250 ms flush 캐이던스와 전역 예산 공정 몫(예산이 상한에 닿기
+    /// 직전이면 몫을 넘는 오래된 세그먼트를 내놓아, 자를 것이 없는 젊은
+    /// 세션도 다시 예약할 수 있게 한다). 버퍼에 꼬리가 남았으면 다음 flush
+    /// 시각을 돌려준다 — actor는 그때까지 잔다.
+    ///
+    /// DB 진행 동기화는 여기서 하지 않는다: 250 ms마다 `synchronous=FULL`
+    /// 커밋을 저널 잠금을 쥔 채 기다리던 경로(세션 테이블 WAL 커밋 초당
+    /// 14–17회, 하루 수 GB의 SSD 쓰기)였는데, 런타임에 그 열을 읽는 곳이
+    /// 없다 — 복구(`session_recovery`)는 저널을 다시 훑고, retention은 디스크
+    /// 바이트를 센다. 마지막 값은 Drop이 한 번 남긴다.
+    fn tick(&mut self, now_ms: u64) -> Option<u64> {
+        let result = self.writer.flush_tick(now_ms);
+        self.note_flush(result);
+        if now_ms >= self.next_share_check_ms {
+            self.next_share_check_ms = now_ms.saturating_add(FAIR_SHARE_CHECK_MS);
+            let released = self.writer.yield_to_global_pressure();
+            if released > 0 {
+                tracing::debug!(
+                    session = %self.session_id,
+                    released_bytes = released,
+                    "journal trimmed to its fair share of the global budget"
+                );
+            }
         }
-        if now_ms.saturating_sub(self.last_progress_ms) < 250 {
-            return;
+        self.writer.flush_due_at()
+    }
+
+    /// flush 결과 기록. 실패는 처음 한 번만 경고하고(재시도는 캐이던스가
+    /// 맡는다), 실제로 flush가 다시 성공하면 회복을 남긴다.
+    fn note_flush(&mut self, result: Result<bool, JournalFlowError>) {
+        match result {
+            Ok(true) => {
+                if std::mem::take(&mut self.flush_failing) {
+                    tracing::info!(session = %self.session_id, "journal flush recovered");
+                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                if !std::mem::replace(&mut self.flush_failing, true) {
+                    tracing::warn!(
+                        session = %self.session_id,
+                        error = %e,
+                        "journal flush failed; retrying on the flush cadence"
+                    );
+                }
+            }
         }
-        self.last_progress_ms = now_ms;
-        self.sync_progress();
     }
 
     fn sync_progress(&mut self) {
         let seq = self.writer.last_seq();
         let bytes = self.writer.journal_bytes();
-        if seq > 0 && (seq, bytes) != self.last_persisted {
+        if seq > 0 {
             if let Err(e) = self
                 .storage
                 .update_session_progress(&self.session_id, seq, bytes)
             {
                 tracing::warn!(session = %self.session_id, error = %e, "session progress sync failed");
-            } else {
-                self.last_persisted = (seq, bytes);
             }
         }
     }
@@ -417,40 +490,17 @@ impl Drop for JournalInner {
         }
         self.finished = true;
         let _ = self.writer.finalize();
+        // 세션의 마지막 진행(last_seq/journal_bytes)을 한 번 남긴다. 마지막
+        // Arc가 사라지는 순간이라 저널 잠금을 쥔 다른 쪽은 없다.
         self.sync_progress();
     }
-}
-
-/// Per-session journal flusher: keeps the 250 ms flush cadence alive while
-/// the session runs so the delivery pump never waits on a buffered tail.
-/// Exits when the session entry is finalized (the actor's Drop performs the
-/// final flush + progress sync).
-pub fn spawn_journal_flusher(
-    state: Arc<DaemonState>,
-    session: Arc<SessionEntry>,
-    journal: Arc<Mutex<JournalInner>>,
-) {
-    std::thread::Builder::new()
-        .name(format!("journal-flush-{}", session.session_id))
-        .spawn(move || loop {
-            if session.actor_finalized.load(Ordering::Acquire) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-            if session.actor_finalized.load(Ordering::Acquire) {
-                return;
-            }
-            let mut inner = journal.lock().unwrap_or_else(|p| p.into_inner());
-            inner.tick(state.now_ms());
-        })
-        .expect("spawn journal flusher");
 }
 
 /// 종료된 세션이 붙들고 있던 저널 쓰기 핸들을 놓아준다(02-runner §7의
 /// teardown 순서: writer → master → group handle).
 ///
 /// `SessionEntry.journal_inner`는 `Arc<Mutex<JournalInner>>`의 한 소유자다.
-/// 이 참조를 비우지 않으면 actor 스레드와 flusher가 끝나도 strong count가
+/// 이 참조를 비우지 않으면 actor 스레드가 끝나도 strong count가
 /// 0이 되지 않아 [`JournalInner`]의 Drop이 영영 돌지 않는다 — 즉 세션당
 /// 64 KiB 쓰기 버퍼와 파일 서술자 하나가 데몬이 죽을 때까지 남는다.
 /// 마지막 버퍼는 여기서 즉시 flush해 재생(파일 직접 읽기)이 곧바로
@@ -475,18 +525,22 @@ pub fn release_journal(session: &SessionEntry) -> bool {
 /// session pump. `can_send` is always true — the journal is the buffering
 /// layer and per-view slowness must never stall it (spec §4: "journal에
 /// 공간이 있으면 PTY를 계속 읽고").
+///
+/// 세션 항목을 약한 참조로 직접 쥔다 — 레코드마다 전역 `sessions` 잠금을
+/// 잡고 레지스트리를 뒤지던 비용(펌프·RPC 모두가 다투는 잠금)이 없다.
+/// 항목이 회수되면 업그레이드가 실패해 emit이 조용히 끝난다(예전의
+/// "레지스트리에 없으면 무시"와 같다). 펌프는 붙은 뷰가 있을 때만 깨운다.
 pub struct NotifySink {
     state: Arc<DaemonState>,
-    session_id: SessionId,
+    session: Weak<SessionEntry>,
 }
 
 impl NotifySink {
-    pub fn new(state: Arc<DaemonState>, session_id: SessionId) -> Self {
-        NotifySink { state, session_id }
-    }
-
-    fn session(&self) -> Option<Arc<SessionEntry>> {
-        self.state.session(&self.session_id)
+    pub fn new(state: Arc<DaemonState>, session: &Arc<SessionEntry>) -> Self {
+        NotifySink {
+            state,
+            session: Arc::downgrade(session),
+        }
     }
 }
 
@@ -496,14 +550,14 @@ impl OutputSink for NotifySink {
     }
 
     fn emit(&mut self, event: ActorEvent) {
-        let Some(session) = self.session() else {
+        let Some(session) = self.session.upgrade() else {
             return;
         };
         session.last_seq.store(event.seq, Ordering::Release);
         if let ActorEventKind::Resize { cols, rows } = event.kind {
             session.record_resize(event.seq, cols, rows, self.state.now_ms());
         } else {
-            session.wake();
+            session.wake_if_viewed();
         }
     }
 }
@@ -540,8 +594,8 @@ impl term_pty::actor::DescendantWatch for GroupWatch {
 
 /// Spawn the per-session delivery pump. The pump reads journal records in
 /// order and pushes `session.output` frames to each view's data connection,
-/// gated by the per-view flow credits. It exits when `pump_stop` is set and
-/// no views remain.
+/// gated by the per-view flow credits. It exits when `pump_stop` is set or
+/// no views remain (attach restarts it through [`ensure_pump`]).
 pub fn spawn_pump(state: Arc<DaemonState>, session: Arc<SessionEntry>) {
     session.pump_alive.store(true, Ordering::Release);
     std::thread::Builder::new()
@@ -551,8 +605,8 @@ pub fn spawn_pump(state: Arc<DaemonState>, session: Arc<SessionEntry>) {
 }
 
 /// (Re)start the delivery pump when a view attaches to a session whose pump
-/// already exited (finished session + all views detached earlier). Races with
-/// the pump's own exit decision are serialized by `pump_ctl`.
+/// already exited (no view was attached). Races with the pump's own exit
+/// decision are serialized by `pump_ctl`.
 pub fn ensure_pump(state: Arc<DaemonState>, session: Arc<SessionEntry>) {
     let _ctl = session.pump_ctl.lock().unwrap_or_else(|p| p.into_inner());
     if !session.pump_alive.load(Ordering::Acquire) && !session.pump_stop.load(Ordering::Acquire) {
@@ -560,7 +614,19 @@ pub fn ensure_pump(state: Arc<DaemonState>, session: Arc<SessionEntry>) {
     }
 }
 
+/// 붙은 뷰가 모두 따라잡은 펌프의 안전망 대기. 새 레코드(`wake_if_viewed`)·
+/// ACK·attach·소유권 이전·종료가 모두 깨우므로 이 시간은 지연이 아니다 —
+/// 놓친 깨움이 있어도 1초 안에 회복한다는 상한일 뿐이다.
+const PUMP_IDLE_WAIT: Duration = Duration::from_secs(1);
+/// 보낼 레코드가 있는데 막힌 펌프(크레딧·전역 출력 예산·아직 없는 데이터
+/// 연결·저널 읽기 오류)의 재시도 간격. 다른 세션의 ACK가 푼 전역 예산이나
+/// 데이터 연결 링크는 이 세션을 깨우지 않으므로 짧게 시작해 막힘이 이어지는
+/// 동안 늘린다.
+const PUMP_BLOCKED_MIN_WAIT: Duration = Duration::from_millis(20);
+const PUMP_BLOCKED_MAX_WAIT: Duration = Duration::from_millis(100);
+
 fn pump_loop(state: Arc<DaemonState>, session: Arc<SessionEntry>) {
+    let mut blocked_wait = PUMP_BLOCKED_MIN_WAIT;
     loop {
         if session.pump_stop.load(Ordering::Acquire) {
             break;
@@ -569,38 +635,41 @@ fn pump_loop(state: Arc<DaemonState>, session: Arc<SessionEntry>) {
         // Exit decision under pump_ctl so a concurrent `ensure_pump` either
         // sees the pump still alive (and we see its freshly inserted view) or
         // observes the exit and respawns (lock order: pump_ctl → views).
-        let (should_exit, view_count) = {
+        // 뷰가 없으면 살아 있는 세션이라도 빠져나간다: 배달할 곳이 없고,
+        // 예전처럼 200 ms마다 깨어 있을 이유도 없다(하루 내내 떨어져 있는
+        // 세션도 흔하다). 다음 attach가 `ensure_pump`로 다시 띄운다.
+        let should_exit = {
             let _ctl = session.pump_ctl.lock().unwrap_or_else(|p| p.into_inner());
-            let view_count = session
+            let no_views = session
                 .views
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .len();
-            if view_count == 0 && session.actor_finalized.load(Ordering::Acquire) {
+                .is_empty();
+            if no_views {
                 session.pump_alive.store(false, Ordering::Release);
-                (true, view_count)
-            } else {
-                (false, view_count)
             }
+            no_views
         };
         if should_exit {
             break;
         }
         match delivery {
-            Delivery::Progressed => std::thread::sleep(Duration::from_millis(1)),
+            Delivery::Progressed => {
+                blocked_wait = PUMP_BLOCKED_MIN_WAIT;
+                std::thread::sleep(Duration::from_millis(1));
+            }
             // 보낼 레코드가 남았는데 데이터 연결 큐가 찼다: writer는 몇 ms 안에
             // 비우므로 짧게만 쉬고 이어 보낸다(재생 속도를 20 ms 폴링에 묶지 않는다).
             Delivery::QueueFull => session.wait(Duration::from_millis(2)),
+            Delivery::Blocked => {
+                session.wait(blocked_wait);
+                blocked_wait = (blocked_wait * 2).min(PUMP_BLOCKED_MAX_WAIT);
+            }
+            // 모두 따라잡았다: 새 레코드가 오면 actor의 emit이 깨운다
+            // (예전엔 뷰가 붙은 세션마다 20 ms 폴링 — 초당 50번).
             Delivery::Idle => {
-                // A live session with no attached view has nothing to deliver:
-                // polling it at 50 Hz burned idle CPU for the whole (possibly
-                // day-long) detached window. `attach` calls `wake()`, so the
-                // longer sleep costs no latency.
-                session.wait(Duration::from_millis(if view_count == 0 {
-                    200
-                } else {
-                    20
-                }));
+                blocked_wait = PUMP_BLOCKED_MIN_WAIT;
+                session.wait(PUMP_IDLE_WAIT);
             }
         }
     }
@@ -613,16 +682,29 @@ enum Delivery {
     Progressed,
     /// 보낼 레코드가 있지만 데이터 연결 큐에 여유가 없어 멈췄다.
     QueueFull,
-    /// 보낼 것이 없거나 크레딧·읽기 오류로 멈췄다.
+    /// 보낼 레코드가 있지만 크레딧·전역 예산·데이터 연결·읽기 오류로
+    /// 멈췄다(재시도 간격으로 다시 본다).
+    Blocked,
+    /// 붙은 뷰가 모두 따라잡았다(새 레코드가 깨운다).
     Idle,
 }
 
 impl Delivery {
-    fn from_progress(progressed: bool) -> Self {
+    /// 따라잡아 보낼 것이 없다.
+    fn caught_up(progressed: bool) -> Self {
         if progressed {
             Delivery::Progressed
         } else {
             Delivery::Idle
+        }
+    }
+
+    /// 보낼 것이 남았지만 지금은 막혔다.
+    fn blocked(progressed: bool) -> Self {
+        if progressed {
+            Delivery::Progressed
+        } else {
+            Delivery::Blocked
         }
     }
 }
@@ -813,6 +895,9 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
         realign_cursors_with_ledger(session);
         // Views that still need records, with their data connections.
         let mut pending_views: Vec<(ViewId, ViewEntry, Arc<crate::state::ConnHandle>)> = Vec::new();
+        // 보낼 레코드가 있는데 데이터 연결이 (아직) 없는 뷰가 있다 — 링크는
+        // 펌프를 깨우지 않으므로 따라잡음(Idle)이 아니라 막힘으로 다시 본다.
+        let mut awaiting_link = false;
         {
             let views = session.views.lock().unwrap_or_else(|p| p.into_inner());
             for (id, view) in views.iter() {
@@ -825,13 +910,18 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
                 // 연결 해체 지점(ipc.rs)에서 정확히 판별해 떼고
                 // `session.replay_required`로 알린다(shed_views_of_control).
                 let Some(data_conn) = state.data_conn_for(&view.conn) else {
+                    awaiting_link = true;
                     continue;
                 };
                 pending_views.push((id.clone(), view.clone(), data_conn));
             }
         }
         if pending_views.is_empty() {
-            return Delivery::from_progress(progressed);
+            return if awaiting_link {
+                Delivery::blocked(progressed)
+            } else {
+                Delivery::caught_up(progressed)
+            };
         }
         // 큐가 찬 연결의 뷰는 이번 패스에서 뺀다 — 연결은 살아 있고(데이터 큐는
         // 넘침으로 닫히지 않는다) writer가 비우면 QueueFull 대기 뒤 이어 보낸다.
@@ -851,7 +941,7 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
             pending_views.retain(|(id, _, _)| flow.can_send(id));
         }
         if pending_views.is_empty() {
-            return Delivery::from_progress(progressed);
+            return Delivery::blocked(progressed);
         }
 
         // Batch-read the next records once for this pass.
@@ -861,7 +951,7 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
             .min()
             .unwrap_or(u64::MAX);
         if from > target {
-            return Delivery::from_progress(progressed);
+            return Delivery::caught_up(progressed);
         }
         let to = (from + 64).min(target);
         let head = session.journal_segments.snapshot();
@@ -882,7 +972,7 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
                 // 뒤처진 뷰). 영원히 재시도하는 대신 뷰를 떼고 다시 붙으라고
                 // 알린다 — 재생은 first_seq부터 다시 시작한다.
                 if detach_views_behind(state, session, first_seq) == 0 {
-                    return Delivery::from_progress(progressed);
+                    return Delivery::blocked(progressed);
                 }
                 continue;
             }
@@ -918,7 +1008,7 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
                         "journal read for delivery failed; retrying"
                     );
                 }
-                return Delivery::from_progress(progressed);
+                return Delivery::blocked(progressed);
             }
         };
         if records.is_empty() {
@@ -944,11 +1034,11 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
                     session.clear_journal_read_failure();
                     if !records.is_empty() {
                         let sent = deliver_records(state, session, &records, target);
-                        return Delivery::from_progress(progressed || sent);
+                        return Delivery::blocked(progressed || sent);
                     }
                 }
             }
-            return Delivery::from_progress(progressed);
+            return Delivery::blocked(progressed);
         }
 
         if !deliver_records(state, session, &records, target) {
@@ -963,7 +1053,7 @@ fn deliver_pending(state: &Arc<DaemonState>, session: &Arc<SessionEntry>) -> Del
             return if queue_full {
                 Delivery::QueueFull
             } else {
-                Delivery::Idle
+                Delivery::Blocked
             };
         }
         progressed = true;
@@ -1800,14 +1890,11 @@ pub(crate) mod journal_release_tests {
         let segments = Arc::new(SegmentTracker::frozen(writer.segment_snapshot()));
         let storage =
             Arc::new(term_storage::Storage::open(dir.join("meta.db3")).expect("storage open"));
-        let inner = Arc::new(Mutex::new(JournalInner {
+        let inner = Arc::new(Mutex::new(JournalInner::new(
             writer,
             storage,
-            session_id: session_id.clone(),
-            last_progress_ms: 0,
-            last_persisted: (0, 0),
-            finished: false,
-        }));
+            session_id.clone(),
+        )));
         let session = Arc::new(SessionEntry {
             session_id: session_id.clone(),
             workload_id: WorkloadId::generate(),
@@ -2393,5 +2480,140 @@ mod redaction_tests {
         let joined: Vec<u8> = pieces.concat();
         assert_eq!(joined.len(), MAX_OUTPUT_PAYLOAD * "[redacted]".len());
         assert_eq!(last, 1 + pieces.len() as u64);
+    }
+}
+
+#[cfg(test)]
+mod journal_tick_tests {
+    use super::*;
+    use term_pty::journal::DEFAULT_SEGMENT_BYTES;
+
+    /// actor 시계의 `tick`이 250 ms 캐이던스로 꼬리를 flush하고 다음 flush
+    /// 시각을 알린다 — 세션마다 100 ms로 깨던 flusher 스레드 없이도 버퍼에
+    /// 남은 꼬리가 파일에 닿는다.
+    #[test]
+    fn tick_flushes_the_tail_on_the_cadence_and_reports_the_next_due() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session_id = SessionId::generate();
+        let (_session, inner, path) = journal_release_tests::session_entry(dir.path(), &session_id);
+        let mut sink = SharedJournal { inner };
+        let file_len = || std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+        sink.append_resize(80, 24).expect("size record");
+        assert_eq!(sink.tick(1_000), None, "the first tick flushes at once");
+        let flushed = file_len();
+        assert!(flushed > 0);
+
+        sink.append_output(b"tail").expect("output");
+        assert_eq!(
+            sink.tick(1_100),
+            Some(1_250),
+            "inside the cadence: due at the boundary"
+        );
+        assert_eq!(file_len(), flushed, "the tail is still buffered");
+        assert_eq!(sink.tick(1_250), None);
+        assert!(file_len() > flushed, "the tail reached the file");
+    }
+
+    /// 전역 예산이 상한 직전이면 오래된 세션의 `tick`이 공정 몫을 넘는
+    /// 세그먼트를 내놓고, 닫힌 세그먼트가 없어 거절당하던 젊은 세션이 다시
+    /// 기록한다(예전엔 `GlobalCap`으로 영영 PTY 읽기를 멈췄다).
+    #[test]
+    fn tick_yields_the_fair_share_so_a_young_session_can_write_again() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let budget = GlobalJournalBudget::shared(64 * 1024);
+        let storage =
+            Arc::new(term_storage::Storage::open(dir.path().join("meta.db3")).expect("storage"));
+        let open = |name: &str| {
+            let writer = JournalWriter::open_with(
+                dir.path().join(name),
+                uuid::Uuid::new_v4(),
+                JournalOptions {
+                    session_limit: 64 * 1024, // 8 KiB segments
+                    segment_cap: Some(DEFAULT_SEGMENT_BYTES),
+                },
+                Arc::clone(&budget),
+            )
+            .expect("journal open");
+            SharedJournal {
+                inner: Arc::new(Mutex::new(JournalInner::new(
+                    writer,
+                    Arc::clone(&storage),
+                    SessionId::generate(),
+                ))),
+            }
+        };
+        let mut old = open("old.mtj");
+        old.append_resize(80, 24).expect("size");
+        for _ in 0..50 {
+            old.append_output(&[b'o'; 1000]).expect("output");
+        }
+        let mut young = open("young.mtj");
+        young.append_resize(80, 24).expect("size");
+        {
+            // 나머지는 이 시험이 자를 수 없는 저널(retention을 기다리는
+            // 종료 세션)의 몫이다.
+            let mut budget = budget.lock().expect("budget");
+            let free = budget.limit() - budget.used();
+            budget.seed_used(free);
+        }
+        let refused = young.append_output(&[b'y'; 1000]).expect_err("budget full");
+        assert!(
+            refused.to_string().contains("budget exhausted"),
+            "{refused}"
+        );
+
+        // 쉬고 있는 세션의 actor도 exit poll 주기로 tick한다.
+        let _ = old.tick(10_000);
+        young
+            .append_output(&[b'y'; 1000])
+            .expect("room once the old session yielded its fair share");
+        let used = budget.lock().expect("budget").used();
+        assert!(used <= 64 * 1024, "{used}");
+    }
+
+    /// 새 레코드 알림은 붙은 뷰가 있을 때만 펌프를 깨운다 — 뷰가 없는 세션은
+    /// 펌프 스레드도 없다. 크기 레코드의 `session.resize` 대기자 알림은 뷰와
+    /// 무관하다.
+    #[test]
+    fn new_records_wake_the_pump_only_while_a_view_is_attached() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (session, _inner, _path) =
+            journal_release_tests::session_entry(dir.path(), &SessionId::generate());
+        session.wake_if_viewed();
+        session.record_resize(1, 80, 24, 0);
+        assert!(
+            !session.wake_pending.load(Ordering::Acquire),
+            "no view: nothing to wake"
+        );
+        assert_eq!(
+            session
+                .recent_resizes
+                .lock()
+                .expect("ring")
+                .last()
+                .map(|r| r.0),
+            Some(1),
+            "resize correlation does not depend on views"
+        );
+
+        let view_id = ViewId::generate();
+        session.views.lock().expect("views").insert(
+            view_id.clone(),
+            ViewEntry {
+                view_id,
+                access: AttachAccess::Reader,
+                conn: ConnectionId::generate(),
+                epoch: session.current_epoch(),
+                next_seq: 1,
+                input_in_flight: false,
+            },
+        );
+        session.wake_if_viewed();
+        assert!(session.wake_pending.load(Ordering::Acquire));
+        session.wait(Duration::ZERO);
+        assert!(!session.wake_pending.load(Ordering::Acquire), "consumed");
+        session.record_resize(2, 100, 30, 0);
+        assert!(session.wake_pending.load(Ordering::Acquire));
     }
 }

@@ -46,8 +46,9 @@ fn tick(state: &Arc<DaemonState>) {
             return QueueReason::ResourceUnschedulable;
         }
         // 원래 요청을 지금 호스트에 맞춰 다시 줄인다: 받을 수 없을 만큼 큰 요청은 여유가
-        // 생기는 대로 그만큼으로 시작하고, 실행 때 호스트 크기를 몰라 줄이지 못한 요청도
-        // 여기서 맞춘다(그대로 두면 매 틱 RESOURCE_UNSCHEDULABLE로 대기열에 남는다).
+        // 생기는 대로(단, 예산의 절반 이상으로) 시작하고, 실행 때 호스트 크기를 몰라
+        // 줄이지 못한 요청도 여기서 맞춘다(그대로 두면 매 틱 RESOURCE_UNSCHEDULABLE로
+        // 대기열에 남는다).
         let policy = orchestrator::fit_policy_to_host(state, &host, &requested);
         let request = AdmissionRequest {
             reservation_bytes: policy.reservation_bytes.get(),
@@ -69,7 +70,10 @@ fn tick(state: &Arc<DaemonState>) {
                 QueueReason::Admit
             }
             Err(term_core::CoreError::AdmissionDenied { reason }) => reason,
-            Err(_) => QueueReason::WaitTelemetry,
+            Err(error) => {
+                tracing::warn!(workload = %candidate.workload_id, %error, "admission failed; retrying");
+                QueueReason::WaitTelemetry
+            }
         }
     });
 
@@ -97,7 +101,7 @@ fn tick(state: &Arc<DaemonState>) {
         let _ = state
             .storage
             .set_queue_reason(&picked.workload_id, Some(QueueReason::Admit));
-        start_one(Arc::clone(state), picked.workload_id.clone());
+        start_one(Arc::clone(state), &picked);
     }
 
     if queue_changed {
@@ -107,7 +111,8 @@ fn tick(state: &Arc<DaemonState>) {
 
 /// Start one admitted workload on its own thread (the pipeline blocks on
 /// PTY/gate IO).
-fn start_one(state: Arc<DaemonState>, workload_id: WorkloadId) {
+fn start_one(state: Arc<DaemonState>, picked: &term_contracts::snapshot::QueueEntry) {
+    let workload_id: WorkloadId = picked.workload_id.clone();
     // Verify it is still QUEUED before handing it to the pipeline.
     let valid = state
         .workload_entry(&workload_id)
@@ -118,8 +123,9 @@ fn start_one(state: Arc<DaemonState>, workload_id: WorkloadId) {
         return;
     }
     // Spawn failure must degrade, not abort the daemon: release the
-    // reservation and leave the workload queued — the next scheduler pass
-    // (or a fresh queue snapshot) retries it once threads are available.
+    // reservation and put the workload back in the queue (`pick_next` already
+    // removed it — left alone it would sit QUEUED forever with no entry) so
+    // the next scheduler pass retries it once threads are available.
     let worker_state = Arc::clone(&state);
     let worker_workload = workload_id.clone();
     let spawn_result = std::thread::Builder::new()
@@ -129,8 +135,16 @@ fn start_one(state: Arc<DaemonState>, workload_id: WorkloadId) {
         tracing::error!(
             workload = %workload_id,
             %error,
-            "launch worker spawn failed — workload stays queued"
+            "launch worker spawn failed — workload re-queued"
         );
         state.ledger.release(&workload_id);
+        if let Err(error) = state.queue.enqueue(
+            workload_id.clone(),
+            picked.request_id.clone(),
+            picked.priority,
+        ) {
+            tracing::error!(workload = %workload_id, %error, "re-queue after spawn failure failed");
+        }
+        state.broadcast_queue_changed();
     }
 }

@@ -31,6 +31,8 @@ export interface ReplaySnapshot {
 export interface ReplaySnapshotStore {
   load(sessionId: string): Promise<ReplaySnapshot | null>;
   save(snapshot: ReplaySnapshot): Promise<void>;
+  /** 한 세션의 스냅샷을 지운다(pane을 닫을 때). 없으면 아무 일도 없다. */
+  delete(sessionId: string): Promise<void>;
   /** `sessionIds`에 없는 세션의 스냅샷을 지운다(닫힌 pane의 잔여물 정리). */
   retain(sessionIds: ReadonlySet<string>): Promise<void>;
 }
@@ -131,6 +133,16 @@ export function createIndexedDbSnapshotStore(factory: IDBFactory = indexedDB): R
         // 캐시 저장 실패는 다음 시작의 전체 재생으로 충분하다.
       }
     },
+    delete: async (sessionId) => {
+      try {
+        const db = await open();
+        const tx = db.transaction(TABLE, "readwrite");
+        tx.objectStore(TABLE).delete(sessionId);
+        await transactionDone(tx);
+      } catch {
+        // 지우지 못한 것은 주기 정리(retain)가 치운다.
+      }
+    },
     retain: async (sessionIds) => {
       try {
         const db = await open();
@@ -160,6 +172,9 @@ export function createMemorySnapshotStore(): ReplaySnapshotStore & { readonly en
     load: async (sessionId) => decodeReplaySnapshot(entries.get(sessionId) ?? null, sessionId),
     save: async (snapshot) => {
       if (snapshot.data.length <= REPLAY_SNAPSHOT_MAX_CHARS) entries.set(snapshot.sessionId, { ...snapshot });
+    },
+    delete: async (sessionId) => {
+      entries.delete(sessionId);
     },
     retain: async (sessionIds) => {
       for (const key of [...entries.keys()]) if (!sessionIds.has(key)) entries.delete(key);

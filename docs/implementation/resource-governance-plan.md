@@ -587,7 +587,7 @@ npm run typecheck && npm run test:unit
 
 각 항목은 "무엇을, 어디에" 수준으로 적는다. 착수 전에 1단계처럼 세부 지시서를 쓴다.
 
-### P2-1. 우선순위·에이전트 활동 상태를 희생 순서에 쓴다
+### P2-1. 우선순위·에이전트 활동 상태를 희생 순서에 쓴다 — **완료(3.6절)**
 - `crates/iyagi-termd/src/state.rs` 워크로드 entry에는 `priority: Priority`(258줄)와
   `agent: Option<AgentStatus>`(287줄, `session_status`: "busy"/"shell"/"waiting"/"idle")가 이미 있다.
 - `relief::LiveWorkload`·`guard::LiveUsage`에 `priority: u8`, `agent_activity: Option<String>`을 추가하고
@@ -596,7 +596,7 @@ npm run typecheck && npm run test:unit
 - relief WARNING에서는 `priority == 2`와 CPU 독점만 양보하고, CRITICAL에서 전부 양보한다.
 - 큐 에이징(`crates/term-core/src/queue.rs` 48줄)은 한 단계(2→1)까지만, 창은 5분으로.
 
-### P2-2. 가드·완화 정책을 설정 화면에서 바꾸고 저장한다
+### P2-2. 가드·완화 정책을 설정 화면에서 바꾸고 저장한다 — **완료(3.6절)**
 - RPC `guard.set_policy`/`relief.set_policy`는 이미 있다(`src/features/daemon/client.ts` 371·379줄).
   UI가 없을 뿐이다.
 - `src/features/settings/GeneralPanel.tsx` 옆에 `ResourcePanel.tsx`를 만들고 `cpu_cores_limit`,
@@ -604,7 +604,7 @@ npm run typecheck && npm run test:unit
 - 값은 `src/store/preferences.ts`에 저장하고, 데몬 연결 직후(`sessionController` 시작 경로)에
   다시 보낸다 — 데몬은 정책을 메모리에만 둔다.
 
-### P2-3. macOS 프로세스 스캔을 틱당 한 번만 한다
+### P2-3. macOS 프로세스 스캔을 틱당 한 번만 한다 — **완료(3.6절)**
 - `crates/term-platform/src/group/macos_tree.rs` 48~60줄: `member_identities`가 호출마다 전체
   프로세스를 새로 긁고, `telemetry_loop.rs` 251·254줄이 워크로드마다 두 번 부른다.
 - 틱 시작에 한 번 스냅샷을 만들어 모든 워크로드가 공유하게 바꾼다.
@@ -615,7 +615,7 @@ npm run typecheck && npm run test:unit
   4면 `force_critical`. Linux: `/proc/pressure/memory`의 `some avg10 > 20` 또는 `full avg10 > 5`.
   Windows: `CreateMemoryResourceNotification(LowMemoryResourceNotification)`.
 
-### P2-5. 셸 경로 에이전트 실행에 가벼운 admission을 건다
+### P2-5. 셸 경로 에이전트 실행에 가벼운 admission을 건다 — **완료(3.6절, 시작 줄로 시행)**
 - 퀵스타트·이어서 열기·수동 재개(`sessionController.resumeAgentSession`)도 T5의
   `waitForMemoryHeadroom`을 거치게 한다. 거부는 하지 않는다(대기 상한 30초).
 
@@ -649,6 +649,159 @@ T1~T6 완료 뒤 사용자 승인으로 시행했다. 동기: 큰 RAM 호스트�
   `PressureConfig`가 어긋나지 않게 같이 맞췄다. mock 데몬(`mockClient.ts`)도
   같은 규칙(1 GiB floor + 12%)로 미러링.
 
+## 3.6 2차 시행: 리소스 관리 전면 보강 (P2-1·2·3·5 포함)
+
+1단계·3.5절 뒤 리소스 관리 전반을 다시 검토해 나온 개선을 모두 시행했다. 묶음은
+셋이다 — 버그·안전, 비용·측정, 정책·UX. 3.5절 T7의 "이미 CRITICAL이면 커널 신호를
+건너뛴다"와 "warn은 반영하지 않는다"는 아래 G1이 대체한다.
+
+### 버그·안전
+
+**G1. 압력 판정이 커널 신호를 1차로 쓴다** (`term-core/src/pressure.rs`
+`update_with_kernel`, `term-platform/src/telemetry/kernel_pressure.rs`)
+- 신호는 `KernelMemorySignal{Unknown, Normal, Warn, Critical}`. macOS는
+  `kern.memorystatus_vm_pressure_level`(2·3 warn, 4 이상 critical), Linux는 PSI
+  (`some avg10 > 10` warn, `some avg10 > 20` 또는 `full avg10 > 5` critical).
+- critical은 즉시 CRITICAL이고 신호가 남아 있는 동안 회복하지 않는다. 예전에는
+  이미 CRITICAL이면 신호를 건너뛰어, macOS의 넉넉한 "가용" 수치만 보고 10초 만에
+  NORMAL로 내려갔다가 다음 틱에 다시 CRITICAL이 되며 가드가 얼렸다 풀기를 반복했다.
+- warn이 10샘플 이어지면 WARNING 표본으로 친다. warn인 동안은 NORMAL로 회복하지 않는다.
+- 원시 분류가 CRITICAL을 벗어난 지 10초면 CRITICAL → WARNING으로 내린다.
+
+**G2·G4·G5·G6. 가드** (`iyagi-termd/src/guard.rs`)
+- CRITICAL 희생은 "지금 늘고 있는 것"이 먼저다. 15초 창에서 최저점보다 64 MiB 이상
+  늘어난 워크로드를 고른다. 그 주범이 면제 대상(보이는 세션·보호·수동 재개)이면
+  `guard_warning`만 올리고 아무것도 얼리지 않는다 — 엉뚱한 워크로드를 얼려도 압력은
+  풀리지 않는다.
+- 정지 간격은 10초, 에피소드당 3개까지다. 늘지 않는 정적 희생은 에피소드가 10초
+  이어진 뒤에만, 1개까지, 512 MiB 이상에서 고른다. 순서는 낮은 우선순위 → 쉬는
+  에이전트 → 큰 RSS다(P2-1).
+- 사용자가 직접 재개한 워크로드는 메모리가 NORMAL이 될 때까지 자동 정지에서 면제된다.
+  예전에는 재개 직후 다음 틱에 다시 얼었다.
+- 메모리 회복 재개(T3)는 `auto_suspend` 설정과 무관하게 돈다. 3초에 하나씩, 정지
+  시점 RSS만큼 호스트 여유가 있을 때만 푼다. `auto_resume`의 메모리 사유 정지는
+  메모리 NORMAL을 요구한다.
+- `manual()`은 상태를 미리 바꾸지 않고 OS 조작이 성공했을 때(`record`)만 바꾼다.
+  종료 중(`closing`)에는 새 조치를 걸지 않는다.
+
+**G8. 크래시 안전 장부** (`iyagi-termd/src/governance_ledger.rs`)
+- 정지·양보한 신원과 cgroup 경로를 `<data>/governance-ledger.json`에 원자적으로 쓴다.
+- 데몬이 기동하면(싱글턴 락 뒤, 텔레메트리 전) `recover`가 같은 프로세스로 남은 것만
+  SIGCONT·normal tier로 되돌리고 `cgroup.freeze=0`·`cpu.weight=100`을 쓴다. 예전에는
+  얼린 채 데몬이 죽으면 그 프로세스들이 영원히 멈춰 있었다.
+- 정상 종료 경로는 `governance_closing`을 먼저 세우고, 모두 재개한 뒤 장부를 지운다.
+- 재시작 재조정의 생존자(`reconciliation_survivors`)는 틱마다 다시 본다. 모두
+  사라지거나 120초 유예가 지나면 재조정 플래그를 끈다.
+
+**정지·재개 순서와 fork 경합** (`term-platform/src/group/scheduling.rs`)
+- `set_process_suspend`가 순서를 정한다. 지금 트리의 깊이로 정렬해, 정지는 부모를
+  먼저, 재개는 자식을 먼저 처리한다. 부모가 먼저 깨면 잡 제어 셸이 아직 멈춘
+  포그라운드 잡을 "Stopped"로 거둬 터미널을 가져간다.
+- `suspend_walked`는 정지 뒤 멤버십을 4번까지 다시 훑는다. 훑기와 신호 사이에
+  fork된 자식(빌드의 `rustc` 등)까지 멈추기 위해서다. 직접 셸, macOS 관측 트리,
+  Linux 비위임 트리가 같이 쓴다.
+- 다른 uid 프로세스의 거부(`EPERM`, Windows access denied)는 `skipped_denied`로
+  센다. 재시도해도 성공하지 않으므로 결과를 partial로 만들지 않는다.
+- Linux 위임 cgroup의 `cgroup.freeze`는 요청일 뿐이다. 실제 완료는 `cgroup.events`의
+  `frozen`으로 확인한다(200 ms 안에 맞지 않으면 partial). freeze 파일이 없는 5.2
+  미만 커널은 per-pid SIGSTOP으로 대신한다.
+- Windows 양보는 원래 priority class를 기억했다가 그대로 돌려놓는다. 예전에는 HIGH나
+  IDLE이던 프로세스도 NORMAL로 돌아왔다. 양보가 쓰는 값은 BELOW_NORMAL뿐이므로,
+  복원도 BELOW_NORMAL만 되돌린다.
+
+**G9. UI 전파**
+- 완화·가드가 바꾼 워크로드마다 `workload_state_changed`를 보낸다(경고 변화 포함).
+- `resource.snapshot` 이벤트 본문은 `ResourceSnapshotEvent{revision, host,
+  pressure, cpu_pressure, usage}`다. UI는 `revision`이 앞서면 스냅샷을 다시 받고,
+  `usage`로 배지를 갱신한다.
+
+**G10. 포커스**: `session.focus`가 보이는 세션 전체(`visible_session_ids`)를
+보고한다. 분할 화면에서 보이는 pane은 모두 면제된다. 살아 있는 세션만 받는다.
+
+### 정책·UX
+
+**G3·G7. 완화** (`iyagi-termd/src/relief.rs`)
+- CPU 독점 판정:
+  - 진입: 창 안 표본의 80% 이상이 한도를 넘는다.
+  - 해제: 한도의 0.5배 미만이 30초 이어지고, 최소 60초는 유지한다.
+  - 2분 안에 다시 독점이면 유지 시간을 2배로 늘린다(최대 10분).
+- 양보 범위: WARNING에서는 우선순위 2와 독점만, CRITICAL에서는 면제가 아닌 전부를
+  양보시킨다(P2-1).
+- 복원 간격: 압력이 재발하면 2배씩 늘린다(최대 30초). NORMAL이 5분 이어지면 기본
+  3초로 돌아간다.
+- 사용자가 수동으로 복원하면 `hog_override`로 그 독점은 다시 양보시키지 않는다.
+- 재시도: 실패하면 10초 백오프, partial이면 30초 뒤 다시 건다.
+
+**G11. 호스트 기반 기본값** (`iyagi-termd/src/config.rs`)
+- `guard_policy_for_host`: CPU 한도는 논리 코어의 절반(최소 2), 메모리 한도는
+  RAM의 1/4(2~8 GiB)이다.
+- 스냅샷은 이 값을 `guard_policy_default`로 함께 싣는다.
+- `guard.set_policy`는 범위를 검사한다(cpu 1~1024, rss 256 MiB~1 TiB, 지속
+  1~600초). 예를 들어 메모리 한도 "0"은 WARNING에서 비포커스 워크로드를 전부 얼린다.
+
+**G13. 대기열** (`term-core/src/queue.rs`, `iyagi-termd/src/state.rs`·`orchestrator.rs`)
+- 에이징은 5분 간격(`defaults.json` `priority_aging` 300000)으로 NORMAL(1)까지만
+  올린다.
+- 크기 때문에 막힌 머리(메모리 여유·CPU 슬롯·예약 예산)가 10분을 넘게 기다리면 뒤의
+  작은 실행이 추월하지 못한다(굶주림 방지).
+- 세션 상한은 원자적인 `reserve_launch_slot`으로 검사한다.
+- 대기열이 비어 있지 않으면 새 관리 실행은 직접 승인하지 않고 줄 뒤에 선다.
+- 오케스트레이터 예약 하한(`fit_policy_to_host`)은 예산의 절반이다.
+- 스레드 생성에 실패하면 다시 넣는다.
+
+**P2-2. 설정 화면**: `ResourcePanel`이 가드·완화 정책을 바꾸고 `preferences`에
+저장한다. 데몬에 접속할 때마다 다시 보낸다(데몬은 정책을 메모리에만 둔다).
+
+**P2-5. 에이전트 시작 줄** (`src/features/terminal/agentStartPool.ts`)
+- 앱 복원·이어서 열기·모두 재개를 한 줄로 세운다. 동시 3개(메모리나 CPU가 WARNING
+  이상이면 1개), 시작 사이 간격은 1.5초다.
+- 메모리 CRITICAL이면 줄 머리가 최대 30초 기다린다.
+- "지금 시작"은 줄과 압력 검사를 건너뛴다.
+
+**UI 기타**: 자동 정지 알림, 탭 표식, 경고 칩. 스냅샷 재요청 백오프. 압력에서 WebGL
+렌더러 회수. 구독 사용량 자동 폴링은 5분 주기, 최소 간격 1분이고, 숨김·압력
+상태에서는 건너뛴다. 명시적 새로고침은 브리지 캐시를 건너뛴다(`force`).
+
+### 비용·측정
+
+**P2-3. 프로세스 열거·계량을 네이티브로** (`term-platform/src/native_proc.rs`, `proc_scan.rs`)
+- sysinfo의 macOS 갱신은 프로세스마다 `KERN_PROCARGS2`(argv+env 전체)를 두 번씩 읽었다.
+  셸 pane마다 2초에 한 번 돌아 데몬 CPU의 절반 이상이 커널 시간이었다.
+- 이제 목록은 pid·ppid·시작 시각·uid·이름만 읽는다(macOS libproc, Linux `/proc`).
+  공유 스냅샷(최대 나이 900 ms)을 같은 틱의 셸 관측·에이전트 감시·멤버 열거가 나눠
+  쓴다. argv·env는 필요한 pid에만, 프로세스마다 한 번 읽는다.
+- 셸 관측은 2초마다 모든 셸을 스캔 한 번으로 계산한다(`ShellObserver`). 멤버는 셋을
+  합친 것이다: 루트 트리, 부모가 바뀐 기존 멤버, `IYAGI_WORKLOAD_ID` 태그가 붙은 고아.
+- 계량은 `pid_usage`로 한다(macOS `proc_pid_rusage` v4 footprint, Linux
+  `stat`/`status`/`io`). 회수된 자식의 CPU를 더하고, 새 pid는 통째로 센다. 메모리는
+  Activity Monitor와 같은 footprint 기준이다(RSS 합은 공유 페이지를 이중으로 세서
+  ±2배까지 어긋났다).
+- cgroup·Job 그룹은 커널 그룹 계정(`sample_group`)을 합친다. CPU·IO·프로세스 수·
+  accounted는 그룹 값(끝난 자손 포함), 상주 메모리는 per-pid footprint를 쓴다.
+  레지스트리가 쥔 핸들로 샘플한다 — 복제 핸들은 차분 기준도 복제된다.
+- Linux 비위임 트리의 env 태그 판정은 (pid, 시작 시각)마다 한 번만 한다. 핸들보다
+  먼저 뜬 프로세스는 아예 읽지 않는다. 예전에는 걸음마다 모든 `/proc/*/environ`을
+  읽었다.
+
+**PTY·데몬 경로**
+- 진행값 fsync와 flusher 스레드를 없앴다. actor는 기한 기반으로 park한다.
+- pump는 뷰가 있을 때만 이벤트로 돈다. NotifySink는 Weak를 쥐고 뷰가 있을 때만
+  깨운다. reap 스레드를 없앴고, reader는 self-pipe로 무기한 poll한다.
+- 전역 저널 예산 초과는 일시 오류로 바꾸고 공정 몫만큼 양보한다.
+- 로그는 14개까지만 남긴다. 여유 공간 경고는 전이 때만 낸다.
+- claude_usage의 fsync를 없앴고, gate 소켓은 unlink한다. 게이트웨이 업스트림에
+  keepalive를 둔다(`08-local-gateway.md`).
+- `workload.processes`는 `run_blocking`으로 돈다. 구독 사용량은 결과를 캐시한다.
+
+### 시행하지 않은 것 (이유)
+- **재생 프레임 병합**: replay의 프레임 경계·순서 계약을 깬다.
+- **Linux per-pid nice 양보**: 비특권 데몬은 nice를 되돌릴 수 없다(RLIMIT_NICE, 08 §0-4).
+- **macOS 플랫폼 바이너리의 env 태그**: `/bin/*` 같은 플랫폼 바이너리는 커널이
+  argv·env를 숨긴다. 기록된 멤버십과 ppid 추적으로만 따라간다.
+- **Windows 정지**: Job·per-pid suspend는 여전히 미지원이다(capability가 unsupported).
+- **크래시 뒤 Windows priority class**: 원래 class는 메모리에만 있다. 데몬이 죽은 뒤
+  장부 복구는 BELOW_NORMAL을 NORMAL로 돌린다.
+
 ## 4. 3단계 (구조 변경 — 설계 메모)
 
 - **셸 에이전트 1급 워크로드화.** `agent_watch`가 찾은 에이전트 pid를 루트로 하는 가상
@@ -665,12 +818,17 @@ T1~T6 완료 뒤 사용자 승인으로 시행했다. 동기: 큰 RAM 호스트�
 
 | 항목 | 값 | 위치 |
 |---|---|---|
-| 메모리 CRITICAL / WARNING / 회복 | 가용 <1GiB 또는 커널 위기 신호 / <12% / ≥max(10%, S) 10초 | `crates/term-core/src/pressure.rs`, `term-platform/src/telemetry/kernel_pressure.rs` |
+| 메모리 CRITICAL / WARNING / 회복 | 가용 <1GiB 또는 커널 critical / <12% 또는 커널 warn 10샘플 / ≥max(10%, S) 10초(커널 신호가 남아 있으면 회복 없음) | `crates/term-core/src/pressure.rs`, `term-platform/src/telemetry/kernel_pressure.rs` |
+| CRITICAL → WARNING 하향 | 원시 분류가 CRITICAL을 벗어난 지 10초 | 같은 파일 |
 | CPU WARNING / CRITICAL / 회복 | ≥85% / ≥95% / ≤70% 10초 | 같은 파일 |
 | 악화 판정 | 2샘플 연속 | 같은 파일 |
-| 가드 한도 | 6코어, 4GiB, 20초, auto_resume off | `crates/term-contracts/src/snapshot.rs` `GuardPolicy` |
-| CRITICAL 희생 | 3초에 하나, RSS ≥512MiB 최대 | `guard.rs` 42·253줄 |
-| 완화 복원 간격 | 3초에 하나 | `defaults.json` `relief_release_interval` |
+| 가드 한도 | 호스트 기반: CPU 논리 코어/2(최소 2), 메모리 RAM/4(2~8GiB). 지속 CPU 20초·메모리 5초, auto_resume off | `crates/iyagi-termd/src/config.rs` `guard_policy_for_host` |
+| CRITICAL 희생 | 15초 창에서 +64MiB 늘어난 것 먼저, 10초에 하나, 에피소드당 3. 정적 희생은 10초 뒤 1개(≥512MiB) | `guard.rs` 상수 |
+| 메모리 회복 재개 | 3초에 하나, 정지 시점 RSS만큼 여유 필요 | `guard.rs` |
+| CPU 독점 | 진입: 표본 80% 초과 / 해제: 0.5배 미만 30초 + 최소 60초(재독점이면 2배, 최대 10분) | `relief.rs` 상수 |
+| 완화 복원 간격 | 3초(압력 재발 시 2배씩 최대 30초, NORMAL 5분이면 복귀) | `defaults.json` `relief_release_interval`, `relief.rs` |
 | 관리 실행 동시 수 / 큐 | 2 / 64 | `defaults.json` `limits` |
-| 우선순위 | 0(높음)~2(낮음), 30초마다 한 단계 상승 | `crates/term-core/src/queue.rs` |
-| 텔레메트리 주기 / 신선도 | 1초 / 3초 | `crates/term-platform/src/telemetry.rs` |
+| 우선순위 | 0(높음)~2(낮음), 5분마다 한 단계, NORMAL(1)까지. 크기 대기 10분이면 추월 금지 | `crates/term-core/src/queue.rs` |
+| 에이전트 시작 줄 | 동시 3(압력 시 1), 간격 1.5초, CRITICAL 대기 최대 30초 | `src/features/terminal/agentStartPool.ts` |
+| 정지 재훑기 | 정지 뒤 최대 4번 | `term-platform/src/group/scheduling.rs` |
+| 텔레메트리 주기 / 셸 인벤토리 / 공유 스캔 나이 | 1초 / 2초 / 900ms | `crates/term-platform/src/telemetry.rs`, `defaults.json`, `proc_scan.rs` |

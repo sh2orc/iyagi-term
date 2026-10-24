@@ -432,6 +432,12 @@ pub struct Snapshot {
     /// 현재 자원 가드 정책(08 §5 `resource_guard.*`). 구 데몬은 생략한다.
     #[serde(default)]
     pub guard_policy: GuardPolicy,
+    /// 이 호스트의 기본 가드 정책(기동 때 호스트 코어·메모리로 유도한 값).
+    /// 설정 화면의 "기본값으로" 복원과 사용자 변경분 판정에 쓴다. 구 데몬은
+    /// 생략한다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub guard_policy_default: Option<GuardPolicy>,
 }
 
 #[cfg(test)]

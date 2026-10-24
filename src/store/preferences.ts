@@ -33,6 +33,8 @@ import {
   type AgentTintKey,
 } from "../features/terminal/paneBackground";
 import type { GatewayPoolStrategy } from "../generated/GatewayPoolStrategy";
+import type { GuardPolicy } from "../generated/GuardPolicy";
+import { sanitizeGuardOverrides } from "../features/workloads/resourcePolicy";
 
 export type ThemePreference = "system" | "dark" | "light";
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["system", "dark", "light"];
@@ -101,6 +103,14 @@ export interface PreferenceValues {
   gatewayBlocked: boolean;
   /** API 키 풀 회전 전략. 데몬 정책과 함께 연결마다 다시 적용한다. */
   gatewayPoolStrategy: GatewayPoolStrategy;
+  /**
+   * 사용자가 바꾼 자원 가드 정책 항목만(설정 → 자원 관리). 나머지 항목은 데몬이
+   * 호스트에서 유도한 기본값을 따른다. 데몬 정책은 메모리에만 있어(재시작 →
+   * 기본값) 컨트롤러가 붙을 때마다 현재 정책 위에 이 값을 얹어 다시 보낸다.
+   */
+  resourceGuardOverrides: Partial<GuardPolicy>;
+  /** 사용자가 바꾼 자동 양보(relief.auto_yield). null이면 데몬 기본값(켬)을 따른다. */
+  reliefAutoYield: boolean | null;
   /** 새 터미널이 시작하는 글꼴 크기(pane zoom의 기준점이기도 하다). */
   baseFontSize: number;
   /** 창을 닫을 때 묻지 않고 터미널까지 종료(04 §2). */
@@ -168,6 +178,8 @@ export const DEFAULT_PREFERENCES: PreferenceValues = {
   gatewayObservability: false,
   gatewayBlocked: false,
   gatewayPoolStrategy: "round_robin",
+  resourceGuardOverrides: {},
+  reliefAutoYield: null,
   baseFontSize: DEFAULT_FONT_SIZE,
   terminateOnClose: false,
   quitBehavior: "ask",
@@ -253,6 +265,10 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
     gatewayPoolStrategy: GATEWAY_POOL_STRATEGIES.includes(value.gatewayPoolStrategy as GatewayPoolStrategy)
       ? (value.gatewayPoolStrategy as GatewayPoolStrategy)
       : DEFAULT_PREFERENCES.gatewayPoolStrategy,
+    // 데몬이 거절할 값(범위 밖·모양 어긋남)은 항목 단위로 버린다 — 붙을 때마다 거절당하지 않게.
+    resourceGuardOverrides: sanitizeGuardOverrides(value.resourceGuardOverrides),
+    reliefAutoYield:
+      typeof value.reliefAutoYield === "boolean" ? value.reliefAutoYield : DEFAULT_PREFERENCES.reliefAutoYield,
     fontFamily: sanitizeFontFamily(value.fontFamily),
     cursorStyle: CURSOR_STYLES.includes(value.cursorStyle as string)
       ? (value.cursorStyle as PreferenceValues["cursorStyle"])
@@ -377,6 +393,13 @@ export interface PreferencesState extends PreferenceValues {
   setGatewayBlocked(blocked: boolean): void;
   /** 키 풀 회전 전략 — 모르는 값은 round_robin으로 되돌린다. */
   setGatewayPoolStrategy(strategy: GatewayPoolStrategy): void;
+  /**
+   * 자원 가드 사용자 변경분을 통째로 바꾼다(컨트롤러가 데몬 적용이 성공한 뒤에만
+   * 부른다). 범위 밖 항목은 버린다.
+   */
+  setResourceGuardOverrides(overrides: Partial<GuardPolicy>): void;
+  /** 자동 양보 사용자 값(null이면 데몬 기본값을 따른다). */
+  setReliefAutoYield(value: boolean | null): void;
   setBaseFontSize(size: number): void;
   setTerminateOnClose(value: boolean): void;
   setQuitBehavior(value: QuitBehavior): void;
@@ -452,6 +475,10 @@ export const usePreferences = create<PreferencesState>()(
             ? strategy
             : DEFAULT_PREFERENCES.gatewayPoolStrategy,
         }),
+      setResourceGuardOverrides: (overrides) =>
+        set({ resourceGuardOverrides: sanitizeGuardOverrides(overrides) }),
+      setReliefAutoYield: (reliefAutoYield) =>
+        set({ reliefAutoYield: typeof reliefAutoYield === "boolean" ? reliefAutoYield : null }),
       setBaseFontSize: (size) => set({ baseFontSize: clampBaseFontSize(size) }),
       setTerminateOnClose: (terminateOnClose) => set({ terminateOnClose }),
       setQuitBehavior: (quitBehavior) =>
@@ -496,6 +523,8 @@ export const usePreferences = create<PreferencesState>()(
         gatewayObservability: state.gatewayObservability,
         gatewayBlocked: state.gatewayBlocked,
         gatewayPoolStrategy: state.gatewayPoolStrategy,
+        resourceGuardOverrides: state.resourceGuardOverrides,
+        reliefAutoYield: state.reliefAutoYield,
         zaiMainModel: state.zaiMainModel,
         baseFontSize: state.baseFontSize,
         terminateOnClose: state.terminateOnClose,

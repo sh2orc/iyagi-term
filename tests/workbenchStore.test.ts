@@ -1541,3 +1541,112 @@ describe("workbench store — 탭 순환(cycleTab): 트랙패드 스와이프·�
     expect(useWorkbenchStore.getState().tabs[useWorkbenchStore.getState().tabs.findIndex((t) => t.id === useWorkbenchStore.getState().activeTabId)].kind).toBe("mission");
   });
 });
+
+describe("workbench store — 자원 표본·가드 정책 거울", () => {
+  const usageOf = (cpu: number, rss: string) => ({
+    workload_id: "w-1",
+    cpu_cores: { value: cpu, source: "sysinfo", quality: "measured" as const, reason: null },
+    resident_bytes: { value: rss, source: "sysinfo", quality: "measured" as const, reason: null },
+  });
+  const summary = (overrides: Partial<WorkloadSummary> = {}): WorkloadSummary => ({
+    workload_id: "w-1", session_id: "s-1", mode: "shell", state: "RUNNING", priority: 1, title: "zsh", cwd: "/w",
+    program: "/bin/zsh", reservation_bytes: "0", cpu_slots: 1, enforcement: "observe", root_exited: false,
+    cancel_requested: false, connection: "attached", relief: { kind: "NONE" }, guard: { kind: "NONE" },
+    guard_warning: null, protected: false, ...overrides,
+  });
+
+  it("applyUsage는 바뀐 값만 덧대고, 같으면 상태를 바꾸지 않으며, 사용량을 모르던 작업에는 부분 사용량을 세운다", () => {
+    resetStore();
+    const store = useWorkbenchStore.getState();
+    store.upsertWorkload(summary({ usage: null }));
+    store.upsertWorkload(summary({ workload_id: "w-done", session_id: "s-done", state: "SUCCEEDED" }));
+
+    expect(store.applyUsage([usageOf(1.25, "2048"), { ...usageOf(3, "1"), workload_id: "w-done" }])).toBe(true);
+    const usage = useWorkbenchStore.getState().workloadById.get("w-1")?.usage;
+    expect(usage?.cpu_cores.value).toBe(1.25);
+    expect(usage?.resident_bytes.value).toBe("2048");
+    expect(usage?.accounted_bytes).toMatchObject({ value: null, quality: "unavailable" });
+    expect(usage?.coverage).toBe("partial");
+    // 끝난 작업은 건드리지 않는다.
+    expect(useWorkbenchStore.getState().workloadById.get("w-done")?.usage ?? null).toBeNull();
+
+    const before = useWorkbenchStore.getState().workloads;
+    expect(store.applyUsage([usageOf(1.25, "2048")])).toBe(false);
+    expect(store.applyUsage([])).toBe(false);
+    expect(useWorkbenchStore.getState().workloads).toBe(before);
+
+    // 이미 전체 사용량이 있으면 두 지표만 갈아 끼우고 나머지는 그대로 둔다.
+    store.upsertWorkload(summary({
+      usage: {
+        workload_id: "w-1",
+        cpu_cores: usageOf(0, "0").cpu_cores,
+        resident_bytes: usageOf(0, "0").resident_bytes,
+        accounted_bytes: { value: "7", source: "cgroup.v2", quality: "measured", reason: null },
+        committed_bytes: { value: null, source: "win32.job", quality: "unavailable", reason: "n/a" },
+        read_bytes_per_sec: { value: 1, source: "io", quality: "estimated", reason: null },
+        write_bytes_per_sec: { value: 1, source: "io", quality: "estimated", reason: null },
+        network_rx_bytes_per_sec: { value: 0, source: "net", quality: "unavailable", reason: null },
+        network_tx_bytes_per_sec: { value: 0, source: "net", quality: "unavailable", reason: null },
+        process_count: { value: 3, source: "proc", quality: "measured", reason: null },
+        coverage: "group",
+      },
+    }));
+    expect(store.applyUsage([usageOf(0.5, "4096")])).toBe(true);
+    const patched = useWorkbenchStore.getState().workloadById.get("w-1")?.usage;
+    expect(patched?.cpu_cores.value).toBe(0.5);
+    expect(patched?.accounted_bytes.value).toBe("7");
+    expect(patched?.coverage).toBe("group");
+  });
+
+  it("applySnapshot은 가드 정책과 호스트 기본값을 담고, 구 데몬이면 모른다(null)", () => {
+    resetStore();
+    const policy = { auto_suspend: true, cpu_cores_limit: 4, rss_limit_bytes: "4294967296", sustain_ms: "20000", rss_sustain_ms: "5000", auto_resume: false };
+    const base = {
+      revision: 3,
+      host: {
+        monotonic_ms: 1,
+        physical_total_bytes: { value: "1", source: "t", quality: "measured" as const, reason: null },
+        physical_available_bytes: { value: "1", source: "t", quality: "measured" as const, reason: null },
+        swap_used_bytes: { value: "1", source: "t", quality: "measured" as const, reason: null },
+        pressure: "NORMAL" as const,
+        cpu_pressure: "NORMAL" as const,
+        cpu_cores_used: { value: 1, source: "t", quality: "measured" as const, reason: null },
+        logical_cpu_count: 8,
+        disks: [],
+        interfaces: [],
+      },
+      workloads: [],
+      queue: [],
+      capabilities: { platform: "test" },
+      reconciliation_required: false,
+      focused_session_ids: [],
+      relief_policy: { auto_yield: true },
+    } as unknown as Parameters<WorkbenchState["applySnapshot"]>[0];
+    useWorkbenchStore.getState().applySnapshot({ ...base, guard_policy: policy, guard_policy_default: { ...policy, cpu_cores_limit: 6 } });
+    expect(useWorkbenchStore.getState().guardPolicy).toEqual(policy);
+    expect(useWorkbenchStore.getState().guardPolicyDefault?.cpu_cores_limit).toBe(6);
+
+    // 같은 값이면 setGuardPolicy는 상태를 바꾸지 않는다.
+    const before = useWorkbenchStore.getState().guardPolicy;
+    useWorkbenchStore.getState().setGuardPolicy({ ...policy });
+    expect(useWorkbenchStore.getState().guardPolicy).toBe(before);
+    useWorkbenchStore.getState().setGuardPolicy({ ...policy, auto_resume: true });
+    expect(useWorkbenchStore.getState().guardPolicy?.auto_resume).toBe(true);
+
+    useWorkbenchStore.getState().applySnapshot({ ...base, revision: 4 });
+    expect(useWorkbenchStore.getState().guardPolicy).toBeNull();
+    expect(useWorkbenchStore.getState().guardPolicyDefault).toBeNull();
+  });
+
+  it("panePendingStart는 값이 바뀔 때만 쓴다", () => {
+    resetStore();
+    useWorkbenchStore.setState({ panes: { "leaf-1": pane("leaf-1", "view-1") } });
+    const before = useWorkbenchStore.getState().panes;
+    useWorkbenchStore.getState().panePendingStart("leaf-1", null);
+    expect(useWorkbenchStore.getState().panes).toBe(before);
+    useWorkbenchStore.getState().panePendingStart("leaf-1", "memory");
+    expect(useWorkbenchStore.getState().panes["leaf-1"].pendingStart).toBe("memory");
+    useWorkbenchStore.getState().panePendingStart("nope", "turn");
+    expect(Object.keys(useWorkbenchStore.getState().panes)).toEqual(["leaf-1"]);
+  });
+});

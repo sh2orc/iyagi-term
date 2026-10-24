@@ -17,7 +17,9 @@ import type { LaunchRequest } from "../../generated/LaunchRequest";
 import type { GatewayPolicy } from "../../generated/GatewayPolicy";
 import type { GatewayPolicyParams } from "../../generated/GatewayPolicyParams";
 import type { GatewayStatus } from "../../generated/GatewayStatus";
+import type { GuardPolicy } from "../../generated/GuardPolicy";
 import type { ReliefAction } from "../../generated/ReliefAction";
+import type { ReliefPolicy } from "../../generated/ReliefPolicy";
 import type { ReliefState } from "../../generated/ReliefState";
 import type { WorkloadSummary } from "../../generated/WorkloadSummary";
 import type { DaemonClient, DaemonEvent } from "../daemon/client";
@@ -105,6 +107,17 @@ import { clearTerminalHistory } from "./terminalClear";
 import { loadClearMark, saveClearMark } from "./clearMarks";
 import { agentDisplayName } from "./agentNames";
 import { requestNewMission } from "../missions/entryPoints";
+import { publishTransportStatus } from "../daemon/transportFeed";
+import { AgentStartPool, type AgentStartJob } from "./agentStartPool";
+import {
+  FALLBACK_GUARD_POLICY,
+  GUARD_FIELDS,
+  guardPolicyProblem,
+  nextGuardOverrides,
+  overlayGuardPolicy,
+  sameGuardPolicy,
+  type GuardField,
+} from "../workloads/resourcePolicy";
 
 export interface ControllerConfig {
   projectRoot: string | null;
@@ -157,6 +170,8 @@ export interface ControllerDeps {
 
 const SESSIONS_LIMIT = 32; // defaults.json limits.sessions
 const TRANSPORT_CHECK_MS = 2000;
+/** 창이 숨은 동안의 전송 점검 간격 — 보는 사람이 없으니 2초마다 브리지를 깨우지 않는다. */
+const TRANSPORT_CHECK_HIDDEN_MS = 10_000;
 /**
  * 전송 복구(모든 pane 재접속)의 backoff. 복구가 잇달아 필요하면(브리지가
  * 계속 흔들리거나 데몬이 재접속마다 다시 끊으면) 간격을 2배씩 늘린다 —
@@ -188,13 +203,27 @@ const SNAPSHOT_HIDDEN_DELAY_MS = 1000;
 const SNAPSHOT_AFTER_REPLAY_BYTES = 256 * 1024;
 /** 종료 직전 스냅샷 저장을 기다리는 상한. */
 const SNAPSHOT_QUIT_FLUSH_MS = 1500;
+/**
+ * 스냅샷을 뜨지 못한 세션의 다음 시도까지 쉬는 시간. 너무 큰 화면(상한 초과·어림
+ * 초과)은 곧 다시 떠도 같으니 오래, 직렬화가 던졌으면 1분, 파서가 시퀀스 한가운데라
+ * 못 뜬 일시적 경우는 다음 틱 하나만 쉰다 — 기록이 없으면 같은 세션을 틱마다 다시
+ * 직렬화해 버리며 다른 세션 차례를 막는다.
+ */
+const SNAPSHOT_OVERSIZE_BACKOFF_MS = 10 * 60_000;
+const SNAPSHOT_ERROR_BACKOFF_MS = 60_000;
+const SNAPSHOT_BUSY_BACKOFF_MS = 2 * SNAPSHOT_TICK_MS;
+/** 닫힌 pane의 남은 스냅샷을 치우는 주기(시작 때 한 번 + 이 간격). */
+const SNAPSHOT_RETAIN_SWEEP_MS = 60 * 60_000;
+/**
+ * 스냅샷 다시 받기 안전망: resource.snapshot의 revision이 스토어보다 앞서면(이벤트
+ * 없이 바뀐 데몬 상태 — 구 데몬의 자동 양보·정지 등) systemSnapshot을 다시 받는다.
+ * 최소 간격에서 시작해, 받아 봐도 바뀐 것이 없으면(revision은 포커스 보고·에이전트
+ * 감지로도 오른다) 상한까지 두 배씩 늘린다. 바뀐 것을 찾으면 처음으로 돌아간다.
+ */
+const SNAPSHOT_REFETCH_MIN_MS = 3000;
+const SNAPSHOT_REFETCH_MAX_MS = 30_000;
 /** 앱 시작 때 활성 탭 재생을 먼저 끝내도록 나머지 pane 연결을 미루는 상한. */
 const DEFERRED_ATTACH_MAX_WAIT_MS = 3000;
-/** 한 번에 띄우는 자동 재개 수. 에이전트는 기동 때 Node 로딩·대화 기록 읽기로 잠깐
- *  CPU·RAM을 많이 쓰므로 전부 동시에 띄우지 않는다. 3개면 10코어 PC에서 체감되지 않는다. */
-const RESTORED_RESUME_CONCURRENCY = 3;
-/** CRITICAL 메모리 압력이 풀리길 기다리는 상한. 넘기면 그냥 띄운다(영원히 안 띄우지 않는다). */
-const RESTORED_RESUME_PRESSURE_WAIT_MS = 30_000;
 /** 전체 강제 종료와 종료 상태 확인의 대기 상한. 실패하면 앱을 유지한다. */
 const QUIT_CANCEL_TIMEOUT_MS = 10000;
 /** 새 pane의 PTY 크기를 재려고 mount를 기다리는 프레임 수 상한. */
@@ -283,6 +312,59 @@ interface RestoredResume {
   resume: AgentResumeInfo;
 }
 
+/** 붙을 때 다시 적용한 자원 정책(데몬이 돌려준 값) — 복원이 스냅샷을 쓴 뒤 덧댄다. */
+interface AppliedResourcePolicy {
+  guard: GuardPolicy | null;
+  relief: ReliefPolicy | null;
+}
+
+/** focus 보고의 비교 열쇠 — 새 제어 연결의 기본값(보는 세션 없음)과 같은 값. */
+const FOCUS_NONE_KEY = "|";
+
+/** 창(문서)이 지금 숨겨져 있는가 — 문서가 없는 환경(node 시험)은 보이는 것으로 본다. */
+function documentHidden(): boolean {
+  return typeof document !== "undefined" && document.hidden === true;
+}
+
+/** 다음 매크로태스크까지 양보한다 — 무거운 일을 pane마다 나눠 화면이 멈추지 않게. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * 직렬화 결과 크기의 어림(버퍼 줄 수 × 열). 뜨기 전에 뻔히 상한을 넘는 화면을
+ * 거른다 — 직렬화는 메인 스레드에서 버퍼 전체를 훑는다. 읽을 수 없으면 0(거르지 않음).
+ */
+function estimateSerializedChars(terminal: unknown): number {
+  const view = terminal as {
+    cols?: unknown;
+    buffer?: { normal?: { length?: unknown }; active?: { length?: unknown } };
+  } | null;
+  const cols = typeof view?.cols === "number" && view.cols > 0 ? view.cols : 0;
+  const length = view?.buffer?.normal?.length ?? view?.buffer?.active?.length;
+  const lines = typeof length === "number" && length > 0 ? length : 0;
+  return lines * cols;
+}
+
+/**
+ * 작업 요약에서 사람이 알아야 할 상태만 뽑은 서명(안전망이 다시 받은 스냅샷이 무언가를
+ * 바꿨는지 가린다). 사용량처럼 매초 바뀌는 값은 넣지 않는다.
+ */
+function workloadStateSignature(state: {
+  workloads: readonly WorkloadSummary[];
+  guardPolicy: GuardPolicy | null;
+  reliefPolicy: ReliefPolicy;
+  queue: readonly unknown[];
+}): string {
+  const parts = state.workloads.map((w) => {
+    const guard = w.guard?.kind === "SUSPENDED" ? `S:${w.guard.since_ms}:${w.guard.manual}:${w.guard.reason}` : "N";
+    const relief = w.relief?.kind === "YIELDED" ? `Y:${w.relief.since_ms}:${w.relief.manual}` : "N";
+    return [w.workload_id, w.state, guard, relief, w.protected ? 1 : 0, w.guard_warning ?? "", w.agent?.agent ?? "", w.agent?.session_id ?? ""].join(",");
+  });
+  const guardPolicy = state.guardPolicy ? GUARD_FIELDS.map((field) => String(state.guardPolicy![field])).join(",") : "-";
+  return `${parts.join(";")}|${guardPolicy}|${state.reliefPolicy.auto_yield}|${state.queue.length}`;
+}
+
 /** 새 셸이 이을 끝난 작업(재생이 끝나기를 기다리는 복구). */
 interface PendingShellRecovery {
   /** 재생 중인 이전 세션 — 이 세션의 재생이 끝나야 새 셸을 띄운다. */
@@ -319,10 +401,43 @@ export class SessionController {
   /** focus 보고 구독 해제(zustand subscribe가 돌려주는 함수). */
   private focusSub: (() => void) | null = null;
   /**
-   * 마지막으로 데몬에 알린 focus 세션. 새 제어 연결의 기본값이 "보는 세션
-   * 없음"이므로 null로 시작하고, 재접속 때 다시 null로 되돌린다.
+   * 마지막으로 데몬에 알린 focus 보고(포커스 세션 + 보이는 세션들의 열쇠). 새 제어
+   * 연결의 기본값이 "보는 세션 없음"이므로 그 값으로 시작하고, 재접속 때 되돌린다.
    */
-  private reportedFocusSessionId: string | null = null;
+  private reportedFocusKey = FOCUS_NONE_KEY;
+  /**
+   * start()가 보낸 자원 정책(가드·자동 양보 사용자 변경분) 재적용. 복원은 게이트웨이
+   * 정책과 같이 이것을 기다린 뒤 pane을 붙이고 재실행한다(데몬 정책은 데몬 수명).
+   */
+  private resourcePolicyReady: Promise<AppliedResourcePolicy | null> | null = null;
+  /** 컨트롤러가 직접 자원 설정을 쓰는 중 — 그 변화로 다시 적용하지 않는다. */
+  private syncingResourcePrefs = false;
+  private resourcePrefsSub: (() => void) | null = null;
+  /** 마지막 전송 점검 시각 — 창이 숨은 동안 점검을 늦추는 기준. */
+  private lastTransportCheckAt = 0;
+  /** 스냅샷 다시 받기 안전망의 예약·진행 상태와 다음 최소 간격. */
+  private snapshotRefetchTimer: ReturnType<typeof setTimeout> | null = null;
+  private snapshotRefetchInFlight = false;
+  private lastSnapshotRefetchAt = 0;
+  private snapshotRefetchDelay = SNAPSHOT_REFETCH_MIN_MS;
+  /**
+   * 작업별로 마지막에 본 가드 정지 표식(SUSPENDED의 since_ms, 정지 아니면 null).
+   * 새로 자동 정지된 순간만 알리는 기준이다 — 앱 복원 때 이미 정지돼 있던 것은
+   * 기준으로만 삼는다.
+   */
+  private readonly guardSeen = new Map<string, string | null>();
+  /** 앱 복원이 이미 정지돼 있던 작업을 기준으로 기억했는가. */
+  private guardBaselineSet = false;
+  /** 에이전트 시작 줄(P2-5) — 이어서 열기를 압력·간격에 맞춰 띄운다. */
+  private readonly startPool = new AgentStartPool({
+    pressure: () => {
+      const host = useWorkbenchStore.getState().host;
+      return host ? { memory: host.pressure, cpu: host.cpu_pressure ?? "NORMAL" } : null;
+    },
+    onWait: (leafId, wait) => {
+      if (!this.disposed) useWorkbenchStore.getState().panePendingStart(leafId, wait);
+    },
+  });
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private transportTimer: ReturnType<typeof setInterval> | null = null;
   private deferredDisposeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -336,6 +451,12 @@ export class SessionController {
   private detachedPendingLaunches = new Set<string>();
   /** 세션별 마지막으로 저장(또는 복원)한 스냅샷 seq·시각 — 바뀐 화면만 다시 뜬다. */
   private readonly snapshotMarks = new Map<string, { seq: number; at: number }>();
+  /** 세션별 다음 스냅샷 시도 가능 시각(뜨지 못한 세션의 쉼 — SNAPSHOT_*_BACKOFF_MS). */
+  private readonly snapshotBackoff = new Map<string, number>();
+  /** 숨은 창의 스냅샷 뜨기(pane마다 나눠 도는 중이면 겹쳐 돌리지 않는다). */
+  private hiddenSnapshotRun: Promise<void> | null = null;
+  /** 닫힌 pane의 남은 스냅샷 주기 정리 타이머. */
+  private snapshotRetainTimer: ReturnType<typeof setInterval> | null = null;
   /** 진행 중인 스냅샷 저장(종료 직전 기다린다). */
   private readonly snapshotSaves = new Set<Promise<void>>();
   /** 재생 막힘으로 재접속한 횟수(leaf id별) — 무한 재시도를 막는다. */
@@ -379,7 +500,8 @@ export class SessionController {
       const pipeline = this.pipelines.get(viewId);
       pipeline?.setHidden(!visible);
       if (!visible && pipeline && this.deps.replaySnapshots && this.deps.serializeTerminal) {
-        // 숨긴 탭의 화면을 저장해 둔다 — 전환 순간이 아니라 잠시 뒤에.
+        // 숨긴 탭의 화면을 저장해 둔다 — 전환 순간이 아니라 잠시 뒤에, pane마다 따로(각자의
+        // 타이머 = 각자의 태스크). 탭을 오가도 같은 세션은 최소 간격(60초)에 한 번만 뜬다.
         setTimeout(() => void this.captureReplaySnapshot(viewId), SNAPSHOT_HIDDEN_DELAY_MS);
       }
       // 미뤄 둔 pane이 보이게 되면 기다리지 않고 바로 붙인다.
@@ -407,23 +529,55 @@ export class SessionController {
     this.focusSub = useWorkbenchStore.subscribe(() => this.reportFocus());
     this.reportFocus();
     if (this.deps.client.transportStatus && this.deps.client.reconnectTransport) {
-      this.transportTimer = setInterval(() => void this.checkTransport(), TRANSPORT_CHECK_MS);
+      // 창이 숨은 동안은 TRANSPORT_CHECK_HIDDEN_MS에 한 번만 실제로 점검한다(틱은 그대로 둔다).
+      this.transportTimer = setInterval(() => {
+        if (documentHidden() && Date.now() - this.lastTransportCheckAt < TRANSPORT_CHECK_HIDDEN_MS) return;
+        void this.checkTransport();
+      }, TRANSPORT_CHECK_MS);
     }
     if (this.deps.replaySnapshots && this.deps.serializeTerminal) {
       this.snapshotTimer = setInterval(() => this.snapshotTick(), SNAPSHOT_TICK_MS);
-      if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
-        // 창이 숨겨지면(최소화·다른 앱) 바뀐 화면을 모두 뜬다 — 보는 사람이 없어 비용이 보이지 않는다.
-        const onVisibility = () => {
-          if (document.visibilityState === "hidden") void this.flushReplaySnapshots();
-        };
-        document.addEventListener("visibilitychange", onVisibility);
-        this.visibilitySub = () => document.removeEventListener("visibilitychange", onVisibility);
-      }
     }
+    if (this.deps.replaySnapshots) {
+      // 닫힌 pane의 스냅샷은 닫을 때 지우지만, 창만 닫기·비정상 종료로 남은 것은 주기적으로 치운다.
+      this.snapshotRetainTimer = setInterval(() => this.pruneReplaySnapshots(), SNAPSHOT_RETAIN_SWEEP_MS);
+    }
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      const onVisibility = () => this.handleVisibilityChange();
+      document.addEventListener("visibilitychange", onVisibility);
+      this.visibilitySub = () => document.removeEventListener("visibilitychange", onVisibility);
+    }
+    // 설정 밖에서 자원 설정이 바뀌면(설정 전체 되돌리기 등) 데몬에도 맞춘다.
+    this.resourcePrefsSub = usePreferences.subscribe((state, prev) => {
+      if (this.syncingResourcePrefs) return;
+      if (state.resourceGuardOverrides !== prev.resourceGuardOverrides) {
+        const removed = GUARD_FIELDS.filter(
+          (field) => prev.resourceGuardOverrides[field] !== undefined && state.resourceGuardOverrides[field] === undefined,
+        );
+        void this.syncGuardPolicyFromPreferences(removed);
+      }
+      if (state.reliefAutoYield !== prev.reliefAutoYield) void this.syncReliefFromPreferences();
+    });
     // 정책 적용을 먼저 보내고 복원을 시작한다 — 복원(여기든 Workbench든 먼저
     // 부르는 쪽)은 스냅샷을 받은 뒤 pane을 다시 붙이거나 재실행하기 전에 이 적용을 기다린다.
     this.gatewayPolicyReady = this.applyGatewayPolicy();
+    this.resourcePolicyReady = this.applyResourcePolicy();
     void this.restoreWorkspace();
+  }
+
+  /**
+   * 창 표시가 바뀌었다(최소화·다른 앱·트레이). 숨으면 보이는 세션이 없다고 알리고
+   * (자동 완화·정지 면제를 풀어 준다) 바뀐 화면을 pane마다 나눠 뜬다 — 보는 사람이
+   * 없어 비용이 보이지 않는다. 돌아오면 다시 알리고 늦춰 둔 전송 점검을 곧바로 한다.
+   */
+  private handleVisibilityChange(): void {
+    if (this.disposed) return;
+    this.reportFocus();
+    if (documentHidden()) {
+      if (this.deps.replaySnapshots && this.deps.serializeTerminal) void this.captureHiddenWindowSnapshots();
+      return;
+    }
+    if (this.transportTimer !== null) void this.checkTransport();
   }
 
   /**
@@ -443,6 +597,137 @@ export class SessionController {
       });
     } catch {
       // 의도적으로 조용히 넘긴다(위 설명).
+    }
+  }
+
+  /**
+   * 저장된 자원 정책 변경분(가드 항목·자동 양보)을 데몬에 다시 적용한다. 데몬 정책은
+   * 메모리에만 있어 재시작하면 호스트 기본값으로 돌아가므로 게이트웨이 정책처럼 붙을
+   * 때(start)와 재접속·세대 변경 때마다 보낸다. 가드는 정책 전체를 받으므로 지금
+   * 데몬 정책(스냅샷) 위에 변경분을 얹어 보낸다 — 이미 같으면 보내지 않는다. 자동
+   * 양보는 사용자가 바꿨을 때만 보낸다. 실패는 삼킨다: 구 데몬은 모르는 메서드로
+   * 거절하고, 그 밖의 실패도 터미널 복원을 막을 이유가 없다(설정 화면이 현재 값을 보인다).
+   * 돌려주는 값은 데몬이 받아들인 정책이다(적용한 것이 없으면 null).
+   */
+  private async applyResourcePolicy(): Promise<AppliedResourcePolicy | null> {
+    const prefs = usePreferences.getState();
+    const overrides = prefs.resourceGuardOverrides;
+    const autoYield = prefs.reliefAutoYield;
+    const hasGuard = GUARD_FIELDS.some((field) => overrides[field] !== undefined);
+    if (!hasGuard && autoYield === null) return null;
+    const applied: AppliedResourcePolicy = { guard: null, relief: null };
+    if (hasGuard) {
+      try {
+        const snapshot = await this.deps.client.systemSnapshot();
+        const base = snapshot.guard_policy ?? snapshot.guard_policy_default ?? FALLBACK_GUARD_POLICY;
+        const policy = overlayGuardPolicy(base, overrides);
+        applied.guard = sameGuardPolicy(policy, base) ? base : await this.deps.client.guardSetPolicy({ policy });
+      } catch {
+        // 의도적으로 조용히 넘긴다(위 설명).
+      }
+    }
+    if (autoYield !== null) {
+      try {
+        applied.relief = await this.deps.client.reliefSetPolicy({ auto_yield: autoYield });
+      } catch {
+        // 의도적으로 조용히 넘긴다(위 설명).
+      }
+    }
+    if (this.disposed) return applied;
+    if (applied.guard) useWorkbenchStore.getState().setGuardPolicy(applied.guard);
+    if (applied.relief) useWorkbenchStore.getState().setReliefPolicy(applied.relief);
+    return applied.guard || applied.relief ? applied : null;
+  }
+
+  /** 가드 기본 정책 — 데몬이 알린 호스트 기본값, 모르면 계약의 고정 기본값. */
+  private guardDefaults(): GuardPolicy {
+    return useWorkbenchStore.getState().guardPolicyDefault ?? FALLBACK_GUARD_POLICY;
+  }
+
+  /** 컨트롤러가 직접 자원 설정을 쓴다 — 그 변화로 구독이 다시 적용하지 않게 감싼다. */
+  private writeResourcePrefs(write: () => void): void {
+    this.syncingResourcePrefs = true;
+    try {
+      write();
+    } finally {
+      this.syncingResourcePrefs = false;
+    }
+  }
+
+  /**
+   * 설정(자원 관리): 가드 정책 항목을 바꾼다. 지금 데몬 정책 위에 얹은 전체 정책을
+   * 같은 범위로 먼저 검사하고(`guard.set_policy`가 거절할 값은 보내지 않는다) 보낸 뒤,
+   * 데몬이 받아들인 값을 스토어에, 바꾼 항목을 사용자 변경분에 남긴다(기본값과 같아진
+   * 항목은 지운다). `reset`의 항목은 호스트 기본값으로 되돌린다. 실패는 그대로 던진다
+   * — 설정 화면이 그 자리에 사유를 보인다.
+   */
+  async setGuardPolicy(patch: Partial<GuardPolicy>, options: { reset?: readonly GuardField[] } = {}): Promise<GuardPolicy> {
+    const defaults = this.guardDefaults();
+    const current = useWorkbenchStore.getState().guardPolicy ?? defaults;
+    const reset = options.reset ?? [];
+    const resetValues: Partial<GuardPolicy> = {};
+    for (const field of reset) (resetValues as Record<GuardField, unknown>)[field] = defaults[field];
+    const policy = overlayGuardPolicy(current, { ...resetValues, ...patch });
+    const problem = guardPolicyProblem(policy);
+    if (problem) throw new Error(t(problem.key));
+    const applied = await this.deps.client.guardSetPolicy({ policy });
+    if (this.disposed) return applied;
+    useWorkbenchStore.getState().setGuardPolicy(applied);
+    const prefs = usePreferences.getState();
+    this.writeResourcePrefs(() =>
+      prefs.setResourceGuardOverrides(nextGuardOverrides(prefs.resourceGuardOverrides, patch, defaults, reset)),
+    );
+    return applied;
+  }
+
+  /** "기본값으로": 가드 항목(없으면 전부)을 호스트 기본값으로 되돌리고 변경분에서 지운다. */
+  resetGuardPolicy(fields: readonly GuardField[] = GUARD_FIELDS): Promise<GuardPolicy> {
+    return this.setGuardPolicy({}, { reset: fields });
+  }
+
+  /**
+   * 자동 양보 정책을 바꾸고(08 §2 `relief.set_policy`) 데몬이 적용한 값을 스토어에,
+   * 기본값(켬)과 다를 때만 사용자 변경분으로 남긴다. 실패는 그대로 던진다.
+   */
+  async setReliefAutoYield(autoYield: boolean): Promise<ReliefPolicy> {
+    const policy = await this.deps.client.reliefSetPolicy({ auto_yield: autoYield });
+    if (this.disposed) return policy;
+    useWorkbenchStore.getState().setReliefPolicy(policy);
+    this.writeResourcePrefs(() => usePreferences.getState().setReliefAutoYield(policy.auto_yield ? null : false));
+    return policy;
+  }
+
+  /**
+   * 설정 밖에서 가드 변경분이 바뀌었다(설정 전체 되돌리기 등): 지운 항목은 호스트
+   * 기본값으로, 남은 변경분은 그대로 데몬에 맞춘다. 실패는 삼킨다(다음 접속이 다시 맞춘다).
+   */
+  private async syncGuardPolicyFromPreferences(removed: readonly GuardField[]): Promise<void> {
+    const defaults = this.guardDefaults();
+    const current = useWorkbenchStore.getState().guardPolicy ?? defaults;
+    const resetValues: Partial<GuardPolicy> = {};
+    for (const field of removed) (resetValues as Record<GuardField, unknown>)[field] = defaults[field];
+    const policy = overlayGuardPolicy(
+      overlayGuardPolicy(current, resetValues),
+      usePreferences.getState().resourceGuardOverrides,
+    );
+    if (sameGuardPolicy(policy, current) || guardPolicyProblem(policy)) return;
+    try {
+      const applied = await this.deps.client.guardSetPolicy({ policy });
+      if (!this.disposed) useWorkbenchStore.getState().setGuardPolicy(applied);
+    } catch {
+      // 다음 접속의 재적용이 맞춘다.
+    }
+  }
+
+  /** 설정 밖에서 자동 양보 변경분이 바뀌었다 — 없으면 데몬 기본값(켬)으로 맞춘다. */
+  private async syncReliefFromPreferences(): Promise<void> {
+    const autoYield = usePreferences.getState().reliefAutoYield ?? true;
+    if (useWorkbenchStore.getState().reliefPolicy.auto_yield === autoYield) return;
+    try {
+      const policy = await this.deps.client.reliefSetPolicy({ auto_yield: autoYield });
+      if (!this.disposed) useWorkbenchStore.getState().setReliefPolicy(policy);
+    } catch {
+      // 다음 접속의 재적용이 맞춘다.
     }
   }
 
@@ -479,14 +764,22 @@ export class SessionController {
   private async restoreExistingSessions(): Promise<void> {
     const savedPanes = Object.values(useWorkbenchStore.getState().panes);
     const snapshot = await this.deps.client.systemSnapshot();
-    // start()가 먼저 보낸 게이트웨이 정책 적용을 기다린 뒤에 복원을 이어 간다 —
-    // 복원된 Z.ai pane의 재실행이 게이트웨이를 거치게(적용 실패는 이미 삼켰다).
-    // 스냅샷 조회는 정책 적용 뒤에 줄 세우지 않는다: 복원 기준 시점은 그대로다.
+    // start()가 먼저 보낸 게이트웨이·자원 정책 적용을 기다린 뒤에 복원을 이어 간다 —
+    // 복원된 Z.ai pane의 재실행이 게이트웨이를 거치고, 자동 재개가 사용자의 가드
+    // 정책 아래에서 뜨게(적용 실패는 이미 삼켰다). 스냅샷 조회는 정책 적용 뒤에 줄
+    // 세우지 않는다: 복원 기준 시점은 그대로다.
     if (this.gatewayPolicyReady) await this.gatewayPolicyReady;
+    const appliedPolicy = this.resourcePolicyReady ? await this.resourcePolicyReady : null;
     if (this.disposed) return;
     useWorkbenchStore.getState().applySnapshot(snapshot);
+    // 스냅샷은 정책을 다시 적용하기 전에 받았다 — 방금 적용된 값으로 덧댄다.
+    if (appliedPolicy?.guard) useWorkbenchStore.getState().setGuardPolicy(appliedPolicy.guard);
+    if (appliedPolicy?.relief) useWorkbenchStore.getState().setReliefPolicy(appliedPolicy.relief);
+    // 이미 정지돼 있던 작업은 알림 기준으로만 삼는다(재시작마다 같은 알림을 다시 띄우지 않는다).
+    this.rememberGuardStates(snapshot.workloads);
     this.refreshPaneAgents();
     resourceHistory.push(snapshot.host);
+    this.deps.registry.setMemoryPressure?.(snapshot.host.pressure);
     // 재시작 전 개입 알림 복원(W1-5): 놓친 승인 요청을 알림센터에서 다시 본다.
     try {
       const notices = await this.deps.client.interventionList();
@@ -557,7 +850,7 @@ export class SessionController {
     }
     // 이어서 열 대화는 pane마다 버튼을 누르게 하지 않고 한 번에 모두 띄운다. 기다리지
     // 않는다 — 나머지 복원(고아 탭·출력 재생)이 이 실행들 뒤에 줄 서지 않는다.
-    if (autoResume.length > 0) void this.resumeRestoredAgents(autoResume);
+    if (autoResume.length > 0) this.resumeRestoredAgents(autoResume);
     const state = useWorkbenchStore.getState();
     const known = new Set(Object.values(state.panes).map(p => p.sessionId));
     const activeTabId = state.activeTabId, focusedLeafId = state.focusedLeafId;
@@ -891,34 +1184,61 @@ export class SessionController {
     this.transportTimer = null;
     if (this.snapshotTimer) clearInterval(this.snapshotTimer);
     this.snapshotTimer = null;
+    if (this.snapshotRetainTimer) clearInterval(this.snapshotRetainTimer);
+    this.snapshotRetainTimer = null;
+    if (this.snapshotRefetchTimer) clearTimeout(this.snapshotRefetchTimer);
+    this.snapshotRefetchTimer = null;
     this.visibilitySub?.();
     this.visibilitySub = null;
+    this.resourcePrefsSub?.();
+    this.resourcePrefsSub = null;
     for (const leafId of [...this.healthyTimers.keys()]) this.cancelHealthyTimer(leafId);
     for (const leafId of [...this.reattachBackoff.keys()]) this.clearReattachBackoff(leafId);
   }
 
   /**
-   * focus 보고(08-pressure-relief §1): "지금 보고 있는 세션"이 바뀔 때만
-   * 한 번 보낸다. focus한 pane이 없거나 아직 세션이 붙지 않았으면 null이다
-   * (스토어 구독이 세션 배정 시점의 변화도 같이 잡는다).
+   * focus 보고(08-pressure-relief §1): "지금 보고 있는 세션"과 "지금 화면에 보이는
+   * 세션들"이 바뀔 때만 한 번 보낸다. 보이는 세션은 터미널 화면의 활성 탭에 든
+   * 살아 있는 pane 전부(포커스 세션 포함)다 — 데몬은 이들도 포커스처럼 자동 양보·
+   * 정지에서 뺀다(2×2로 지켜보는 에이전트가 포커스 하나만 남고 얼지 않게). 창이
+   * 숨었거나 터미널 화면이 아니면(설정·배치 편집) 아무것도 보고 있지 않다고 알린다.
+   * focus한 pane이 없거나 아직 세션이 붙지 않았으면 포커스는 null이다(스토어 구독이
+   * 세션 배정·탭 전환·배치 변화를, 문서 관찰이 창 표시 변화를 잡는다).
    *
    * 방금 끝난 세션을 보고하는 경합은 정상 경로이고 데몬은 그때
    * INVALID_ARGUMENT로 거절한다 — 실패는 로그로만 남기고 UI로 올리지 않는다.
    */
   private reportFocus(): void {
     if (this.disposed) return;
-    const store = useWorkbenchStore.getState();
-    const sessionId =
-      (store.focusedLeafId ? store.panes[store.focusedLeafId]?.sessionId : null) ?? null;
-    if (sessionId === this.reportedFocusSessionId) return;
-    this.reportedFocusSessionId = sessionId;
+    const { sessionId, visible } = this.focusReport();
+    const key = `${sessionId ?? ""}|${visible.join(",")}`;
+    if (key === this.reportedFocusKey) return;
+    this.reportedFocusKey = key;
     // Promise 체인으로 감싸 sessionFocus가 없는 구형/축약 클라이언트의
     // 동기 예외까지 같은 자리에서 흡수한다.
     void Promise.resolve()
-      .then(() => this.deps.client.sessionFocus({ session_id: sessionId }))
+      .then(() => this.deps.client.sessionFocus({ session_id: sessionId, visible_session_ids: visible }))
       .catch((error: unknown) => {
         console.debug("session.focus failed", error);
       });
+  }
+
+  /** 지금 보고할 포커스 세션과 보이는 세션들(정렬 — 같은 화면이면 같은 열쇠). */
+  private focusReport(): { sessionId: string | null; visible: string[] } {
+    const store = useWorkbenchStore.getState();
+    if (documentHidden() || store.page !== "terminal") return { sessionId: null, visible: [] };
+    const sessionId =
+      (store.focusedLeafId ? store.panes[store.focusedLeafId]?.sessionId : null) ?? null;
+    const visible = new Set<string>();
+    if (sessionId) visible.add(sessionId);
+    const tab = store.tabs.find((candidate) => candidate.id === store.activeTabId);
+    if (tab?.kind === "terminal") {
+      for (const leaf of listLeaves(tab.root)) {
+        const pane = store.panes[leaf.id];
+        if (pane?.sessionId && pane.phase === "live") visible.add(pane.sessionId);
+      }
+    }
+    return { sessionId, visible: [...visible].sort() };
   }
 
   /**
@@ -952,6 +1272,10 @@ export class SessionController {
     this.deferredAttaches.clear();
     this.foregroundReplays.clear();
     this.snapshotMarks.clear();
+    this.snapshotBackoff.clear();
+    this.guardSeen.clear();
+    this.startPool.dispose();
+    this.pendingAgentResumes.clear();
     for (const [viewId, pipeline] of this.pipelines) {
       pipeline.dispose();
       this.releaseSessionRoute(pipeline.sessionId, viewId);
@@ -974,9 +1298,12 @@ export class SessionController {
     const reconnect = this.deps.client.reconnectTransport;
     if (!statusFn || !reconnect || this.disposed || this.transportCheckInFlight) return;
     this.transportCheckInFlight = true;
+    this.lastTransportCheckAt = Date.now();
     try {
       const status = await statusFn.call(this.deps.client);
       if (this.disposed) return;
+      // 같은 관찰을 mission 화면 등과 나눈다 — 그쪽이 따로 폴링하지 않게(transportFeed).
+      publishTransportStatus({ connected: status.controlAlive && status.dataAlive, generation: status.generation });
       const generationChanged =
         this.transportGeneration !== null && status.generation !== this.transportGeneration;
       // 재접속이 실제로 시작되는 pane만 replaying으로 바뀐다 — 연결 흔들림에
@@ -991,18 +1318,27 @@ export class SessionController {
           await reconnect.call(this.deps.client);
           const reconnected = await statusFn.call(this.deps.client);
           this.transportGeneration = reconnected.generation;
+          publishTransportStatus({
+            connected: reconnected.controlAlive && reconnected.dataAlive,
+            generation: reconnected.generation,
+          });
         } else {
           this.transportGeneration = status.generation;
         }
         // 데몬이 재시작했으면 정책이 기본값으로 돌아가 있다 — 다시 붙기 전에 적용한다.
+        // 복구가 뒤이어 받는 스냅샷은 적용된 뒤의 정책을 싣는다.
         await this.applyGatewayPolicy();
+        await this.applyResourcePolicy();
         if (this.disposed) return;
         await this.recoverAttachedPanes();
       } else {
         this.transportGeneration = status.generation;
       }
     } catch (error) {
-      if (!this.disposed) this.markAttachedPanesFailed(error);
+      if (!this.disposed) {
+        publishTransportStatus({ connected: false, generation: null });
+        this.markAttachedPanesFailed(error);
+      }
     } finally {
       this.transportCheckInFlight = false;
     }
@@ -1194,6 +1530,9 @@ export class SessionController {
       if (this.disposed) return;
       useWorkbenchStore.setState({ revision: 0 });
       useWorkbenchStore.getState().applySnapshot(snapshot);
+      // 시작 복원이 실패했던 창이면 여기서 정지 알림의 기준을 잡는다.
+      if (!this.guardBaselineSet) this.rememberGuardStates(snapshot.workloads);
+      this.afterWorkloadsChanged(snapshot.workloads);
       for (const [sessionId, ref] of [...this.sessionIndex]) {
         if (this.disposed) return;
         const pipeline = this.pipelines.get(ref.viewId);
@@ -1241,7 +1580,7 @@ export class SessionController {
         }
       }
       // 새 제어 연결은 focus를 모른다 — 기억을 비우고 현재 값을 다시 보낸다.
-      this.reportedFocusSessionId = null;
+      this.reportedFocusKey = FOCUS_NONE_KEY;
       this.reportFocus();
     })().finally(() => {
       this.transportRecovery = null;
@@ -1328,9 +1667,7 @@ export class SessionController {
             if (pane.workloadId === event.payload.workload_id && pane.sessionId && pane.phase === "live") markTerminalActivity(pane.sessionId);
           }
         }
-        this.refreshPaneUsages();
-        this.refreshPaneAgents();
-        this.refreshPaneRelief();
+        this.afterWorkloadsChanged([event.payload]);
         break;
       }
       case "intervention.reported": {
@@ -1363,14 +1700,122 @@ export class SessionController {
         store.setQueue(event.payload.queue);
         break;
       case "resource.snapshot": {
-        store.setHostSample(event.payload);
-        resourceHistory.push(event.payload);
+        const sample = event.payload;
+        store.setHostSample(sample.host);
+        resourceHistory.push(sample.host);
+        // 메모리 압력이 오르면 숨은 pane의 WebGL 렌더러부터 놓는다(같은 값이면 아무 일도 없다).
+        this.deps.registry.setMemoryPressure?.(sample.host.pressure);
+        // 매초 오는 워크로드별 cpu·rss를 요약에 덧대 pane·탭 배지를 살려 둔다 — 바뀐 값만.
+        store.applyUsage(sample.usage);
         this.refreshPaneUsages();
         this.refreshPaneRelief();
+        // 압력이 바뀌었을 수 있다 — 기다리던 에이전트 시작을 다시 본다.
+        this.startPool.pump();
+        this.maybeRefetchSnapshot(sample.revision);
         break;
       }
       default:
         break;
+    }
+  }
+
+  /**
+   * 작업 요약이 바뀐 뒤(workload.changed·스냅샷) pane 거울(사용량·에이전트·완화)과
+   * 그에 딸린 판단(자동 정지 알림·시작 줄 정산)을 한 번에 맞춘다. 각 거울은 값이
+   * 같으면 쓰지 않는다.
+   */
+  private afterWorkloadsChanged(changed: readonly WorkloadSummary[]): void {
+    this.refreshPaneUsages();
+    this.refreshPaneAgents();
+    this.refreshPaneRelief();
+    this.noticeGuardTransitions(changed);
+    this.startPool.pump();
+  }
+
+  /**
+   * 스냅샷 다시 받기 안전망: 표본의 revision이 스토어가 쥔 스냅샷보다 앞서면 그사이
+   * 이벤트 없이 바뀐 데몬 상태가 있을 수 있다(구 데몬의 자동 양보·정지 등). 예약은
+   * 하나로 합치고, 최소 간격(바뀐 것이 없으면 늘어난다)을 지키며, 창이 숨은 동안은
+   * 받지 않는다 — 돌아오면 다음 표본이 다시 판단한다. 첫 스냅샷 전(복원 중)은
+   * 복원이 받는다.
+   */
+  private maybeRefetchSnapshot(revision: number): void {
+    if (this.disposed || this.snapshotRefetchTimer !== null || this.snapshotRefetchInFlight) return;
+    const known = useWorkbenchStore.getState().revision;
+    if (known <= 0 || !(revision > known) || documentHidden()) return;
+    const wait = Math.max(0, this.lastSnapshotRefetchAt + this.snapshotRefetchDelay - Date.now());
+    this.snapshotRefetchTimer = setTimeout(() => {
+      this.snapshotRefetchTimer = null;
+      void this.refetchSnapshot();
+    }, wait);
+  }
+
+  private async refetchSnapshot(): Promise<void> {
+    if (this.disposed || this.snapshotRefetchInFlight || documentHidden()) return;
+    this.snapshotRefetchInFlight = true;
+    this.lastSnapshotRefetchAt = Date.now();
+    try {
+      const snapshot = await this.deps.client.systemSnapshot();
+      if (this.disposed) return;
+      const before = workloadStateSignature(useWorkbenchStore.getState());
+      useWorkbenchStore.getState().applySnapshot(snapshot);
+      const after = workloadStateSignature(useWorkbenchStore.getState());
+      // 받아 봐도 바뀐 것이 없으면(포커스 보고·에이전트 감지로만 오른 revision) 간격을 늘린다.
+      this.snapshotRefetchDelay = before === after
+        ? Math.min(SNAPSHOT_REFETCH_MAX_MS, this.snapshotRefetchDelay * 2)
+        : SNAPSHOT_REFETCH_MIN_MS;
+      this.afterWorkloadsChanged(snapshot.workloads);
+    } catch {
+      // 다음 표본이 다시 판단한다.
+    } finally {
+      this.snapshotRefetchInFlight = false;
+    }
+  }
+
+  /** 이미 정지돼 있던 작업은 알림 없이 기준으로만 기억한다(앱 복원). */
+  private rememberGuardStates(workloads: readonly WorkloadSummary[]): void {
+    for (const workload of workloads) {
+      if (isFinishedWorkload(workload.state)) continue;
+      this.guardSeen.set(workload.workload_id, workload.guard?.kind === "SUSPENDED" ? workload.guard.since_ms : null);
+    }
+    this.guardBaselineSet = true;
+  }
+
+  /**
+   * 자원 가드가 스스로(manual=false) 새로 일시정지한 작업을 알림센터에 올린다 —
+   * "재개"·"보호"를 그 자리에서 고를 수 있다(NotificationBell). 같은 정지(since_ms)는
+   * 한 번만 알리고, 창이 숨어 있으면 데스크톱 알림도 띄운다(maybeDesktopNotify가 가른다).
+   */
+  private noticeGuardTransitions(workloads: readonly WorkloadSummary[]): void {
+    for (const workload of workloads) {
+      // 끝난 작업은 더 정지될 일이 없다 — 기억에서 지워 기록이 끝없이 늘지 않게 한다.
+      if (isFinishedWorkload(workload.state)) {
+        this.guardSeen.delete(workload.workload_id);
+        continue;
+      }
+      const guard = workload.guard;
+      const mark = guard?.kind === "SUSPENDED" ? guard.since_ms : null;
+      const known = this.guardSeen.has(workload.workload_id);
+      const previous = known ? this.guardSeen.get(workload.workload_id) ?? null : null;
+      this.guardSeen.set(workload.workload_id, mark);
+      // 복원이 기준을 잡기 전에 처음 본 작업은 기준으로만 삼는다(재시작마다 옛 정지를 알리지 않게).
+      if (!known && !this.guardBaselineSet) continue;
+      if (guard?.kind !== "SUSPENDED" || guard.manual || mark === previous) continue;
+      const pane = Object.values(useWorkbenchStore.getState().panes).find((p) => p.workloadId === workload.workload_id);
+      const name = terminalDisplayTitle(pane?.terminalTitle ?? pane?.title ?? workload.title);
+      const title = t("notifications.resource.suspended", { title: name });
+      const detail = t(`queue.guard.reason.${guard.reason}`);
+      const added = useNotificationStore.getState().push({
+        id: `guard:${workload.workload_id}:${guard.since_ms}`,
+        kind: "resource",
+        title,
+        detail,
+        at: new Date().toISOString(),
+        sessionId: workload.session_id ?? pane?.sessionId ?? null,
+        workloadId: workload.workload_id,
+        acknowledged: false,
+      });
+      if (added) maybeDesktopNotify(t("notifications.kind.autoSuspended"), `${title} — ${detail}`);
     }
   }
 
@@ -1916,9 +2361,9 @@ export class SessionController {
   /**
    * cwd를 주면 그 경로에서 시작한다(에이전트 세션 재개 — 04-ui §5).
    * 빈 탭의 첫 pane에는 한도 판정이 없어 항상 만든다 — 분할 경로와 반환값을
-   * 맞추기 위해 true를 돌려준다.
+   * 맞추기 위해 true를 돌려준다. `deferLaunch`면 자리만 만든다(시작 줄이 띄운다).
    */
-  createFirstPane(tabId: string, cwd?: string): boolean {
+  createFirstPane(tabId: string, cwd?: string, options: { deferLaunch?: boolean } = {}): boolean {
     const leafId = this.uuid();
     const viewId = this.uuid();
     const root = makeLeaf(leafId, viewId, null);
@@ -1943,7 +2388,7 @@ export class SessionController {
       },
       focusedLeafId: leafId,
     }));
-    void this.launchShell(leafId, cwd ?? this.pickCwd(null));
+    if (!options.deferLaunch) void this.launchShell(leafId, cwd ?? this.pickCwd(null));
     return true;
   }
 
@@ -2010,14 +2455,15 @@ export class SessionController {
   /**
    * cwd를 주면 새 pane은 그 경로에서 시작한다(에이전트 세션 재개).
    * 반환값은 "pane을 만들었는가" — 거절 사유는 한도·공간 문구로 알린다.
+   * `deferLaunch`면 자리만 만든다(시작 줄이 띄운다).
    */
-  splitFocused(axis: "row" | "column", cwdOverride?: string): boolean {
+  splitFocused(axis: "row" | "column", cwdOverride?: string, options: { deferLaunch?: boolean } = {}): boolean {
     const store = useWorkbenchStore.getState();
     const tab = store.tabs.find((t) => t.id === store.activeTabId);
     // mission 탭 활성 중 분할은 새 terminal 탭의 첫 pane이 된다(05 §2).
     if (!tab || tab.kind !== "terminal" || !tab.root) {
       if (cwdOverride === undefined) return this.newTerminal();
-      return this.createFirstPane(tab?.kind === "terminal" ? tab.id : this.createTab(), cwdOverride);
+      return this.createFirstPane(tab?.kind === "terminal" ? tab.id : this.createTab(), cwdOverride, options);
     }
     const focusedLeafId = store.focusedLeafId && store.panes[store.focusedLeafId] ? store.focusedLeafId : null;
     if (!focusedLeafId) return false;
@@ -2046,7 +2492,7 @@ export class SessionController {
       axis,
     );
     if (!ok) return false;
-    void this.launchShell(leafId, cwd);
+    if (!options.deferLaunch) void this.launchShell(leafId, cwd);
     return true;
   }
 
@@ -2062,21 +2508,26 @@ export class SessionController {
    * 바꿔 열었으면 무엇을 바꿨는지 알린다. 에이전트 대화 재개(`agent`가 붙은 셸)는 대화가
    * 그 경로·그 CLI에 묶여 있어 바꿔 열지 않고, 사유를 남겨 "새 셸"로 잇게 한다.
    * `grid`: 이미 그려진 화면에서 잇는 PTY의 첫 크기(없으면 80×24 뒤 fit이 맞춘다).
+   * `shell`: 이 실행에만 쓸 셸(에이전트 재개) — 주면 1회용 `nextShell`은 건드리지 않는다.
    */
   private async launchShell(
     leafId: string,
     cwd: string,
-    options: { fallbackCwds?: readonly string[]; grid?: { cols: number; rows: number } | null } = {},
+    options: {
+      fallbackCwds?: readonly string[];
+      grid?: { cols: number; rows: number } | null;
+      shell?: ShellSpec;
+    } = {},
   ): Promise<void> {
     const store = useWorkbenchStore.getState();
     const pane = store.panes[leafId];
     if (!pane) return;
-    const shell: ShellSpec = this.nextShell ?? this.deps.resolveShell?.() ?? {
+    const shell: ShellSpec = options.shell ?? this.nextShell ?? this.deps.resolveShell?.() ?? {
       program: defaultShellProgram(this.deps.platform),
       argv: defaultShellArgv(this.deps.platform),
       label: t("terminal.fallbackShell"),
     };
-    this.nextShell = null; // 1회용: 다음 생성은 다시 기본 프로필
+    if (!options.shell) this.nextShell = null; // 1회용: 다음 생성은 다시 기본 프로필
     const resuming = shell.agent !== undefined;
     const fallbackCwds = resuming ? [] : options.fallbackCwds ?? this.cwdCandidates(cwd).filter(c => c !== cwd);
     const shells = resuming ? [shell] : this.shellCandidates(shell);
@@ -2340,58 +2791,97 @@ export class SessionController {
   }
 
   /**
-   * 앱 복원이 "이어서 열기" 자리로 남긴 에이전트 대화를 이어서 연다. 한 번에
-   * RESTORED_RESUME_CONCURRENCY개까지만 띄우고 하나가 끝나면(성공·실패 무관)
-   * 다음을 띄운다 — 에이전트 여럿이 동시에 뜨면 기동 비용이 한꺼번에 몰린다.
-   * 시작 전 호스트 메모리가 CRITICAL이면 풀릴 때까지(상한 있음) 기다린다.
-   * 그사이 그 pane을 닫았거나 '새 셸'·'이어서 열기'를 직접 눌렀으면 건너뛴다.
-   * 같은 대화를 가리키는 pane이 여럿이면 첫 pane만 열고 나머지는 버튼으로
-   * 남긴다 — 같은 대화를 두 번 띄우지 않는다.
+   * 앱 복원이 "이어서 열기" 자리로 남긴 에이전트 대화를 시작 줄(P2-5)에 세운다 —
+   * 활성 탭의 pane부터. 줄이 압력·간격·동시 시작 수를 지키며 띄우고, 기다리는
+   * pane은 "차례를 기다리는 중…"(메모리 부족이면 "메모리 여유를 기다리는 중…")과
+   * "지금 시작"을 보인다. 그사이 그 pane을 닫았거나 '새 셸'·'이어서 열기'를 직접
+   * 눌렀으면 건너뛴다. 같은 대화를 가리키는 pane이 여럿이면 첫 pane만 열고 나머지는
+   * 버튼으로 남긴다 — 같은 대화를 두 번 띄우지 않는다.
    */
-  private async resumeRestoredAgents(targets: readonly RestoredResume[]): Promise<void> {
+  private resumeRestoredAgents(targets: readonly RestoredResume[]): void {
     const seen = new Set<string>();
-    const queue = targets.filter((target) => {
-      const key = `${target.resume.agent}:${target.resume.agentSessionId}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        const next = queue.shift();
-        if (!next || this.disposed) return;
-        await this.waitForMemoryHeadroom(RESTORED_RESUME_PRESSURE_WAIT_MS);
-        if (this.disposed) return;
-        try { await this.resumeRestoredAgent(next); } catch { /* 개별 실패는 pane에 남는다 */ }
-      }
-    };
-    await Promise.all(Array.from({ length: RESTORED_RESUME_CONCURRENCY }, worker));
-  }
-
-  /** 호스트 메모리가 CRITICAL이 아닐 때까지 500ms 간격으로 기다린다(상한 있음). 샘플이
-   *  아직 없으면(host null) 기다리지 않는다. */
-  private async waitForMemoryHeadroom(maxMs: number): Promise<void> {
-    const start = Date.now();
-    while (useWorkbenchStore.getState().host?.pressure === "CRITICAL") {
-      if (this.disposed || Date.now() - start >= maxMs) return;
-      await new Promise<void>((done) => setTimeout(done, 500));
+    const order = this.leafOrder();
+    const queue = targets
+      .filter((target) => {
+        const key = agentResumeKey(target.resume);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((target, index) => ({ target, rank: order.get(target.leafId) ?? Number.MAX_SAFE_INTEGER, index }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map((entry) => entry.target);
+    for (const target of queue) {
+      if (this.disposed) return;
+      const key = agentResumeKey(target.resume);
+      if (this.pendingAgentResumes.has(key)) continue;
+      this.pendingAgentResumes.set(key, target.leafId);
+      let startedViewId: string | null = null;
+      const job: AgentStartJob = {
+        id: target.leafId,
+        cancelled: () => !this.restoredResumeStillWanted(target),
+        start: async () => {
+          try {
+            startedViewId = await this.resumeRestoredAgent(target);
+          } finally {
+            this.releaseAgentResumeKey(key, target.leafId);
+          }
+        },
+        settled: () => this.agentStartSettled(target.leafId, startedViewId),
+        dropped: () => this.releaseAgentResumeKey(key, target.leafId),
+      };
+      void this.startPool.enqueue(job)?.catch(() => undefined);
     }
   }
 
-  private async resumeRestoredAgent({ leafId, viewId, resume }: RestoredResume): Promise<void> {
-    if (this.disposed) return;
+  /** 탭 순서 → 그 안의 leaf 순서. 활성 탭이 맨 앞이다(복원 시작 순서). */
+  private leafOrder(): Map<string, number> {
+    const state = useWorkbenchStore.getState();
+    const tabs = [...state.tabs].sort((a, b) =>
+      a.id === state.activeTabId ? -1 : b.id === state.activeTabId ? 1 : 0,
+    );
+    const order = new Map<string, number>();
+    for (const tab of tabs) {
+      if (tab.kind !== "terminal") continue;
+      for (const leaf of listLeaves(tab.root)) order.set(leaf.id, order.size);
+    }
+    return order;
+  }
+
+  /** 복원 자리가 아직 그대로인가(같은 view·종료 상태·같은 대화). */
+  private restoredResumeStillWanted({ leafId, viewId, resume }: RestoredResume): boolean {
+    if (this.disposed) return false;
     const pane = useWorkbenchStore.getState().panes[leafId];
-    if (!pane || pane.viewId !== viewId || pane.phase !== "exited") return;
-    if (pane.resume?.agent !== resume.agent || pane.resume.agentSessionId !== resume.agentSessionId) return;
+    return Boolean(
+      pane &&
+        pane.viewId === viewId &&
+        pane.phase === "exited" &&
+        pane.resume?.agent === resume.agent &&
+        pane.resume.agentSessionId === resume.agentSessionId,
+    );
+  }
+
+  /**
+   * 줄 차례가 온 복원 자리를 이어서 연다. 실행 파일을 찾는 사이(await) 자리가
+   * 바뀌었으면 손대지 않는다. 시작했으면 새 view id를, 아니면 null을 돌려준다.
+   */
+  private async resumeRestoredAgent(target: RestoredResume): Promise<string | null> {
+    if (!this.restoredResumeStillWanted(target)) return null;
+    const { leafId, resume } = target;
+    const pane = useWorkbenchStore.getState().panes[leafId];
     // 복원 사이 다른 곳에서 같은 대화가 떴으면 그 자리로 포커스를 옮기지 않고 버튼으로 남긴다.
-    if (this.activeAgentSession(resume, pane.workloadId)) return;
+    if (!pane || this.activeAgentSession(resume, pane.workloadId)) return null;
+    const shell = await this.agentResumeShell(resume);
+    if (!shell || !this.restoredResumeStillWanted(target)) return null;
+    const current = useWorkbenchStore.getState().panes[leafId];
+    if (!current || this.activeAgentSession(resume, current.workloadId)) return null;
     // 끝난 원래 작업과 잇는다(개별 '연결'과 같다): 최근 종료의 연결은 새 대화를 또 띄우지 않고
     // 이 pane으로 오며, 새 작업이 뜨면 원래 작업은 최근 종료에서 빠진다.
-    if (pane.workloadId) {
-      this.recoveredWorkloadPanes.set(pane.workloadId, leafId);
-      this.linkRecovery(leafId, pane.workloadId);
+    if (current.workloadId) {
+      this.recoveredWorkloadPanes.set(current.workloadId, leafId);
+      this.linkRecovery(leafId, current.workloadId);
     }
-    await this.resumeAgentSession(resume, { leafId });
+    return this.launchAgentInPane(leafId, current.viewId, resume, shell, { fresh: false });
   }
 
   /** 이 끝난 작업이 되살아났는가 — 새 창이 살아 있거나 실행 중 대화로 옮겨 갔다. */
@@ -2401,6 +2891,8 @@ export class SessionController {
     if (rememberedWorkload(state.workloadMemory, workloadId)?.recoveredBy) return true;
     const leafId = this.recoveredWorkloadPanes.get(workloadId);
     const pane = leafId ? state.panes[leafId] : null;
+    // 시작 줄에서 차례를 기다리는 자리도 되살린 것으로 센다(곧 뜬다).
+    if (pane && this.startPool.isQueued(pane.leafId)) return true;
     return Boolean(pane && pane.phase !== "exited" && pane.phase !== "failed");
   }
 
@@ -2677,7 +3169,7 @@ export class SessionController {
             this.foregroundReplayDone(leafId);
             // 길게 재생했으면 곧바로 떠 둔다 — 다음 시작(또는 곧 닥칠 비정상 종료)이 같은 재생을 반복하지 않게.
             if (pipeline.replayedBytes >= SNAPSHOT_AFTER_REPLAY_BYTES) {
-              setTimeout(() => void this.captureReplaySnapshot(pane.viewId), 0);
+              setTimeout(() => void this.captureReplaySnapshot(pane.viewId, { ignoreInterval: true }), 0);
             }
           }
         },
@@ -2772,7 +3264,12 @@ export class SessionController {
     return snapshot;
   }
 
-  /** 지금 화면을 스냅샷으로 뜬다(저장하지 않음). 레코드 경계가 아니면 null. */
+  /**
+   * 지금 화면을 스냅샷으로 뜬다(저장하지 않음). 레코드 경계가 아니거나 뜰 수 없으면
+   * null. 뜨지 못한 이유는 세션별로 기록해 그동안 다시 직렬화하지 않는다: 너무 큰
+   * 화면(뜨기 전 어림 — 버퍼 줄 수 × 열 — 이나 결과가 상한을 넘음)은 10분, 직렬화가
+   * 던졌으면 1분, 파서가 시퀀스 한가운데라 못 뜬 일시적 경우는 다음 틱 하나를 쉰다.
+   */
   private currentSnapshot(viewId: string): (PipelineSnapshot & { historyRebuilder: boolean }) | null {
     const serialize = this.deps.serializeTerminal;
     const pipeline = this.pipelines.get(viewId);
@@ -2780,22 +3277,46 @@ export class SessionController {
     if (!serialize || !pipeline || !entry || this.disposed) return null;
     const seq = pipeline.snapshotSeq;
     if (seq === null) return null;
+    const sessionId = pipeline.sessionId;
+    const now = Date.now();
+    if (this.snapshotBlocked(sessionId, now)) return null;
+    if (estimateSerializedChars(entry.terminal) > REPLAY_SNAPSHOT_MAX_CHARS) {
+      this.snapshotBackoff.set(sessionId, now + SNAPSHOT_OVERSIZE_BACKOFF_MS);
+      return null;
+    }
     let state: { data: string; cols: number; rows: number } | null;
     try {
       // 직렬화는 동기다 — 그 사이에 레코드가 적용되어 seq와 어긋날 수 없다.
       state = serialize(entry.terminal);
     } catch {
-      state = null;
+      this.snapshotBackoff.set(sessionId, now + SNAPSHOT_ERROR_BACKOFF_MS);
+      return null;
     }
-    if (!state || state.data.length > REPLAY_SNAPSHOT_MAX_CHARS) return null;
+    if (!state) {
+      this.snapshotBackoff.set(sessionId, now + SNAPSHOT_BUSY_BACKOFF_MS);
+      return null;
+    }
+    if (state.data.length > REPLAY_SNAPSHOT_MAX_CHARS) {
+      this.snapshotBackoff.set(sessionId, now + SNAPSHOT_OVERSIZE_BACKOFF_MS);
+      return null;
+    }
+    this.snapshotBackoff.delete(sessionId);
     return { seq, ...state, clearMark: pipeline.clearMark, historyRebuilder: isHistoryRebuilder(entry.terminal) };
+  }
+
+  /** 이 세션의 스냅샷 시도가 쉬는 중인가(지난 실패의 쉼이 끝나지 않았다). */
+  private snapshotBlocked(sessionId: string, now: number): boolean {
+    const retryAt = this.snapshotBackoff.get(sessionId);
+    return retryAt !== undefined && now < retryAt;
   }
 
   /**
    * 이 view의 화면을 스냅샷으로 저장한다. 마지막 저장 뒤로 바뀐 레코드가 없거나 지금이
-   * 레코드 경계가 아니면 아무것도 하지 않는다(다음 기회에 뜬다).
+   * 레코드 경계가 아니면 아무것도 하지 않는다(다음 기회에 뜬다). 같은 세션은 최소
+   * 간격(SNAPSHOT_MIN_INTERVAL_MS)에 한 번만 뜬다 — 종료 직전·긴 재생 직후처럼
+   * 마지막 기회인 경로만 `ignoreInterval`로 넘는다.
    */
-  private captureReplaySnapshot(viewId: string): Promise<void> | null {
+  private captureReplaySnapshot(viewId: string, options: { ignoreInterval?: boolean } = {}): Promise<void> | null {
     const store = this.deps.replaySnapshots;
     const pipeline = this.pipelines.get(viewId);
     if (!store || !pipeline) return null;
@@ -2805,6 +3326,7 @@ export class SessionController {
     const seq = pipeline.snapshotSeq;
     const mark = this.snapshotMarks.get(sessionId);
     if (seq === null || (mark && mark.seq >= seq)) return null;
+    if (!options.ignoreInterval && mark && Date.now() - mark.at < SNAPSHOT_MIN_INTERVAL_MS) return null;
     const snapshot = this.currentSnapshot(viewId);
     if (!snapshot) return null;
     const now = Date.now();
@@ -2828,15 +3350,18 @@ export class SessionController {
 
   /**
    * 주기 점검: 바뀐 세션 중 가장 오래전에 뜬 하나만 뜬다. 직렬화는 메인 스레드에서
-   * 돌므로 한 번에 여러 pane을 뜨지 않고, 계속 바뀌는 세션도 최소 간격을 둔다.
+   * 돌므로 한 번에 여러 pane을 뜨지 않고, 계속 바뀌는 세션도 최소 간격을 둔다. 뜨지
+   * 못해 쉬는 세션은 건너뛴다 — 안 그러면 늘 "가장 오래된" 그 세션이 다른 세션의
+   * 차례를 막는다. 창이 숨은 동안은 돌지 않는다(숨는 순간 이미 모두 떴다).
    */
   private snapshotTick(): void {
-    if (this.disposed) return;
+    if (this.disposed || documentHidden()) return;
     const now = Date.now();
     let stalest: { viewId: string; at: number } | null = null;
     for (const [viewId, pipeline] of this.pipelines) {
       const seq = pipeline.snapshotSeq;
       if (seq === null) continue;
+      if (this.snapshotBlocked(pipeline.sessionId, now)) continue;
       const mark = this.snapshotMarks.get(pipeline.sessionId);
       if (mark && (mark.seq >= seq || now - mark.at < SNAPSHOT_MIN_INTERVAL_MS)) continue;
       const at = mark?.at ?? 0;
@@ -2845,10 +3370,32 @@ export class SessionController {
     if (stalest) void this.captureReplaySnapshot(stalest.viewId);
   }
 
-  /** 바뀐 화면을 모두 뜨고 저장이 끝나기를(상한까지) 기다린다 — 창 숨김·종료 직전. */
+  /**
+   * 창이 숨겨졌다(최소화·다른 앱): 바뀐 화면을 pane마다 따로 뜬다 — 한 태스크에
+   * 몰아 직렬화하면 숨기 직전 마지막 프레임까지 멈춘다. 최소 간격은 지킨다(탭·창을
+   * 오갈 때마다 같은 세션을 다시 뜨지 않게). 겹쳐 돌리지 않는다.
+   */
+  private captureHiddenWindowSnapshots(): Promise<void> {
+    if (this.hiddenSnapshotRun) return this.hiddenSnapshotRun;
+    this.hiddenSnapshotRun = (async () => {
+      for (const viewId of [...this.pipelines.keys()]) {
+        await yieldToEventLoop();
+        if (this.disposed) return;
+        void this.captureReplaySnapshot(viewId);
+      }
+    })().finally(() => {
+      this.hiddenSnapshotRun = null;
+    });
+    return this.hiddenSnapshotRun;
+  }
+
+  /**
+   * 바뀐 화면을 모두 뜨고 저장이 끝나기를(상한까지) 기다린다 — 종료 직전. 마지막
+   * 기회라 최소 간격을 넘고 한 번에 뜬다(크기 초과로 쉬는 세션은 그대로 건너뛴다).
+   */
   private async flushReplaySnapshots(timeoutMs = SNAPSHOT_QUIT_FLUSH_MS): Promise<void> {
     if (!this.deps.replaySnapshots || !this.deps.serializeTerminal) return;
-    for (const viewId of [...this.pipelines.keys()]) void this.captureReplaySnapshot(viewId);
+    for (const viewId of [...this.pipelines.keys()]) void this.captureReplaySnapshot(viewId, { ignoreInterval: true });
     const pending = [...this.snapshotSaves];
     if (pending.length === 0) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -2859,7 +3406,20 @@ export class SessionController {
     if (timer !== null) clearTimeout(timer);
   }
 
-  /** 지금 열린 pane의 세션만 남기고 스냅샷을 정리한다(앱 시작 복원 뒤 한 번). */
+  /** 닫은 pane의 화면 스냅샷은 다시 쓸 일이 없다 — 저장소와 표식에서 지운다. */
+  private forgetReplaySnapshot(sessionId: string): void {
+    this.snapshotMarks.delete(sessionId);
+    this.snapshotBackoff.delete(sessionId);
+    const store = this.deps.replaySnapshots;
+    if (!store) return;
+    try {
+      void Promise.resolve(store.delete(sessionId)).catch(() => undefined);
+    } catch {
+      // 지우지 못한 것은 주기 정리(retain)가 치운다.
+    }
+  }
+
+  /** 지금 열린 pane의 세션만 남기고 스냅샷을 정리한다(앱 시작 복원 뒤 + 한 시간마다). */
   private pruneReplaySnapshots(): void {
     const store = this.deps.replaySnapshots;
     if (!store) return;
@@ -2968,12 +3528,17 @@ export class SessionController {
       if (resume) {
         if (current.workloadId) this.linkRecovery(leafId, current.workloadId);
         await this.resumeAgentSession(resume, { leafId });
-        // 재개가 이 창을 잡지 못했으면(실행 파일 없음·쓸 수 없는 세션 id — 사유는 알림으로
-        // 떴다) "재생 중"에 두지 않고 실패 오버레이로 돌려 다시 시도할 수 있게 한다.
         if (!this.disposed && samePane()?.phase === "replaying") {
-          useWorkbenchStore
-            .getState()
-            .panePhase(leafId, "failed", pane.error ?? t("terminal.session.attachFailed"));
+          if (this.startPool.isQueued(leafId)) {
+            // 시작 줄에서 차례를 기다린다 — 끝난 작업의 자리로 두고 대기 표시를 보인다.
+            useWorkbenchStore.getState().panePhase(leafId, "exited");
+          } else {
+            // 재개가 이 창을 잡지 못했으면(실행 파일 없음·쓸 수 없는 세션 id — 사유는 알림으로
+            // 떴다) "재생 중"에 두지 않고 실패 오버레이로 돌려 다시 시도할 수 있게 한다.
+            useWorkbenchStore
+              .getState()
+              .panePhase(leafId, "failed", pane.error ?? t("terminal.session.attachFailed"));
+          }
         }
         return;
       }
@@ -3013,10 +3578,14 @@ export class SessionController {
    * 수 있음" 기록도 함께 지운다 — 재개 오버레이가 남아 있지 않게.
    */
   private resetPaneForFreshPty(leafId: string, pane: PaneMeta, options: { keepView?: boolean } = {}): void {
+    // 이 자리에서 차례를 기다리던 이어서 열기는 무효다(사용자가 다른 실행을 골랐다).
+    this.startPool.cancel(leafId);
     this.pipelines.get(pane.viewId)?.dispose();
     this.pipelines.delete(pane.viewId);
     this.releaseSessionRoute(pane.sessionId, pane.viewId);
     this.forgetSessionText(pane.sessionId);
+    // 끝난 세션의 화면 스냅샷은 새 PTY에 쓸 수 없다.
+    if (pane.sessionId) this.forgetReplaySnapshot(pane.sessionId);
     if (pane.workloadId) this.workloadSession.delete(pane.workloadId);
     if (pane.sessionId) this.liveSessions.delete(pane.sessionId);
     if (pane.sessionId) {
@@ -3046,6 +3615,7 @@ export class SessionController {
           phase: "starting",
           error: null,
           agent: null,
+          pendingStart: null,
         },
       },
     }));
@@ -3056,24 +3626,39 @@ export class SessionController {
   }
 
   /**
-   * 기록된 에이전트 세션을 사용자가 연결·재실행할 때 이어서 연다.
+   * 이어서 열 대화별로 지금 시작 줄에 있거나 시작 중인 자리(대화 열쇠 → leaf id, 자리를
+   * 만들기 전이면 빈 문자열). 같은 대화를 두 번 띄우지 않고 그 자리로 보낸다.
+   */
+  private readonly pendingAgentResumes = new Map<string, string>();
+
+  /**
+   * 기록된 에이전트 세션을 사용자가 연결·재실행할 때 이어서 연다(계속 버튼·세션 목록·
+   * 모두 재개·연결 실패 재시도).
    *
    * - program: 기록된 절대 경로 → 없으면 시스템 probe. 둘 다 없으면 토스트.
    * - argv: `claude --resume <id>` / `opencode --session <id>` / `codex resume <id>`(codex는 하위 명령이
    *   먼저), 자율 실행 설정이 켜져 있으면 그 플래그가 붙는다.
    * - cwd: 반드시 기록된 cwd. 포커스된 pane의 cwd를 쓰지 않는다.
-   * 실행은 기존 셸 경로(launchShell → mode "shell")를 그대로 탄다.
+   * 실행은 기존 셸 경로(launchShell → mode "shell")를 그대로 타되, 시작 줄(P2-5)을
+   * 거친다: 지금 띄울 수 있으면 곧바로 띄우고 실행이 끝날 때까지 기다린다. 줄에서
+   * 기다리게 되면 자리만 잡고(새 pane은 "시작 중"으로 만들고 기존 pane은 그대로 둔다)
+   * 곧바로 돌아온다 — 세션 목록 대화상자가 메모리 여유를 30초씩 기다리지 않는다.
+   * 기다리는 pane은 이유와 "지금 시작"을 보인다.
    */
-  private readonly pendingAgentResumes = new Set<string>();
-
   async resumeAgentSession(
     info: AgentResumeInfo,
     target: { leafId: string } | { newPane: true },
   ): Promise<void> {
     if (this.disposed) return;
-    const key = `${info.agent}:${info.agentSessionId}`;
-    if (this.pendingAgentResumes.has(key)) return;
-    const pane = "leafId" in target ? useWorkbenchStore.getState().panes[target.leafId] : null;
+    const key = agentResumeKey(info);
+    const pending = this.pendingAgentResumes.get(key);
+    if (pending !== undefined) {
+      // 같은 대화가 이미 줄에 있거나 시작 중이다 — 그 자리로 간다.
+      if (pending && useWorkbenchStore.getState().panes[pending]) this.focusLeaf(pending);
+      return;
+    }
+    const pane = "leafId" in target ? useWorkbenchStore.getState().panes[target.leafId] ?? null : null;
+    if ("leafId" in target && !pane) return;
     // 끝났거나 연결에 실패한 pane 자신의 작업은 "실행 중인 대화"로 세지 않는다 —
     // 낡은 스토어가 그 작업을 아직 RUNNING으로 알아도 같은 자리에 이어서 연다.
     const active = this.activeAgentSession(
@@ -3084,21 +3669,90 @@ export class SessionController {
       this.focusLiveConversation(active);
       return;
     }
-    this.pendingAgentResumes.add(key);
+    this.pendingAgentResumes.set(key, pane?.leafId ?? "");
+    let queued = false;
     try {
-      await this.launchAgentResume(info, target);
+      const shell = await this.agentResumeShell(info);
+      if (!shell || this.disposed) return;
+      let slot: { leafId: string; viewId: string; sessionId: string | null; fresh: boolean };
+      if (pane) {
+        const current = useWorkbenchStore.getState().panes[pane.leafId];
+        if (!current || current.viewId !== pane.viewId) return;
+        slot = { leafId: current.leafId, viewId: current.viewId, sessionId: current.sessionId, fresh: false };
+      } else {
+        const created = this.createAgentPane(info);
+        if (!created) return;
+        slot = { ...created, sessionId: null, fresh: true };
+      }
+      this.pendingAgentResumes.set(key, slot.leafId);
+      let startedViewId: string | null = null;
+      const job: AgentStartJob = {
+        id: slot.leafId,
+        cancelled: () => this.agentSlotTaken(slot),
+        start: async () => {
+          try {
+            startedViewId = await this.launchAgentInPane(slot.leafId, slot.viewId, info, shell, { fresh: slot.fresh });
+          } finally {
+            this.releaseAgentResumeKey(key, slot.leafId);
+          }
+        },
+        settled: () => this.agentStartSettled(slot.leafId, startedViewId),
+        dropped: () => this.releaseAgentResumeKey(key, slot.leafId),
+      };
+      queued = true;
+      const started = this.startPool.enqueue(job);
+      if (started) await started;
     } finally {
-      this.pendingAgentResumes.delete(key);
+      if (!queued && this.pendingAgentResumes.get(key) !== undefined) this.pendingAgentResumes.delete(key);
     }
   }
 
-  private async launchAgentResume(
-    info: AgentResumeInfo,
-    target: { leafId: string } | { newPane: true },
-  ): Promise<void> {
-    const originalViewId = "leafId" in target ? useWorkbenchStore.getState().panes[target.leafId]?.viewId : null;
-    // 인자를 먼저 만든다: 플래그로 해석될 세션 id("-…")나 경로처럼 보이는
-    // 값은 여기서 멈춘다 — 기록이 오염됐을 때의 방어선(isSafeSessionId).
+  /** 시작 줄에서 기다리는 pane을 지금 띄운다("지금 시작" — 압력·간격·동시 시작 수를 건너뛴다). */
+  startPendingNow(leafId: string): void {
+    this.startPool.startNow(leafId);
+  }
+
+  /** 이 pane이 시작 줄에서 차례를 기다리는 중인가. */
+  isStartPending(leafId: string): boolean {
+    return this.startPool.isQueued(leafId);
+  }
+
+  /** 대화 열쇠가 아직 그 자리의 것이면 놓는다(다른 자리가 이어받았으면 그대로 둔다). */
+  private releaseAgentResumeKey(key: string, leafId: string): void {
+    if (this.pendingAgentResumes.get(key) === leafId) this.pendingAgentResumes.delete(key);
+  }
+
+  /**
+   * 줄에서 기다리는 사이 그 자리를 다른 일이 가져갔는가(닫기·새 view·새 실행). 새로 만든
+   * pane은 시작 중인 빈 자리로 남아 있어야 하고, 기존 pane은 같은 view·세션이어야 한다.
+   */
+  private agentSlotTaken(slot: { leafId: string; viewId: string; sessionId: string | null; fresh: boolean }): boolean {
+    if (this.disposed) return true;
+    const pane = useWorkbenchStore.getState().panes[slot.leafId];
+    if (!pane || pane.viewId !== slot.viewId || pane.sessionId !== slot.sessionId) return true;
+    return slot.fresh ? pane.phase !== "starting" : pane.phase === "starting" || pane.phase === "live";
+  }
+
+  /**
+   * 시작 줄 슬롯을 놓아도 되는가 — 새 pane의 작업이 에이전트를 보고했거나(기동 비용의
+   * 큰 부분이 지났다), 시작이 실패·종료로 끝났거나, 자리가 사라졌다.
+   */
+  private agentStartSettled(leafId: string, viewId: string | null): boolean {
+    if (this.disposed || viewId === null) return true;
+    const state = useWorkbenchStore.getState();
+    const pane = state.panes[leafId];
+    if (!pane || pane.viewId !== viewId) return true;
+    if (pane.phase === "failed" || pane.phase === "exited") return true;
+    if (!pane.workloadId) return false;
+    return Boolean(state.workloadById.get(pane.workloadId)?.agent);
+  }
+
+  /**
+   * 이어서 열 셸(실행 파일·인자). 인자를 먼저 만든다: 플래그로 해석될 세션 id("-…")나
+   * 경로처럼 보이는 값은 여기서 멈춘다 — 기록이 오염됐을 때의 방어선(isSafeSessionId).
+   * 쓸 수 없으면 사유를 알리고 null.
+   */
+  private async agentResumeShell(info: AgentResumeInfo): Promise<ShellSpec | null> {
     const argv = resumeArgv(
       info.agent,
       info.agentSessionId,
@@ -3106,7 +3760,7 @@ export class SessionController {
     );
     if (!argv) {
       this.toast(t("terminal.resume.launchFailed"));
-      return;
+      return null;
     }
     let program = info.program;
     if (!program) {
@@ -3116,58 +3770,77 @@ export class SessionController {
         program = null;
       }
     }
-    if (this.disposed) return;
+    if (this.disposed) return null;
     if (!program) {
       this.toast(t("terminal.resume.noProgram", { name: agentDisplayName(info.agent) }));
-      return;
+      return null;
     }
-    const shell: ShellSpec = { program, argv, label: agentDisplayName(info.agent), agent: info.agent };
+    return { program, argv, label: agentDisplayName(info.agent), agent: info.agent };
+  }
+
+  /**
+   * 이어서 열 대화의 새 pane(기록된 cwd)을 만든다 — 실행은 시작 줄이 한다. 자리를 못
+   * 만들었는데 아무 문구도 없으면(포커스된 pane 없음 등) 사용자에게는 아무 일도 안
+   * 일어난 것처럼 보이므로 그때만 알린다. 한도·공간 부족은 splitFocused가 더
+   * 구체적으로 말했으니 덮지 않는다.
+   */
+  private createAgentPane(info: AgentResumeInfo): { leafId: string; viewId: string } | null {
+    const before = useWorkbenchStore.getState().panes;
     const toastBefore = useWorkbenchStore.getState().toast;
+    const created = this.newTerminalAt(info.cwd, { deferLaunch: true });
+    const pane = created
+      ? Object.values(useWorkbenchStore.getState().panes).find((candidate) => !before[candidate.leafId])
+      : undefined;
+    if (!pane) {
+      if (useWorkbenchStore.getState().toast === toastBefore) this.toast(t("terminal.resume.launchFailed"));
+      return null;
+    }
+    useWorkbenchStore.getState().paneResume(pane.leafId, info);
+    return { leafId: pane.leafId, viewId: pane.viewId };
+  }
+
+  /**
+   * 시작 줄 차례가 온 이어서 열기를 실제로 띄운다. 기존 자리면 새 PTY 자리로 갈아
+   * 끼우고(재개 정보는 남긴다), 새로 만든 자리면 그대로 실행한다. 시작했으면 실행한
+   * view id를, 그사이 자리가 바뀌었으면 null을 돌려준다.
+   */
+  private async launchAgentInPane(
+    leafId: string,
+    viewId: string,
+    info: AgentResumeInfo,
+    shell: ShellSpec,
+    options: { fresh: boolean },
+  ): Promise<string | null> {
+    const pane = useWorkbenchStore.getState().panes[leafId];
+    if (this.disposed || !pane || pane.viewId !== viewId) return null;
     try {
-      if ("leafId" in target) {
-        const pane = useWorkbenchStore.getState().panes[target.leafId];
-        if (!pane || pane.viewId !== originalViewId) return;
-        this.resetPaneForFreshPty(target.leafId, pane);
-        useWorkbenchStore.getState().paneResume(target.leafId, info);
-        this.nextShell = shell;
-        await this.launchShell(target.leafId, info.cwd);
-        return;
+      if (!options.fresh) {
+        this.resetPaneForFreshPty(leafId, pane);
+        useWorkbenchStore.getState().paneResume(leafId, info);
       }
-      const before = useWorkbenchStore.getState().panes;
-      this.nextShell = shell;
-      const created = this.newTerminalAt(info.cwd);
-      if (created) {
-        const pane = Object.values(useWorkbenchStore.getState().panes).find(p => !before[p.leafId]);
-        if (pane) useWorkbenchStore.getState().paneResume(pane.leafId, info);
-      }
-      // 분할 한도·공간 부족으로 pane이 생기지 않았으면 다음 새 터미널이
-      // 이 셸을 물려받지 않도록 되돌린다(launchShell은 즉시 비운다).
-      if (this.nextShell === shell) this.nextShell = null;
-      // 자리를 못 만들었는데 아무 문구도 없으면(포커스된 pane 없음 등)
-      // 사용자에게는 아무 일도 안 일어난 것처럼 보인다 — 그때만 알린다.
-      // 한도·공간 부족은 splitFocused가 더 구체적으로 말했으니 덮지 않는다.
-      if (!created && useWorkbenchStore.getState().toast === toastBefore) {
-        this.toast(t("terminal.resume.launchFailed"));
-      }
+      const launchedViewId = useWorkbenchStore.getState().panes[leafId]?.viewId ?? null;
+      await this.launchShell(leafId, info.cwd, { shell });
+      return launchedViewId;
     } catch {
       // launchShell은 스스로 pane에 실패를 남기지만, 그 바깥이 깨지면 아무
       // 표시도 남지 않는다 — 재개가 실패했다는 것만이라도 알린다.
-      if (this.nextShell === shell) this.nextShell = null;
       this.toast(t("terminal.resume.launchFailed"));
+      return null;
     }
   }
 
   /**
    * newTerminal과 같되 cwd를 강제한다(기록된 경로에서 재개).
    * 반환값은 "pane을 만들었는가" — 호출자가 조용한 실패를 알릴 수 있게.
+   * `deferLaunch`면 자리만 만들고 실행은 호출자가 한다(시작 줄).
    */
-  private newTerminalAt(cwd: string): boolean {
+  private newTerminalAt(cwd: string, options: { deferLaunch?: boolean } = {}): boolean {
     const store = useWorkbenchStore.getState();
     const tab = store.tabs.find((t) => t.id === store.activeTabId) ?? null;
     if (!tab || tab.kind !== "terminal" || !tab.root) {
-      return this.createFirstPane(tab?.kind === "terminal" ? tab.id : this.createTab(), cwd);
+      return this.createFirstPane(tab?.kind === "terminal" ? tab.id : this.createTab(), cwd, options);
     }
-    return this.splitFocused("row", cwd);
+    return this.splitFocused("row", cwd, options);
   }
 
   // -------------------------------------------------------------- pane close
@@ -3223,6 +3896,8 @@ export class SessionController {
   async closePane(leafId: string, terminate = true): Promise<void> {
     this.pendingShellRecoveries.delete(leafId);
     this.recoveryOrigins.delete(leafId);
+    // 닫는 자리에서 차례를 기다리던 이어서 열기는 띄우지 않는다.
+    this.startPool.cancel(leafId);
     const pane = useWorkbenchStore.getState().panes[leafId];
     if (!pane) return;
     if (!terminate && pane.phase === "starting" && !pane.sessionId) this.detachedPendingLaunches.add(leafId);
@@ -3234,6 +3909,8 @@ export class SessionController {
     if (pane.sessionId) {
       const ref = this.sessionIndex.get(pane.sessionId);
       if (ref && ref.leafId === leafId) this.sessionIndex.delete(pane.sessionId);
+      // 닫은 pane의 화면 스냅샷은 다시 쓸 일이 없다(다시 붙이면 저널을 재생한다).
+      this.forgetReplaySnapshot(pane.sessionId);
       try {
         await this.deps.client.sessionDetach({ session_id: pane.sessionId, view_id: pane.viewId });
       } catch {
@@ -3439,15 +4116,39 @@ export class SessionController {
   }
 
   /**
-   * 자동 양보 정책 토글(08 §2 `relief.set_policy`). 데몬이 적용한 값을
-   * 그대로 스토어에 반영한다(요청값이 아니라 응답값이 정본이다).
+   * 자동 양보 정책 토글(08 §2 `relief.set_policy`, 대기열 서랍). 데몬이 적용한 값을
+   * 그대로 스토어에 반영하고(요청값이 아니라 응답값이 정본이다) 사용자 변경분으로
+   * 저장한다 — 데몬 정책은 데몬 수명이라 다음 접속에서 다시 적용한다.
    */
   async setAutoYield(autoYield: boolean): Promise<void> {
     try {
-      const policy = await this.deps.client.reliefSetPolicy({ auto_yield: autoYield });
-      useWorkbenchStore.getState().setReliefPolicy(policy);
+      await this.setReliefAutoYield(autoYield);
     } catch (error) {
       this.toast(errorMessage(error, t("terminal.relief.policyFailed")));
+    }
+  }
+
+  /**
+   * 자동 정지 알림의 "보호": 이 세션을 자동 완화·정지에서 빼고(`session.relief`
+   * protect) 정지돼 있으면 재개한다 — 보호만 하고 얼어 있는 채로 두면 사용자가
+   * 바란 "계속 돌게"가 되지 않는다. 결과는 곧바로 pane에 반영하고, 실패는 같은
+   * 자리(toast)로 알린다.
+   */
+  async protectWorkload(workloadId: string): Promise<void> {
+    const state = useWorkbenchStore.getState();
+    const workload = state.workloadById.get(workloadId);
+    const pane = Object.values(state.panes).find((candidate) => candidate.workloadId === workloadId);
+    const sessionId = workload?.session_id ?? pane?.sessionId ?? null;
+    try {
+      if (sessionId) {
+        const result = await this.deps.client.sessionRelief({ session_id: sessionId, action: "protect" });
+        if (pane) useWorkbenchStore.getState().paneRelief(pane.leafId, paneReliefFrom(result.relief), result.protected);
+      }
+      if (useWorkbenchStore.getState().workloadById.get(workloadId)?.guard?.kind === "SUSPENDED") {
+        await this.deps.client.workloadResume({ request_id: this.uuid(), workload_id: workloadId });
+      }
+    } catch (error) {
+      this.toast(errorMessage(error, t("terminal.relief.failed")));
     }
   }
 
@@ -3983,6 +4684,11 @@ export function groupOrphansByCwd(
     }
   }
   return groups;
+}
+
+/** 같은 대화를 가리키는 열쇠(에이전트 + 대화 id). */
+function agentResumeKey(info: Pick<AgentResumeInfo, "agent" | "agentSessionId">): string {
+  return `${info.agent}:${info.agentSessionId}`;
 }
 
 /**

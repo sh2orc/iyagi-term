@@ -17,7 +17,7 @@ use term_contracts::remote::ExecutorChoice;
 use term_contracts::rpc::{methods, RpcRequest, RpcResponse};
 use term_contracts::session::{
     AttachAccess, AttachParams, AttachResult, GuardPolicyParams, InputParams, InputResult,
-    ReliefPolicyParams, ResizeParams, ResizeResult, SessionAck, SessionFocusParams,
+    ReliefAction, ReliefPolicyParams, ResizeParams, ResizeResult, SessionAck, SessionFocusParams,
     SessionFocusResult, SessionReliefParams, SessionReliefResult, WorkloadGuardResult,
     WorkloadSuspendParams,
 };
@@ -126,7 +126,14 @@ pub async fn route(
         methods::WORKLOAD_UPDATE_POLICY => {
             workload_update_policy(&state, &request.params).map(Some)
         }
-        methods::WORKLOAD_PROCESSES => workload_processes(&state, &request.params).map(Some),
+        // 프로세스 표 전체 스캔(관리 그룹 멤버 열거 또는 셸 PTY 루트 트리
+        // 훑기)은 블로킹 OS 호출이다 — async 연결 루프의 워커를 붙잡지 않게
+        // blocking worker로 보낸다(search·relief와 같은 패턴).
+        methods::WORKLOAD_PROCESSES => {
+            let state = Arc::clone(&state);
+            let params = request.params.clone();
+            run_blocking(move || workload_processes(&state, &params).map(Some)).await
+        }
         methods::SESSION_ATTACH => {
             let state = Arc::clone(&state);
             let conn = conn.clone();
@@ -1851,9 +1858,26 @@ fn session_focus(
             ));
         }
     }
+    // 보이는 세션 목록은 살아 있는 것만 남긴다(거부하지 않는다 — 막 끝난
+    // pane이 섞여 있어도 보고 전체를 버릴 이유는 없다).
+    let visible: Vec<SessionId> = params
+        .visible_session_ids
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|session_id| {
+            state.session(session_id).is_some_and(|session| {
+                state.workload_entry(&session.workload_id).is_some_and(|w| {
+                    !w.lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .state
+                        .is_terminal()
+                })
+            })
+        })
+        .collect();
     // 같은 보고를 반복해도 revision은 움직이지 않는다(UI가 1초마다 다시
     // 보고해도 스냅샷이 매번 무효화되지 않게).
-    if state.set_focused_session(conn, params.session_id) {
+    if state.set_focus(conn, params.session_id, visible) {
         state.bump_revision();
     }
     let result = SessionFocusResult {
@@ -1908,6 +1932,24 @@ fn session_relief(
         let outcome = crate::relief::apply(state, &op);
         let mut relief = state.relief.lock().unwrap_or_else(|p| p.into_inner());
         relief.record(&op, &outcome, now);
+    }
+    // 보호는 가드에도 통한다: 자동으로 얼어 있던 pane이면 함께 푼다(보호한
+    // pane이 여전히 멈춰 있으면 보호가 반쪽이다). 수동 정지는 그대로 둔다.
+    if params.action == ReliefAction::Protect && state.suspend_resume_supported {
+        let ops = {
+            let mut guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
+            match guard.view(&workload_id).0 {
+                term_contracts::snapshot::GuardState::Suspended { manual: false, .. } => {
+                    guard.manual(&workload_id, false)
+                }
+                _ => Vec::new(),
+            }
+        };
+        for op in ops {
+            let outcome = crate::guard::apply(state, &op);
+            let mut guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
+            guard.record(&op, &outcome, now);
+        }
     }
     // 보호 표시만 바뀌어도 요약은 달라진다 — revision을 올리고
     // `workload.changed`로 알린다.
@@ -1990,17 +2032,33 @@ fn workload_guard(
             "workload already finished",
         ));
     }
+    // 정지 경로가 없는 플랫폼(Windows)에서 상태만 SUSPENDED로 바꾸면 입력·
+    // 리사이즈가 모두 거부된 채 프로세스는 계속 돈다 — 거부한다.
+    if !state.suspend_resume_supported {
+        return Err(RpcError::new(
+            ErrorCode::CapabilityUnavailable,
+            "suspend/resume is not available on this platform",
+        ));
+    }
     let now = state.now_ms();
     let ops = {
         let mut guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
         guard.manual(&params.workload_id, suspend)
     };
+    let mut failure = None;
     for op in ops {
         let outcome = crate::guard::apply(state, &op);
+        if let Err(error) = &outcome {
+            failure = Some(error.to_string());
+        }
         let mut guard = state.guard.lock().unwrap_or_else(|p| p.into_inner());
         guard.record(&op, &outcome, now);
     }
     state.workload_state_changed(&params.workload_id);
+    // 상태는 OS 조작이 성공했을 때만 바뀐다 — 실패는 그대로 알린다.
+    if let Some(message) = failure {
+        return Err(RpcError::new(ErrorCode::InvalidState, message));
+    }
     let (guard, _) = state.guard_view(&params.workload_id);
     let result = WorkloadGuardResult { guard };
     serde_json::to_value(&result)
@@ -2015,6 +2073,8 @@ fn guard_set_policy(
     let params: GuardPolicyParams = serde_json::from_value(params.clone())
         .map_err(|e| RpcError::new(ErrorCode::InvalidArgument, e.to_string()))?;
     let policy = params.policy;
+    crate::config::validate_guard_policy(&policy)
+        .map_err(|message| RpcError::new(ErrorCode::InvalidArgument, message))?;
     let changed = state
         .guard
         .lock()

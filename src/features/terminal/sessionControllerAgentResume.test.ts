@@ -3,9 +3,10 @@
  *
  * 네 가지 계약을 고정한다:
  * 1) 복원 — PTY가 사라진 저장 pane에 "지금 돌고 있지 않은" 기록이 있으면
- *    닫지 않고 그 자리에서 대화를 이어서 연다. 이어서 열 pane이 여럿이면
- *    서로를 기다리지 않고 한꺼번에 띄우며, 복원도 그 실행을 기다리지 않는다.
- *    같은 대화는 한 번만 띄운다. 일반 터미널은 저널을 재생하고 다시 실행하지 않는다.
+ *    닫지 않고 그 자리에서 대화를 이어서 연다. 이어서 열 pane이 여럿이면 시작 줄
+ *    (P2-5)이 앞 실행을 기다리지 않되 1.5초 간격·동시 3개·기동 확인(에이전트 감지,
+ *    상한 12초)을 지키며 띄우고, 복원도 그 실행을 기다리지 않는다. 같은 대화는 한
+ *    번만 띄운다. 일반 터미널은 저널을 재생하고 다시 실행하지 않는다.
  * 2) 재개 — 기록된 cwd에서 claude/codex의 재개 인자로 셸 워크로드를 만든다
  *    (자율 실행 설정 on/off 모두). 인자로 쓸 수 없는 세션 id나 자리를 못
  *    만든 경우에는 조용히 끝나지 않는다.
@@ -222,7 +223,8 @@ describe("복원: 기록이 있으면 그 자리에서 이어서 열고, 없으�
     } finally { controller.dispose(); }
   });
 
-  it("이어서 열 pane이 여럿이면 서로를 기다리지 않고 한꺼번에 띄운다", async () => {
+  it("이어서 열 pane이 여럿이면 앞 실행을 기다리지 않되 1.5초 간격으로 띄운다", async () => {
+    vi.useFakeTimers();
     const client = new MockDaemonClient({ resourceIntervalMs: 0 });
     client.seedAgentSessions([
       record(),
@@ -241,16 +243,28 @@ describe("복원: 기록이 있으면 그 자리에서 이어서 열고, 없으�
     try {
       // 실행 요청이 하나도 끝나지 않았는데 복원은 끝난다 — 복원이 실행을 기다리지 않는다.
       await controller.restoreWorkspace();
-      // 첫 요청이 끝나지 않은 채로 둘째 요청도 나간다 — 하나씩 차례로 띄우지 않는다.
-      await vi.waitFor(() => expect(launches).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(launches).toHaveLength(1);
+      // 둘째는 차례를 기다리는 동안 그 이유를 보인다.
+      expect(useWorkbenchStore.getState().panes["leaf-2"].pendingStart).toBe("turn");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(launches).toHaveLength(1);
+      // 첫 요청이 끝나지 않은 채로 간격이 지나면 둘째도 나간다 — 앞 실행을 기다리지 않는다.
+      await vi.advanceTimersByTimeAsync(600);
+      expect(launches).toHaveLength(2);
       expect(launches.map(l => l.cwd).sort()).toEqual(["/work/iyagi", "/work/web"]);
       expect(commandLine(launches.find(l => l.cwd === "/work/web")!)).toContain("agent-session-0002");
       const panes = useWorkbenchStore.getState().panes;
       expect([panes["leaf-1"].phase, panes["leaf-2"].phase]).toEqual(["starting", "starting"]);
-    } finally { controller.dispose(); }
+      expect(panes["leaf-2"].pendingStart ?? null).toBeNull();
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
   });
 
-  it("자동 재개는 한 번에 3개까지만 띄우고, 하나가 끝나면 다음을 띄운다", async () => {
+  it("자동 재개는 한 번에 3개까지만 띄우고, 실행이 돌아와도 에이전트가 기동을 알리기(또는 12초) 전에는 다음을 띄우지 않는다", async () => {
+    vi.useFakeTimers();
     const client = new MockDaemonClient({ resourceIntervalMs: 0 });
     client.seedAgentSessions([1, 2, 3, 4, 5].map((n) => record({
       id: `rec-${n}`, workload_id: `w-old${n}`, pty_session_id: `s-old${n}`,
@@ -263,15 +277,34 @@ describe("복원: 기록이 있으면 그 자리에서 이어서 열고, 없으�
 
     const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
     try {
+      controller.start();
       await controller.restoreWorkspace();
-      await vi.waitFor(() => expect(launches).toHaveLength(3));
-      // 마이크로태스크가 더 흘러도 4·5번째는 대기 중이다.
-      await new Promise<void>((done) => setTimeout(done, 0));
+      await vi.advanceTimersByTimeAsync(3100);
       expect(launches).toHaveLength(3);
-      // 첫 실행이 끝나면(성공·실패 무관) 다음이 뜬다.
+      // 간격이 더 지나도 4·5번째는 대기 중이다(슬롯 셋을 다 쥐고 있다).
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(launches).toHaveLength(3);
+      // 첫 실행이 돌아와 pane이 붙어도 에이전트가 기동을 알리기 전에는 슬롯을 쥔다 —
+      // Node 로딩·대화 기록 읽기는 그 뒤에 온다.
       release(0);
-      await vi.waitFor(() => expect(launches).toHaveLength(4));
-    } finally { controller.dispose(); }
+      await vi.advanceTimersByTimeAsync(500);
+      const first = useWorkbenchStore.getState().panes["leaf-1"];
+      expect(first.workloadId).not.toBeNull();
+      expect(launches).toHaveLength(3);
+      // 에이전트 감지(workload.changed)가 오면 슬롯을 놓고 다음이 뜬다.
+      client.reportAgent(first.workloadId!, { agent: "claude", pid: 11, detected_at_ms: 1 });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(launches).toHaveLength(4);
+      // 나머지 둘은 알림이 없어도 상한(시작 뒤 12초)에서 놓인다 — 둘째(1.5초에 시작)가
+      // 13.5초에 놓이면 다섯째가 뜬다.
+      await vi.advanceTimersByTimeAsync(13_400 - 6_900);
+      expect(launches).toHaveLength(4);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(launches).toHaveLength(5);
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it("메모리 압력이 CRITICAL이면 자동 재개를 미루고 풀리면 띄운다", async () => {
@@ -427,6 +460,109 @@ function info(overrides: Partial<AgentResumeInfo> = {}): AgentResumeInfo {
     ...overrides,
   };
 }
+
+// 에이전트 시작 줄(P2-5)을 거치는 수동 경로: 계속 버튼·세션 목록·압력.
+describe("이어서 열기 시작 줄(수동 경로)", () => {
+  const second = (): AgentResumeInfo =>
+    info({ recordId: "rec-2", agentSessionId: "agent-session-0002", cwd: "/work/web", title: "web" });
+
+  it("계속 버튼: 줄이 차 있으면 그 pane에 대기 이유를 보이고 '지금 시작'으로 곧바로 띄운다", async () => {
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const launches = holdLaunches(client);
+    seedWorkspace(
+      savedPane({ sessionId: null, workloadId: null, phase: "exited", resume: info() }),
+      savedPane({ leafId: "leaf-2", viewId: "view-2", sessionId: null, workloadId: null, phase: "exited", resume: second() }),
+    );
+    const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+    try {
+      void controller.resumeAgentSession(info(), { leafId: "leaf-1" });
+      await vi.waitFor(() => expect(launches).toHaveLength(1));
+      // 시작 간격(1.5초) 안의 둘째 요청은 기다린다 — 버튼을 누른 pane에 이유와 "지금 시작"이 뜬다.
+      await controller.resumeAgentSession(second(), { leafId: "leaf-2" });
+      expect(launches).toHaveLength(1);
+      expect(controller.isStartPending("leaf-2")).toBe(true);
+      expect(useWorkbenchStore.getState().panes["leaf-2"]).toMatchObject({ phase: "exited", pendingStart: "turn" });
+      // 같은 대화를 다시 눌러도 두 번 줄 세우지 않는다.
+      await controller.resumeAgentSession(second(), { leafId: "leaf-2" });
+      expect(controller.isStartPending("leaf-2")).toBe(true);
+
+      controller.startPendingNow("leaf-2");
+      await vi.waitFor(() => expect(launches).toHaveLength(2));
+      expect(commandLine(launches[1])).toContain("agent-session-0002");
+      expect(useWorkbenchStore.getState().panes["leaf-2"]).toMatchObject({ phase: "starting", pendingStart: null });
+    } finally { controller.dispose(); }
+  });
+
+  it("세션 목록(새 pane): 줄에서 기다리게 되면 실행을 기다리지 않고 곧바로 돌아온다 — 새 pane은 시작 중 + 대기 표시", async () => {
+    vi.useFakeTimers();
+    const probe = launchProbe();
+    const controller = new SessionController({ client: probe.client, registry: registry(), platform: "darwin" });
+    try {
+      await controller.resumeAgentSession(info(), { newPane: true });
+      expect(probe.launches).toHaveLength(1);
+      await controller.resumeAgentSession(second(), { newPane: true });
+      expect(probe.launches).toHaveLength(1);
+      const waiting = Object.values(useWorkbenchStore.getState().panes).find((pane) => pane.resume?.agentSessionId === "agent-session-0002");
+      expect(waiting).toMatchObject({ phase: "starting", sessionId: null, pendingStart: "turn" });
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(probe.launches).toHaveLength(2);
+      expect(probe.launches[1].cwd).toBe("/work/web");
+      expect(useWorkbenchStore.getState().panes[waiting!.leafId].pendingStart ?? null).toBeNull();
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("메모리 WARNING이면 하나씩 — 간격이 지나도 앞 실행의 기동 확인(상한 12초)을 기다린다", async () => {
+    vi.useFakeTimers();
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const launches = holdLaunches(client);
+    seedWorkspace(
+      savedPane({ sessionId: null, workloadId: null, phase: "exited", resume: info() }),
+      savedPane({ leafId: "leaf-2", viewId: "view-2", sessionId: null, workloadId: null, phase: "exited", resume: second() }),
+    );
+    useWorkbenchStore.setState({ host: hostSample("WARNING") });
+    const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+    try {
+      void controller.resumeAgentSession(info(), { leafId: "leaf-1" });
+      void controller.resumeAgentSession(second(), { leafId: "leaf-2" });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(launches).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(8500);
+      expect(launches).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(launches).toHaveLength(2);
+    } finally {
+      controller.dispose();
+      useWorkbenchStore.setState({ host: null });
+      vi.useRealTimers();
+    }
+  });
+
+  it("앱 복원은 활성 탭의 자리부터 띄운다", async () => {
+    const client = new MockDaemonClient({ resourceIntervalMs: 0 });
+    const launches = holdLaunches(client);
+    const first = savedPane({ sessionId: null, workloadId: null, phase: "exited", resume: info() });
+    const other = savedPane({ leafId: "leaf-2", viewId: "view-2", sessionId: null, workloadId: null, phase: "exited", resume: second() });
+    useWorkbenchStore.setState({
+      tabs: [
+        { kind: "terminal", id: "tab-1", title: "iyagi", root: makeLeaf(first.leafId, first.viewId, null) },
+        { kind: "terminal", id: "tab-2", title: "web", root: makeLeaf(other.leafId, other.viewId, null) },
+      ],
+      panes: { [first.leafId]: first, [other.leafId]: other },
+      activeTabId: "tab-2",
+      focusedLeafId: other.leafId,
+    });
+    const controller = new SessionController({ client, registry: registry(), platform: "darwin" });
+    try {
+      await controller.restoreWorkspace();
+      await vi.waitFor(() => expect(launches).toHaveLength(1));
+      expect(launches[0].cwd).toBe("/work/web");
+      expect(useWorkbenchStore.getState().panes[first.leafId].pendingStart).toBe("turn");
+    } finally { controller.dispose(); }
+  });
+});
 
 describe("resumeAgentSession: 프로그램·인자·cwd", () => {
   it("Claude 대화 파일이 없으면 저장된 ID를 바꾸지 않고 구체적인 원인을 보여 준다", async () => {
@@ -1133,16 +1269,25 @@ describe("대기열 터미널 연결에서 종료된 에이전트 복구", () =>
         { ...workload(), workload_id: "w-plain", session_id: "s-w-plain" },
       ],
     });
+    vi.useFakeTimers();
     const controller = new SessionController({ client: probe.client, registry: registry(), platform: "windows" });
-    await controller.resumeAgentWorkloads(["w-a", "w-b", "w-plain"]);
-    // 기록 없는 터미널은 새 셸로 잇지 않는다 — 대화 둘만 실행한다.
-    expect(probe.launches).toHaveLength(2);
-    expect(probe.launches.map((launch) => launch.argv.join(" "))).toEqual([
-      expect.stringContaining("agent-w-a"),
-      expect.stringContaining("agent-w-b"),
-    ]);
-    expect(useWorkbenchStore.getState().toast).toBe(t("queue.resumeAll.partial", { n: 2, failed: 1 }));
-    controller.dispose();
+    try {
+      await controller.resumeAgentWorkloads(["w-a", "w-b", "w-plain"]);
+      // 시작 줄: 첫 대화는 곧바로, 둘째는 1.5초 간격 뒤에 뜬다 — 일괄 재개는 그사이
+      // 기다리지 않고 자리(대기 표시)만 잡아 둔 채 결과를 알린다.
+      expect(probe.launches).toHaveLength(1);
+      expect(useWorkbenchStore.getState().toast).toBe(t("queue.resumeAll.partial", { n: 2, failed: 1 }));
+      await vi.advanceTimersByTimeAsync(1600);
+      // 기록 없는 터미널은 새 셸로 잇지 않는다 — 대화 둘만 실행한다.
+      expect(probe.launches).toHaveLength(2);
+      expect(probe.launches.map((launch) => launch.argv.join(" "))).toEqual([
+        expect.stringContaining("agent-w-a"),
+        expect.stringContaining("agent-w-b"),
+      ]);
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it("일괄 재개가 도는 중에는 같은 요청을 겹쳐 실행하지 않는다", async () => {

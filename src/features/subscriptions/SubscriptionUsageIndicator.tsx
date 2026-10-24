@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
+import { useWorkbenchStore } from "../../store/workbenchStore";
 import { isTauri } from "../bridge/ipc";
 import { refreshSubscriptionUsage, SUBSCRIPTION_REFRESH_EVENT } from "./client";
 import type { ProviderUsage, UsageWindow } from "./types";
 import { quotaGauges, type QuotaGauge } from "./quotaGauges";
+import { autoRefreshAllowed, SUBSCRIPTION_MIN_GAP_MS, SUBSCRIPTION_POLL_MS } from "./autoRefresh";
 
-const POLL_MS = 60_000;
 /** 남은 비율이 이 값 이하이면 게이지를 빨갛게 — 상태 바 CPU/RAM/Disk의 80% 사용 기준과 같은 선. */
 const LOW_REMAINING_PERCENT = 20;
 
@@ -34,13 +35,17 @@ export function SubscriptionUsageIndicator(): JSX.Element {
   const [failed, setFailed] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const refreshSequence = useRef(0);
+  /** 마지막 갱신(수동·자동) 시작 시각 — 자동 갱신의 최소 간격 판단에 쓴다. */
+  const lastRefreshAt = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
+  /** `force`: 사용자가 명시적으로 요청한 갱신 — 브리지의 결과 캐시를 건너뛴다. */
+  const refresh = useCallback(async (force = false) => {
     if (!isTauri()) return;
+    lastRefreshAt.current = Date.now();
     const sequence = ++refreshSequence.current;
     setLoading(true);
     try {
-      const result = await refreshSubscriptionUsage();
+      const result = await refreshSubscriptionUsage({ force });
       if (sequence !== refreshSequence.current) return;
       setProviders(result);
       setFailed(false);
@@ -53,21 +58,32 @@ export function SubscriptionUsageIndicator(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    // 트레이에 숨어 있는 동안은 폴링하지 않는다 — 매 분 CLI를 띄우고 HTTP를
-    // 치는 일은 보이는 상태 바를 위한 것이다. 다시 보이면 곧바로 갱신한다.
-    const poll = () => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      void refresh();
+    // 자동 갱신(첫 갱신·5분 주기·창 복귀)은 autoRefreshAllowed를 거친다: 트레이에
+    // 숨어 있거나 메모리 압력이 높으면 CLI를 띄우지 않고, 마지막 갱신 뒤 1분이
+    // 지나지 않았으면 건너뛴다. 압력을 아직 모르면(첫 샘플 전) 막지 않는다.
+    const auto = (minGapMs: number) => {
+      const allowed = autoRefreshAllowed({
+        now: Date.now(),
+        lastRefreshAt: lastRefreshAt.current,
+        hidden: typeof document !== "undefined" && document.hidden,
+        pressure: useWorkbenchStore.getState().host?.pressure ?? null,
+        minGapMs,
+      });
+      if (allowed) void refresh();
     };
-    const timer = window.setInterval(poll, POLL_MS);
-    const onRefresh = () => void refresh();
+    auto(0);
+    const timer = window.setInterval(() => auto(SUBSCRIPTION_MIN_GAP_MS), SUBSCRIPTION_POLL_MS);
+    // 다시 보이면 갱신하되, 잠깐 다른 앱을 봤다 돌아온 것이면(1분 미만) 그대로 둔다.
+    const onVisibility = () => auto(SUBSCRIPTION_MIN_GAP_MS);
+    // 설정 변경 등 명시적 요청은 조건 없이, 캐시도 건너뛰고 곧바로 갱신한다
+    // (팝오버 버튼과 같다).
+    const onRefresh = () => void refresh(true);
     window.addEventListener(SUBSCRIPTION_REFRESH_EVENT, onRefresh);
-    document.addEventListener("visibilitychange", poll);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener(SUBSCRIPTION_REFRESH_EVENT, onRefresh);
-      document.removeEventListener("visibilitychange", poll);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [refresh]);
 
@@ -126,7 +142,7 @@ export function SubscriptionUsageIndicator(): JSX.Element {
         <section className="subscription-popover" role="dialog" aria-label={t("monitor.quota.title")}>
           <header>
             <strong>{t("monitor.quota.title")}</strong>
-            <button type="button" disabled={loading} onClick={() => void refresh()}>
+            <button type="button" disabled={loading} onClick={() => void refresh(true)}>
               {loading ? t("monitor.quota.loading") : t("monitor.quota.refresh")}
             </button>
           </header>

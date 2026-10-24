@@ -171,14 +171,22 @@ function QuotaWindow({ window }: { window: UsageWindow }): JSX.Element {
       {window.used !== null && window.limit !== null ? (
         <small>{t("monitor.quota.count", { used: formatCount(window.used), limit: formatCount(window.limit) })}</small>
       ) : null}
-      {window.resetsAt ? <small>{t("monitor.quota.resets", { time: formatTime(window.resetsAt) })}</small> : null}
+      {window.resetsAt ? <small>{t("monitor.quota.resets", { time: formatTime(window.resetsAt, true) })}</small> : null}
     </div>
   );
 }
 
-function formatTime(epochSeconds: number): string {
+/** 마감 시각은 분 단위로 올린다 — 공급자의 resets_at은 16:59:59.99처럼 분
+ * 끝에서 돌아가고 claude.ai·Codex 대시보드는 17:00으로 올려 보여준다. 이미
+ * 분 경계면 그대로다. 관측 시각(observedAt)에는 쓰지 않는다. */
+export function ceilMinute(epochSeconds: number): number {
+  return Math.ceil(epochSeconds / 60) * 60;
+}
+
+function formatTime(epochSeconds: number, roundUpToMinute = false): string {
+  const seconds = roundUpToMinute ? ceilMinute(epochSeconds) : epochSeconds;
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    .format(new Date(epochSeconds * 1000));
+    .format(new Date(seconds * 1000));
 }
 
 function formatCount(value: number): string {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { QuotaGauges } from "./SubscriptionUsageIndicator";
+import { ceilMinute, QuotaGauges } from "./SubscriptionUsageIndicator";
 import { quotaGauges } from "./quotaGauges";
 import type { ProviderUsage, UsageWindow } from "./types";
 
@@ -81,6 +81,13 @@ describe("subscription quota gauges", () => {
   });
 });
 
+
+describe("reset time display", () => {
+  it("rounds a reset deadline up to the next minute — providers roll windows at second boundaries like 16:59:59 and their dashboards show 17:00", () => {
+    expect(ceilMinute(1_792_828_799)).toBe(1_792_828_800); // 2026-10-24T07:59:59Z = KST 16:59:59.99
+    expect(ceilMinute(1_792_828_800)).toBe(1_792_828_800); // 이미 분 경계
+  });
+});
 
 describe("Claude model-scoped quota", () => {
   it("shows Fable separately from the general Claude allowance", () => {

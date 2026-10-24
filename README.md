@@ -199,7 +199,9 @@ level, where the work actually runs:
 - Notification center for permission requests, questions, finished responses and finished
   managed runs, with desktop notifications while the window is hidden. It works through
   Claude/Codex hooks and an injected OpenCode plugin — your global CLI config is never edited
-- Subscription usage gauges for Codex, Claude and Z.ai in the status bar
+- Subscription usage gauges for Codex, Claude and Z.ai in the status bar. The popover shows
+  each window's usage and reset time, rounded up to the next minute — providers roll windows at
+  second boundaries (e.g. 16:59:59) that their own dashboards already show rounded (17:00)
 
 **Z.ai routing, token observatory and key pool**
 

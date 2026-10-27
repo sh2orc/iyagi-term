@@ -27,11 +27,11 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.4](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.4)** (2026-10-16) — a
-maintenance release: held letter keys repeat on macOS, so `h`/`j`/`k`/`l` keep moving in vim.
-0.1.3 brought a token usage observatory and kill switch for Z.ai-routed Claude Code terminals,
-API key pool rotation and `Shift+Space` for Chinese and Japanese input sources.
-See [what's new](#whats-new-in-014).
+**Latest: [0.1.5](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.5)** (2026-10-27) —
+terminals, agents and the daemon become a governed resource: memory pressure freezes work in
+stages and revives it automatically, CPU monopolists yield, and process accounting is native
+and cheap. Glyphs are crisp on fractional-DPI displays (Windows 125 %/150 %).
+See [what's new](#whats-new-in-015).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -41,12 +41,12 @@ See [what's new](#whats-new-in-014).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.4_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.4/IYAGI.Term_0.1.4_aarch64.dmg) | 17 MB | `ea644c56831fb3f6d99fc77d3b33af1fefecba3f9e3312692870a5878b93c4b1` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.5_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.5/IYAGI.Term_0.1.5_aarch64.dmg) | 17 MB | `b719fd230848cb689d059e15cb5ff13d4aae8b5dcf9a2367f06b1eac0b449cc1` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.4_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.5_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -81,6 +81,16 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.5
+
+- **Resource governance.** Memory pressure freezes workloads in stages — the pane you are
+  watching last — and revives them automatically as headroom returns. CPU monopolists yield,
+  admission limits scale to the host, and process accounting is native (the daemon's own CPU
+  cost dropped). Agent starts queue up instead of thundering.
+- **Crisp glyphs on fractional DPI.** Windows 125 %/150 % scaling no longer smears text: the
+  glyph atlas bakes at integer device pixels and the canvas keeps its exact size. Full notes:
+  [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.4
 
@@ -383,7 +393,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.4** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.5** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

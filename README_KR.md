@@ -26,10 +26,11 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.4](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.4)** (2026-10-16) — 유지보수
-릴리스: macOS에서 문자 키를 누르고 있으면 반복 입력되어 vim의 `h`/`j`/`k`/`l`로 계속 이동합니다.
-0.1.3에서는 Z.ai로 라우팅된 Claude Code 터미널의 토큰 사용량 관측과 킬 스위치, API 키 풀 회전,
-중국어·일본어 입력 소스용 `Shift+Space`가 들어왔습니다. [새로운 점](#014의-새로운-점)을 참고하세요.
+**최신: [0.1.5](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.5)** (2026-10-27) —
+터미널·에이전트·데몬이 하나의 관리되는 자원이 됩니다: 메모리 압력에 따라 작업을 단계적으로
+멈췄다가 여유가 돌아오면 자동으로 되살리고, CPU를 독점하는 작업은 양보시키며, 프로세스
+계량은 네이티브로 저렴해졌습니다. 분수 DPI 화면(Windows 125%/150%)에서 글자가 선명해집니다.
+[새로운 점](#015의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -39,12 +40,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.4_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.4/IYAGI.Term_0.1.4_aarch64.dmg) | 17 MB | `ea644c56831fb3f6d99fc77d3b33af1fefecba3f9e3312692870a5878b93c4b1` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.5_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.5/IYAGI.Term_0.1.5_aarch64.dmg) | 17 MB | `b719fd230848cb689d059e15cb5ff13d4aae8b5dcf9a2367f06b1eac0b449cc1` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.4_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.5_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -77,6 +78,16 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.5의 새로운 점
+
+- **리소스 거버넌스.** 메모리 압력에 따라 작업을 단계적으로 멈추고(보고 있는 pane이 가장
+  마지막) 여유가 돌아오면 자동으로 되살립니다. CPU를 독점하는 작업은 양보시키고, 승인 한도는
+  호스트 크기에 맞추며, 프로세스 계량을 네이티브로 옮겨 데몬 자체 부담도 줄였습니다. 에이전트
+  시작은 한꺼번에 몰리지 않고 줄을 섭니다.
+- **분수 DPI에서 선명한 글자.** Windows 125%/150% 배율에서 글자가 번지지 않습니다. 글리프
+  아틀라스를 정수 디바이스 픽셀로 굽고 캔버스 크기를 정확한 몫으로 씁니다. 전체 노트:
+  [RELEASE.md](RELEASE.md).
 
 ## 0.1.4의 새로운 점
 
@@ -358,7 +369,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.4**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.5**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

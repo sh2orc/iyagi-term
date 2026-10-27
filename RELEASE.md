@@ -5,6 +5,61 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.5 — 2026-10-27
+
+Terminals, agents and the daemon itself become a governed resource: memory pressure freezes
+work in stages and revives it automatically, CPU monopolists are made to yield, and process
+accounting is native and cheap. Also: crisp glyphs on fractional-DPR displays (Windows
+125 %/150 %), quota reset times that match provider dashboards, and CI jobs that can no longer
+hang for a day.
+
+### Resource governance
+
+- **Memory pressure freezes work in stages.** When available memory runs low the daemon
+  freezes terminal workloads step by step — heaviest contributors with recent growth first —
+  and starts them again on its own as headroom returns (one every three seconds, with room for
+  what they had resident). The pane you are watching is frozen last and revived first.
+- **CPU monopolists yield.** A workload that sustains more than 80 % of a core group on an
+  otherwise busy host is demoted until it drops under half of that for 30 seconds; a repeat
+  monopolist waits twice as long each time.
+- **Host-sized guard defaults.** Admission limits no longer assume a server: CPU slots are
+  logical cores ÷ 2 and the managed memory budget is a quarter of RAM (clamped to 2–8 GiB).
+- **Native process accounting.** Process enumeration and per-process metering moved off
+  sysinfo's expensive macOS path (which read every process's argv and env twice per sweep and
+  spent more than half the daemon's CPU in kernel time). Memory now counts per-pid footprint —
+  the number Activity Monitor shows — instead of summing shared pages twice.
+- **Cheaper terminal plumbing.** Progress fsyncs are gone, the PTY pump turns only while a view
+  exists, the global journal budget yields fair shares under pressure, and logs are kept for
+  two weeks. Under memory pressure the WebGL renderer is reclaimed and snapshot re-requests
+  back off.
+- **Agent starts queue up.** Restores, "open again" and resume-all start at most three agents
+  at a time (one under pressure), 1.5 s apart.
+
+### Terminal
+
+- **Crisp glyphs on fractional DPI.** On Windows scaling of 125 %/150 % the glyph atlas baked
+  fonts at fractional pixel sizes (13 px × 1.25 = 16.25 px) with no integer hinting, and the
+  CSS canvas size was rounded away from the cell-multiple backing store — together, text
+  looked faintly smeared. The atlas now bakes at integer device pixels and the CSS size is the
+  exact quotient, so every glyph quad lands on whole pixels. Integer-DPR screens (macOS
+  retina) render exactly as before.
+
+### Usage
+
+- **Quota reset times match provider dashboards**, rounded up to the minute.
+
+### Upgrading from 0.1.4
+
+The daemon changes substantially in this release — restart it after upgrading (Settings ›
+General shows when a newer daemon is installed). Restarting ends open terminals; agent
+conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.5_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.5/IYAGI.Term_0.1.5_aarch64.dmg) | `b719fd230848cb689d059e15cb5ff13d4aae8b5dcf9a2367f06b1eac0b449cc1` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.4 — 2026-10-16
 
 A maintenance release: held letter keys repeat on macOS.

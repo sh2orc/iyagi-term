@@ -1067,6 +1067,12 @@ mod tests {
                     json!({"v": 1, "event": "queue.changed", "payload": {"revision": seq}}),
                 )
                 .await;
+                // 실제 데몬은 사건이 생길 때마다 한 장씩 쓴다. 한 번에 몰아치면
+                // current-thread 런타임에서 reader가 소비자보다 먼저 16칸을 전부
+                // 채워 오버플로(=T02의 닫힘)가 되어, "소비가 따라간다"는 이
+                // 시험의 전제가 스케줄링에 좌우된다. 프레임마다 양보해 전제를
+                // 결정적으로 만든다.
+                tokio::task::yield_now().await;
             }
         });
 

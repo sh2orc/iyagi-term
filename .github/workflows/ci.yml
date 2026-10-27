@@ -57,6 +57,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
+# Every job declares a timeout: the 2026-10-15 run burned 24h of self-hosted
+# runner time on jobs that never finished (killed by the run-level ceiling,
+# with their logs unretrievable). A bounded timeout turns the next hang into
+# a failure that keeps its logs instead.
+#
+# The values have generous headroom over the known-good durations — tighten
+# them only with evidence from a green run.
+
 env:
   CARGO_HOME: ${{ github.workspace }}/.cargo
 
@@ -67,9 +75,10 @@ jobs:
   # ---------- Linux (containerized; every ref) ----------
   linux-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: rust:1.89
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # The rust:1.89 image ships only the default components — the fmt/clippy
       # gates below need both added before they can run at all.
       - run: rustup component add rustfmt clippy
@@ -115,10 +124,11 @@ jobs:
   linux-cgroup:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, cgroup-delegated]
+    timeout-minutes: 30
     env:
       IYAGI_CGROUP_REQUIRE_DELEGATION: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Touches a host-delegated cgroup subtree — nothing cached (note 4).
       - run: cargo test -p term-platform --locked linux_cgroup -- --nocapture
 
@@ -126,8 +136,9 @@ jobs:
   windows-check:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, windows]
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: cargo fmt --all --check
       # Same sidecar requirement as linux-check (Tauri build script checks the
       # resource path during clippy/test of the workspace). Separate steps so
@@ -147,8 +158,9 @@ jobs:
   windows-pty-integration:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, windows]
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Test-binary flags go after `--`; cargo itself rejects `--ignored`.
       - run: cargo test -p term-pty --locked conpty -- --ignored
 
@@ -156,8 +168,9 @@ jobs:
   macos-check:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, macos]
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: cargo fmt --all --check
       # Same sidecar requirement as linux-check (Tauri build script checks the
       # resource path during clippy/test of the workspace).
@@ -170,26 +183,38 @@ jobs:
   # ---------- Frontend (containerized; every ref) ----------
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container: node:22
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: npm ci
       - run: npm run typecheck
       # The app ships the committed bundle, not vendor/ source: editing the source
       # without rebuilding silently drops the fix (2026-09-17 audit, vendored webgl).
+      # Compare bytes, not `git diff`: in the node:22 container the workspace is not
+      # visible as a git repository at step time (checkout used git, yet plain git
+      # says "Not a git repository" and dies as `--no-index` usage, exit 129), and a
+      # tarball checkout has no .git at all.
       - name: vendored WebGL addon bundle must match vendor/ source
         run: |
+          cp src/vendor/xterm-addon-webgl/addon-webgl.js /tmp/addon-webgl-committed.js
           npm run build:webgl-addon
-          git diff --exit-code -- src/vendor/xterm-addon-webgl
+          # On drift print the one-line remedy, not the diff: the bundle's lines
+          # are long, and the fix is always the same rebuild-and-commit.
+          cmp --silent /tmp/addon-webgl-committed.js src/vendor/xterm-addon-webgl/addon-webgl.js || {
+            echo "::error::addon-webgl.js drifted from vendor/ source — run npm run build:webgl-addon and commit it"
+            exit 1
+          }
       - run: npm run test:unit
       - run: npm run build:frontend
 
   # ---------- Bundles ----------
   bundle-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: rust:1.89
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # bookworm ships libayatana-appindicator3-dev (libappindicator3-dev is gone).
       - name: Install host deps
         run: >
@@ -216,8 +241,9 @@ jobs:
   bundle-windows:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, windows]
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: npm ci
       - run: npm run tauri build -- --no-bundle
       - uses: actions/upload-artifact@v4
@@ -229,8 +255,9 @@ jobs:
   bundle-macos:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: [self-hosted, macos]
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: npm ci
       - run: npm run tauri build -- --no-bundle
       - uses: actions/upload-artifact@v4

@@ -387,35 +387,46 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn local_probe_bounds_time_output_and_rejects_failed_commands() {
-        for (body, want) in [
-            ("printf 'codex-cli 0.154.0\\n'", Ok("0.154.0".into())),
-            ("printf 'codex-cli 0.154.0\\n' >&2", Ok("0.154.0".into())),
+        // 마감을 기다리는 사례(`sleep 30`)만 좁은 예산을 쓴다 — 시험이 빨리
+        // 끝나야 한다는 의미는 그대로다. 나머지는 즉시 끝나야 하는 사례이지만,
+        // 코어 수만큼 무거운 시험이 병렬로 돌면 2초 예산도 스레드 기아로
+        // 흘러넘친다(TimedOut 오판). 넉넉한 예산을 주고 경과 상한은 예산 +
+        // 여유로 잡아 매달림만 잡는다.
+        let waits_for_deadline = Duration::from_secs(2);
+        let roomy = Duration::from_secs(10);
+        for (body, timeout, want) in [
+            ("printf 'codex-cli 0.154.0\\n'", roomy, Ok("0.154.0".into())),
+            (
+                "printf 'codex-cli 0.154.0\\n' >&2",
+                roomy,
+                Ok("0.154.0".into()),
+            ),
             (
                 "printf 'codex-cli 0.154.0\\n'; exit 1",
+                roomy,
                 Err(ProbeFailure::Failed),
             ),
-            ("sleep 30", Err(ProbeFailure::TimedOut)),
+            ("sleep 30", waits_for_deadline, Err(ProbeFailure::TimedOut)),
             (
                 "sleep 30 & printf 'codex-cli 0.154.0\\n'",
+                waits_for_deadline,
                 Err(ProbeFailure::TimedOut),
             ),
             (
                 "while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done",
+                roomy,
                 Err(ProbeFailure::OutputLimit),
             ),
             (
                 "printf 'not a version'",
+                roomy,
                 Err(ProbeFailure::UnrecognizedVersion),
             ),
         ] {
             let (_dir, path) = script(body);
             let start = std::time::Instant::now();
-            assert_eq!(
-                inspect(&path, RuntimeKind::Codex, Duration::from_secs(2)),
-                want,
-                "{body}"
-            );
-            assert!(start.elapsed() < Duration::from_secs(4), "{body}");
+            assert_eq!(inspect(&path, RuntimeKind::Codex, timeout), want, "{body}");
+            assert!(start.elapsed() < timeout + Duration::from_secs(4), "{body}");
         }
         assert_eq!(
             version("/nonexistent/iyagi-cli", RuntimeKind::Codex),

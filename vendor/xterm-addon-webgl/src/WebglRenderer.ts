@@ -609,13 +609,17 @@ export class WebglRenderer extends Disposable implements IRenderer {
     this.dimensions.device.canvas.height = this._terminal.rows * this.dimensions.device.cell.height;
     this.dimensions.device.canvas.width = this._terminal.cols * this.dimensions.device.cell.width;
 
-    // The the size of the canvas on the page. It's important that this rounds to nearest integer
-    // and not ceils as browsers often have floating point precision issues where
-    // `window.devicePixelRatio` ends up being something like `1.100000023841858` for example, when
-    // it's actually 1.1. Ceiling may causes blurriness as the backing canvas image is 1 pixel too
-    // large for the canvas element size.
-    this.dimensions.css.canvas.height = Math.round(this.dimensions.device.canvas.height / this._devicePixelRatio);
-    this.dimensions.css.canvas.width = Math.round(this.dimensions.device.canvas.width / this._devicePixelRatio);
+    // 화면에서의 캔버스 크기. 업스트림은 정수로 반올림하지만(올림은 백퍼 이미지가 요소보다 1px
+    // 커져 흐려지므로), 그 반올림 자체가 분수 DPR(Windows 125%/150%)에서 흐림을 만든다:
+    // 반올림된 CSS 크기의 실제 디바이스 박스는 셀 배수 백퍼 스토어와 어긋나고,
+    // DevicePixelObserver가 관찰된 박스로 백퍼를 다시 맞추면(_setCanvasDevicePixelDimensions)
+    // 글리프 피치가 observed/cols — 소수 디바이스 픽셀이 되어 모든 글리프 쿼드가 서브픽셀로
+    // 찍힌다. 정수 몫 대신 정확한 몫을 쓰면 요소 박스가 백퍼 스토어에 정확히 겹치고(컴포지터
+    // 1:1 블릿) devicePixelContentBoxSize가 셀 배수를 그대로 보고해 관찰자도 발화하지 않는다.
+    // devicePixelRatio의 부동소수점 잡음(1.100000023841858 vs 1.1)은 박스를 1e-6 css px
+    // 수준으로만 움직이므로 디바이스 픽셀 격자가 흡수한다.
+    this.dimensions.css.canvas.height = this.dimensions.device.canvas.height / this._devicePixelRatio;
+    this.dimensions.css.canvas.width = this.dimensions.device.canvas.width / this._devicePixelRatio;
 
     // Get the CSS dimensions of an individual cell. This needs to be derived from the calculated
     // device pixel canvas value above. CharMeasure.width/height by itself is insufficient when the

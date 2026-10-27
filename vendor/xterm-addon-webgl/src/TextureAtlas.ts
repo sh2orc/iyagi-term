@@ -541,8 +541,11 @@ export class TextureAtlas implements ITextureAtlas {
     // draw the foreground/glyph
     const fontWeight = bold ? this._config.fontWeightBold : this._config.fontWeight;
     const fontStyle = italic ? 'italic' : '';
+    // 글리프는 정수 디바이스 픽셀 크기로 구운다. 분수 크기(예: 13px × 1.25 = 16.25px,
+    // Windows 125% 배율)는 정수 픽셀 힌팅이 걸리지 않아 아틀라스 글리프 전체가 물러 보인다.
+    // DPR 2(망망)에서는 원래 정수라 결과가 달라지지 않는다.
     this._tmpCtx.font =
-      `${fontStyle} ${fontWeight} ${this._config.fontSize * this._config.devicePixelRatio}px ${this._config.fontFamily}`;
+      `${fontStyle} ${fontWeight} ${Math.round(this._config.fontSize * this._config.devicePixelRatio)}px ${this._config.fontFamily}`;
     this._tmpCtx.textBaseline = TEXT_BASELINE;
 
     const powerlineGlyph = chars.length === 1 && isPowerlineGlyph(chars.charCodeAt(0));

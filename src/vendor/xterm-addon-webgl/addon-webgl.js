@@ -3476,7 +3476,7 @@ var TextureAtlas = class _TextureAtlas {
     this._tmpCtx.globalCompositeOperation = "source-over";
     const fontWeight = bold ? this._config.fontWeightBold : this._config.fontWeight;
     const fontStyle = italic ? "italic" : "";
-    this._tmpCtx.font = `${fontStyle} ${fontWeight} ${this._config.fontSize * this._config.devicePixelRatio}px ${this._config.fontFamily}`;
+    this._tmpCtx.font = `${fontStyle} ${fontWeight} ${Math.round(this._config.fontSize * this._config.devicePixelRatio)}px ${this._config.fontFamily}`;
     this._tmpCtx.textBaseline = TEXT_BASELINE;
     const powerlineGlyph = chars.length === 1 && isPowerlineGlyph(chars.charCodeAt(0));
     const restrictedPowerlineGlyph = chars.length === 1 && isRestrictedPowerlineGlyph(chars.charCodeAt(0));
@@ -6846,8 +6846,8 @@ var WebglRenderer = class extends Disposable {
     this.dimensions.device.char.left = Math.floor(this._optionsService.rawOptions.letterSpacing / 2);
     this.dimensions.device.canvas.height = this._terminal.rows * this.dimensions.device.cell.height;
     this.dimensions.device.canvas.width = this._terminal.cols * this.dimensions.device.cell.width;
-    this.dimensions.css.canvas.height = Math.round(this.dimensions.device.canvas.height / this._devicePixelRatio);
-    this.dimensions.css.canvas.width = Math.round(this.dimensions.device.canvas.width / this._devicePixelRatio);
+    this.dimensions.css.canvas.height = this.dimensions.device.canvas.height / this._devicePixelRatio;
+    this.dimensions.css.canvas.width = this.dimensions.device.canvas.width / this._devicePixelRatio;
     this.dimensions.css.cell.height = this.dimensions.device.cell.height / this._devicePixelRatio;
     this.dimensions.css.cell.width = this.dimensions.device.cell.width / this._devicePixelRatio;
   }

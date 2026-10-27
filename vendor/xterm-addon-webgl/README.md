@@ -50,6 +50,27 @@ WKWebView(Tauri)에서 한글·색이 많은 TUI 출력(Claude Code 등)을 오�
 `resize`), 그리고 쓰이지 않게 된 import를 지웠다. 링크 레이어는 글리프를 그리지 않으므로 렌더링 결과는
 같다. 업스트림을 올릴 때 이 수정이 들어갔는지 따로 확인해야 한다.
 
+**분수 DPR(Windows 125%/150% 배율)에서 글자가 옅게 번져 보이던 두 군데.**
+
+정수 DPR 화면(macOS 망망 2, 배율 100%)에서는 아래 두 경로가 처음부터 무해해 증상이 없었다 — Windows에서만
+"텍스트가 약간 깨지듯이" 보이는 것과 정확히 대응한다. 업스트림에는 이 조합의 원인 분석이 없다(#2033이
+WebGL 렌더러 추적 이슈).
+
+1. `WebglRenderer._updateDimensions()`가 CSS 캔버스 크기를 **정수로 반올림**한다. 분수 DPR에서는
+   `셀 배수 백퍼 / dpr`이 소수(예: 1188/1.25 = 950.4)인 경우가 흔한데, 반올림된 CSS 크기의 실제 디바이스
+   박스는 백퍼 스토어와 어긋난다. 그러면 `DevicePixelObserver`(`devicePixelContentBoxSize`)가 관찰된 박스로
+   백퍼를 다시 맞추고(`_setCanvasDevicePixelDimensions`), 글리프를 찍는 정점은 `관찰된 폭 / cols` 피치 —
+   **소수 디바이스 픽셀** — 로 놓이며 LINEAR 텍스처 샘플링으로 모든 글리프가 살짝 번진다. 반올림 대신 정확한
+   몫 `device / dpr`을 CSS 크기로 쓴다: 요소 박스가 백퍼와 정확히 겹치고(컴포지터 1:1 블릿),
+   `devicePixelContentBoxSize`가 셀 배수를 그대로 보고해 관찰자 자체가 발화하지 않게 된다.
+   `devicePixelRatio`의 부동소수점 잡음(1.100000023841858 vs 1.1)은 박스를 1e-6 css px 수준으로만 움직여
+   디바이스 픽셀 격자가 흡수한다 — 업스트림 주석이 걱정하던 정밀도 문제와는 다른 자릿수다.
+2. 아틀라스가 글리프를 `fontSize × dpr` px로 구운다. 분수 DPR에서는 16.25px·19.5px 같은 **분수 폰트
+   크기**가 되어 정수 픽셀 힌팅이 걸리지 않고, 아틀라스 글리프 전체가 물러 구워진다(텍스처 LINEAR 샘플링이
+   한 번 더 흐리게 한다). `Math.round(fontSize × dpr)`로 정수 디바이스 픽셀 크기로 구운다 — 잉크 크기 차이는
+   ≤0.5 디바이스 픽셀(~3%)이고, 아틀라스 공유 판정(`configEquals`)은 `fontSize`·`devicePixelRatio`를 따로
+   비교하므로 영향받지 않는다.
+
 ## 다시 묶기
 
 ```sh

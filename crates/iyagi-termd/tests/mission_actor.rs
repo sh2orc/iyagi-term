@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::{Duration, Instant},
 };
 use term_contracts::{ids::ConnectionId, mission::types::*};
@@ -77,6 +77,54 @@ mod mission_usability;
 fn git(path: &Path, args: &[&str]) -> String {
     iyagi_termd_lib::workspace::git::run_git_for_test(path, args)
 }
+
+/// 미션 시험 하나가 게이트 helper(iyagi-termd 바이너리)·git·검증 exec 같은 실제
+/// 프로세스를 몰아 띄운다. libtest는 논리 코어 수만큼 시험을 병렬로 돌려서,
+/// 코어가 많은 개발 호스트에서는 스폰 폭풍이 서로를 밀어낸다 — 마감을 코어
+/// 수에 맞춰 늘려도(load 14에서 45초도 모자랐다) 느림이 판정을 흔들 뿐이다.
+/// 동시 4개(4스레드 전수 통과 지점, 115초)면 이 묶음은 충분히 포화한다: Rig을
+/// 만들 때 허가를 얻고 Drop에 돌려준다. 같은 스레드에서 허가를 이미 쥔 시험이
+/// 안쪽에 또 Rig을 만들면 겹쳐 잡지 않는다(교찰 없음).
+static RIG_PERMITS: (Mutex<u32>, Condvar) = (Mutex::new(4), Condvar::new());
+
+thread_local! {
+    static RIG_PERMIT_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+struct RigPermit {
+    /// `false`면 안쪽 Rig — 겹친 허가가 아니므로 돌려줄 것도 없다.
+    held: bool,
+}
+
+impl Drop for RigPermit {
+    fn drop(&mut self) {
+        if self.held {
+            // Rig을 만든 스레드와 drop하는 스레드가 다를 수 있다(Send라 워커로
+            // 넘어갈 수 있음). 그 스레드의 깊이는 0이라 포화 감산으로만 맞춘다 —
+            // 계정이 어긋나면 그 스레드의 이후 Rig이 허가 없이 지나갈 뿐, 언더
+            // 플로 패닉으로 시험 전체를 죽이지는 않는다.
+            RIG_PERMIT_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+            let (lock, cvar) = &RIG_PERMITS;
+            *lock.lock().unwrap_or_else(|p| p.into_inner()) += 1;
+            cvar.notify_one();
+        }
+    }
+}
+
+fn acquire_rig_permit() -> RigPermit {
+    let held = !RIG_PERMIT_DEPTH.with(|depth| depth.get() > 0);
+    if held {
+        RIG_PERMIT_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        let (lock, cvar) = &RIG_PERMITS;
+        let mut free = lock.lock().unwrap_or_else(|p| p.into_inner());
+        while *free == 0 {
+            free = cvar.wait(free).unwrap_or_else(|p| p.into_inner());
+        }
+        *free -= 1;
+    }
+    RigPermit { held }
+}
+
 struct Rig {
     dir: tempfile::TempDir,
     repo: tempfile::TempDir,
@@ -85,6 +133,9 @@ struct Rig {
     conn: ConnectionId,
     id: Id,
     base: String,
+    /// 이 Rig이 산 동안 붙잡는 동시 허가(see [`acquire_rig_permit`]) — 다른
+    /// 필드 정리가 끝난 뒤 풀리도록 마지막에 선언한다.
+    _permit: RigPermit,
 }
 impl Rig {
     fn new(automatic: bool, command_argv: &[&str]) -> Self {
@@ -99,6 +150,8 @@ impl Rig {
         recover_unsent: bool,
         clock: Option<Arc<dyn Fn() -> Instant + Send + Sync>>,
     ) -> Self {
+        // 모든 생성 경로가 지나는 깔때기이므로 여기서 동시 허가를 얻는다.
+        let _permit = acquire_rig_permit();
         let dir = tempfile::tempdir().unwrap();
         let repo = tempfile::tempdir().unwrap();
         git(repo.path(), &["init", "-q"]);
@@ -188,6 +241,7 @@ impl Rig {
             conn,
             id,
             base,
+            _permit,
         }
     }
     fn snapshot(&self) -> workflow::MissionEntities {
@@ -205,7 +259,12 @@ impl Rig {
         actor: &mut MissionActor,
         predicate: impl Fn(&workflow::MissionEntities) -> bool,
     ) {
-        let until = Instant::now() + Duration::from_secs(15);
+        // 미션 시험은 게이트 helper(iyagi-termd 바이너리)·git·검증 exec 같은 실제
+        // 프로세스를 띄운다. 동시 상한(RIG_PERMITS)이 있어도 바깥 부하까지 겹치면
+        // 15초 안에 끝나지 않을 수 있다 — 느릴 뿐 멈춘 것은 아니다. 정지 판정은
+        // 그대로 두고 기한만 넉넉한 상수로 잡는다(코어 수로 스케일하던 적도 있었
+        // 지만 상한이 동시성을 묶은 뒤로는 정지 감지만 늦출 뿐이다).
+        let until = Instant::now() + Duration::from_secs(45);
         while Instant::now() < until {
             actor.tick().unwrap();
             let snapshot = self.snapshot();
@@ -1780,7 +1839,9 @@ async fn durable_exec_store_and_native_gate_run_together_with_real_owned_artifac
             helper_program: daemon,
             directory: gate_dir.path().into(),
             platform: Arc::from(term_platform::group::select_backend()),
-            timeout: Duration::from_secs(5),
+            // 게이트 핸드셰이크 기한: 병렬 시험 폭풍에서 helper 기동이 밀려도
+            // 실패가 아니라 느림으로만 보이게 넉넉히 잡는다.
+            timeout: Duration::from_secs(15),
         },
     );
     let marker = rig.dir.path().join("target-ran");

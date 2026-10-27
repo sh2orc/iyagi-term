@@ -23,7 +23,9 @@ pub(super) fn supervisor(rig: &Rig, service: &Arc<MissionService>) -> Arc<ExecSu
             helper_program: env!("CARGO_BIN_EXE_iyagi-termd").into(),
             directory: rig.dir.path().join("gates"),
             platform: Arc::from(term_platform::group::select_backend()),
-            timeout: Duration::from_secs(5),
+            // 게이트 핸드셰이크 기한: 병렬 시험 폭풍에서 helper 기동이 밀려도
+            // 실패가 아니라 느림으로만 보이게 넉넉히 잡는다.
+            timeout: Duration::from_secs(15),
         },
     ))
 }

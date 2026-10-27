@@ -330,6 +330,9 @@ fn excluding_a_prior_input_rebuilds_repair_work_and_checks_after_integration() {
         .with_deterministic_exec(supervisor.clone(), runtime.handle().clone());
     conflict(&rig, &mut worker);
     choose(&rig, "resolve_and_reintegrate");
+    // 느린 러너(CI)에서는 첫 검증 exec가 아직 기록 전일 수 있다 — 아래 단정이
+    // "이미 1개"를 가정하므로 결정론적으로 기다렸다가 다음 충돌로 간다.
+    rig.tick_until(&mut worker, |s| s.verifications.len() == 1);
     // The reviewed candidate needs a repair. Replaying the original sources
     // conflicts again; now exclusion must invalidate the repair's base too.
     conflict(&rig, &mut worker);

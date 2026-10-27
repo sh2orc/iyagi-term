@@ -262,13 +262,31 @@ fn oversized_managed_request_is_fitted_to_the_host_not_refused() {
 
 #[test]
 fn oversized_managed_request_starts_with_the_headroom_the_host_has() {
-    // 예산을 메모리 전체로 넓힌 호스트(relaxed)에서 1 PiB 요청: 예산 전체로 맞추면 여유
-    // 검사가 "가용 메모리 ≥ 전체 메모리"를 요구해 대기열에서 영영 나오지 못한다. 지금의
-    // 여유만큼으로 맞춰 곧바로 시작해야 한다.
-    let daemon = DaemonProc::spawn(
-        "launch-managed-fit-headroom",
-        Some(common::relaxed_admission(json!({}))),
+    // 1 PiB 요청: 예산 전체로 맞추면 여유 검사가 "가용 ≥ 예산"을 요구해 대기열에서
+    // 영영 나오지 못한다. 지금의 여유(A - S - P)만큼으로 맞춰 곧바로 시작해야 한다.
+    // 다만 맞춤에는 "예산의 절반 아래로는 줄이지 않고 그만큼 여유가 생길 때까지
+    // 기다린다"는 바닥이 있어, 예산을 메모리 전체(100%)로 두면 여유가 절반 미만인
+    // 호스트에서는 바닥이 여유보다 커져 이 시험 자체가 호스트 가용 상태에 좌우된다.
+    // 예산을 "측정한 여유의 바로 위"(여유 < 예산, 예산/2 ≈ 여유의 절반)로 잡으면
+    // 바닥이 여유 아래로 내려오므로 "지금의 여유로 맞춰 시작한다"를 결정적으로
+    // 검증한다. 예산/2 ≈ 여유/2이므로 시험이 데몬을 띄우는 사이 가용이 절반으로
+    // 내려앉아도 견딘다(1.5배 예산이던 초안은 25% 하락까지만 견뎠다).
+    let mut sampler = term_platform::telemetry::TelemetrySampler::new(std::sync::Arc::new(
+        term_platform::telemetry::SystemClock::new(),
+    ));
+    let host = sampler.poll_host_now();
+    let total = host.total_bytes().expect("host total");
+    let available = host.available_bytes().expect("host available");
+    // 예산 최소 단위가 1%라 가용이 전체의 2% 이하로 내려가면 바닥(예산/2)과
+    // 여유 사이 마진이 희박해진다 — 그만큼 다급한 호스트는 이 시험의 전제 밖이다.
+    assert!(
+        available > total / 50,
+        "host too exhausted for this spec: {total} {available}"
     );
+    let percent = (available * 100 / total + 1).clamp(1, 100);
+    let mut config = common::relaxed_admission(json!({}));
+    config["admission"]["managed_budget_percent"] = json!(percent);
+    let daemon = DaemonProc::spawn("launch-managed-fit-headroom", Some(config));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
     let outcome = control
         .request(

@@ -23,6 +23,7 @@ import {
 } from "../features/terminal/xtermSetup";
 import { createIndexedDbSnapshotStore } from "../features/terminal/replaySnapshot";
 import { resolveTheme, startThemeSync, systemPrefersLight, type ResolvedTheme } from "./theme";
+import { revealTabScroll } from "./tabReveal";
 import { usePreferences } from "../store/preferences";
 import { currentPlatform, detectPlatform, mapShortcut, shortcutHint, type Platform, type ShortcutContext } from "../features/terminal/shortcuts";
 import { isNativePasteKey, terminalLeafIdOf } from "../features/terminal/nativePaste";
@@ -123,6 +124,9 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
   // 인덱스로 방향을 정한다.
   const splitScrollRef = useRef<HTMLDivElement>(null);
   const prevTabIndexRef = useRef<number | null>(null);
+  // 상단 탭 막대(nav.tab-bar). 활성 탭이 가려져 있으면 최소한으로 말아서
+  // 화면 안에 들어오게 한다(아래 useEffect).
+  const tabBarRef = useRef<HTMLElement | null>(null);
   // xterm이 앱 단축키 조합을 소비하지 않게 하는 필터(design §10).
   // ref로 전달해 registry/factory 신원을 유지한다.
   const consumeKeyRef = useRef<(event: KeyboardEvent) => boolean>(() => true);
@@ -577,6 +581,32 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
     });
   }, [pageOpen]);
 
+  // 활성 탭이 바뀌면(스와이프 순환·이동·닫기 뒤 인접 선택 포함) 탭 막대를
+  // 최소한으로 말아서 그 탭이 화면 안에 보이게 한다. 스와이프로 가려진 쪽
+  // 탭까지 넘어가면 활성 탭이 막대 밖에 있는 채로 끝나던 것을 고친다.
+  // 보이는 중이면 scrollLeft를 건드리지 않는다 — 터치패드로 밀어 둔 위치를
+  // 흔들지 않는다.
+  useEffect(() => {
+    const bar = tabBarRef.current;
+    const tab =
+      bar && !pageOpen && activeTabId !== null
+        ? bar.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeTabId)}"]`)
+        : null;
+    if (!bar || !tab) return;
+    // offsetLeft의 기준은 offsetParent다 — .tab-bar가 정적 배치라 기준이
+    // body가 되어 top-bar의 패딩만큼 어긋난다. rect 차이 + scrollLeft로
+    // 막대 콘텐츠 좌표를 직접 잰다(스무스 스크롤 도중에도 불변인 값).
+    const tabRect = tab.getBoundingClientRect();
+    const barRect = bar.getBoundingClientRect();
+    const target = revealTabScroll(
+      { scrollLeft: bar.scrollLeft, clientWidth: bar.clientWidth },
+      { offsetLeft: tabRect.left - barRect.left + bar.scrollLeft, offsetWidth: tabRect.width },
+    );
+    if (target !== null) {
+      bar.scrollTo({ left: target, behavior: "smooth" });
+    }
+  }, [activeTabId, tabs, pageOpen]);
+
   // 활성 탭이 바뀌면 들어오는 탭에 슬라이드+페이드를 건다. 방향은 인덱스
   // 변화로, on/off·모션 최소화는 설정·CSS가 정한다. 리마운트 없이 같은
   // 요소에서 애니메이션을 재시작한다(none → 리플로 → 원복).
@@ -600,7 +630,7 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
     <ControllerContext.Provider value={controller}>
       <div className="workbench" ref={workbenchRef} style={{ display: pageOpen ? "none" : undefined }}>
         <header className="top-bar">
-          <nav className="tab-bar" aria-label={i18n.t("app.aria.tabs")}>
+          <nav className="tab-bar" ref={tabBarRef} aria-label={i18n.t("app.aria.tabs")}>
             {tabs.map((tab, index) => (
               <LiveTabItem
                 key={tab.id}

@@ -269,7 +269,7 @@ fn integration_conflict_without_an_integrator_offers_no_integrator_resolution() 
         .enable_all()
         .build()
         .unwrap();
-    let supervisor = super::mission_verification_exec::supervisor(&rig, &rig.service);
+    let supervisor = super::exec_supervisor::supervisor(&rig, &rig.service);
     supervisor.refresh_recovery().unwrap();
     let factory: AdapterFactory = Arc::new(|run| {
         let ctx = context(run);
@@ -439,7 +439,7 @@ fn attestation_releases_only_runs_no_daemon_can_observe_and_stays_distinguishabl
     ));
     #[cfg(unix)]
     let supervisor = {
-        let supervisor = super::mission_verification_exec::supervisor(&rig, &restarted);
+        let supervisor = super::exec_supervisor::supervisor(&rig, &restarted);
         assert_eq!(
             supervisor.refresh_recovery().unwrap(),
             1,

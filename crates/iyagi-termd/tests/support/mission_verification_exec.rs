@@ -1,34 +1,6 @@
+use super::exec_supervisor::supervisor;
 use super::*;
-use iyagi_termd_lib::exec::{gated::GateConfig, ExecSupervisor};
-
-pub(super) fn supervisor(rig: &Rig, service: &Arc<MissionService>) -> Arc<ExecSupervisor> {
-    Arc::new(ExecSupervisor::persistent(
-        term_core::AdmissionConfig {
-            logical_cpus: 8,
-            managed_concurrency: 2,
-            telemetry_stale_ms: 3000,
-            host_reserve_min_bytes: 2 << 30,
-            host_reserve_percent: 15,
-            managed_budget_percent: 50,
-        },
-        service.exec_persistence(),
-        term_core::AdmissionHost {
-            total_bytes: 16 << 30,
-            available_bytes: Some(12 << 30),
-            sample_age_ms: 0,
-            reconciliation_required: false,
-            pressure: term_contracts::metrics::PressureLevel::Normal,
-        },
-        GateConfig {
-            helper_program: env!("CARGO_BIN_EXE_iyagi-termd").into(),
-            directory: rig.dir.path().join("gates"),
-            platform: Arc::from(term_platform::group::select_backend()),
-            // 게이트 핸드셰이크 기한: 병렬 시험 폭풍에서 helper 기동이 밀려도
-            // 실패가 아니라 느림으로만 보이게 넉넉히 잡는다.
-            timeout: Duration::from_secs(15),
-        },
-    ))
-}
+use iyagi_termd_lib::exec::ExecSupervisor;
 
 fn actor(rig: &Rig) -> (tokio::runtime::Runtime, Arc<ExecSupervisor>, MissionActor) {
     let runtime = tokio::runtime::Builder::new_multi_thread()

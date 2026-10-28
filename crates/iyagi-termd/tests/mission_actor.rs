@@ -41,15 +41,25 @@ mod mission_plan_repair;
 #[path = "support/mission_required_repair.rs"]
 mod mission_required_repair;
 
-#[cfg(unix)]
+// 이 둘은 실제 검증 exec를 돌린다 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec에 기대하므로 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). Linux CI에서 이 모듈들이 통째로 빨간 것은 회귀가 아니라 설계
+// 경계다: macOS 게이트로 두고 Linux는 컴파일에서 뺀다. 픽스처는 어느 OS에서나
+// 쓰는 모듈(exec_supervisor)로 옮겨 두었다.
+#[cfg(all(unix, target_os = "macos"))]
 #[path = "support/mission_verification_exec.rs"]
 mod mission_verification_exec;
 
-#[cfg(unix)]
+#[cfg(all(unix, target_os = "macos"))]
 #[path = "support/mission_integration_exec.rs"]
 mod mission_integration_exec;
 
-#[cfg(unix)]
+#[path = "support/exec_supervisor.rs"]
+mod exec_supervisor;
+
+// git 스탠드인도 위 두 모듈만 쓴다 — 같이 게이트하지 않으면 Linux에서
+// dead_code 경고(clippy -D warnings)로 남는다.
+#[cfg(all(unix, target_os = "macos"))]
 #[path = "support/git_barrier.rs"]
 mod git_barrier;
 

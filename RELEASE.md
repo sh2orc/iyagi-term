@@ -5,6 +5,40 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.6 — 2026-10-28
+
+A small interface release: the tab bar keeps the group you switched to in view, and mission
+test suites no longer paint Linux CI red where the platform simply does not support them.
+
+### Terminal
+
+- **The tab bar reveals the group you swipe to.** A two-finger swipe can land on a group whose
+  tab sits outside the visible part of the tab bar — the bar used to stay put, so repeated
+  swipes in one direction ended on an active group you could not see. The bar now scrolls the
+  minimum needed to bring it in (6 px of breathing room), measured in the bar's own content
+  coordinates so the reveal lands exactly where intended. A group that is already visible is
+  never nudged — a position you pushed with the trackpad is left alone — and changes that
+  happen while the workbench is hidden (settings, layout editor) can no longer reset it.
+
+### Tests
+
+- The mission verification/integration exec suites now compile only on macOS, where the
+  sandbox-exec isolation they exercise exists. On Linux CI they used to show as failures — a
+  platform boundary, not a regression. Their shared `ExecSupervisor` fixture moved to
+  `exec_supervisor.rs` so every OS can still use it.
+
+### Upgrading from 0.1.5
+
+The daemon is unchanged apart from its version number. Settings › General will say a newer
+daemon is installed; restarting it is optional. Restarting ends open terminals; agent
+conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.6_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.6/IYAGI.Term_0.1.6_aarch64.dmg) | `1ae3f0fa2efe29f7ab45fabe2fb3e16a2715011c676802b562088c38dde1e413` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.5 — 2026-10-27
 
 Terminals, agents and the daemon itself become a governed resource: memory pressure freezes

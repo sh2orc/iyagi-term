@@ -27,11 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.5](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.5)** (2026-10-27) —
-terminals, agents and the daemon become a governed resource: memory pressure freezes work in
-stages and revives it automatically, CPU monopolists yield, and process accounting is native
-and cheap. Glyphs are crisp on fractional-DPI displays (Windows 125 %/150 %).
-See [what's new](#whats-new-in-015).
+**Latest: [0.1.6](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.6)** (2026-10-28) —
+a small release: swiping to a group whose tab is scrolled out of the tab bar now scrolls the
+bar just enough to show it, without disturbing a position you pushed yourself.
+See [what's new](#whats-new-in-016).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -41,12 +40,12 @@ See [what's new](#whats-new-in-015).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.5_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.5/IYAGI.Term_0.1.5_aarch64.dmg) | 17 MB | `b719fd230848cb689d059e15cb5ff13d4aae8b5dcf9a2367f06b1eac0b449cc1` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.6_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.6/IYAGI.Term_0.1.6_aarch64.dmg) | 18 MB | `1ae3f0fa2efe29f7ab45fabe2fb3e16a2715011c676802b562088c38dde1e413` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.5_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.6_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -81,6 +80,13 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.6
+
+- **The tab bar reveals the group you swipe to.** A two-finger swipe to a group scrolled out
+  of the tab bar now scrolls the bar just enough to bring it into view — and leaves the
+  position untouched when the group is already visible. Full notes:
+  [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.5
 
@@ -393,7 +399,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.5** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.6** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

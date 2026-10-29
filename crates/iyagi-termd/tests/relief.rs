@@ -33,6 +33,27 @@ fn always_critical() -> Value {
     }))
 }
 
+/// 이 백엔드가 스케줄링 양보를 지원하는가? 아니면 침묵히 건너뛴다.
+///
+/// Linux에서 yield는 쓰기 가능한 cgroup v2 위임이 있는 호스트에서만
+/// "supported"다. 이 파일의 시험은 양보 능력을 가정하므로, 위임 없는 평범한
+/// 컨테이너(linux-check)에서는 skip한다 — 위임 러너의 실제 cgroup 경로는
+/// linux-cgroup 잡이 증명한다. guard.rs의 suspend_resume 건너뛰기와 같은
+/// 관례다.
+fn yield_supported(control: &mut Client) -> bool {
+    let caps = control
+        .request("system.snapshot", json!({}))
+        .expect("snapshot");
+    if caps["capabilities"]["scheduling_yield"]["support"].as_str() != Some("supported") {
+        eprintln!(
+            "SKIP: scheduling_yield unsupported ({:?})",
+            caps["capabilities"]["scheduling_yield"]
+        );
+        return false;
+    }
+    true
+}
+
 /// 살아 있는 셸 하나(`echo` 픽스처는 stdin을 기다린다).
 fn live_shell(control: &mut Client) -> (Value, String) {
     let launch = control
@@ -150,6 +171,9 @@ fn cleanup(control: &mut Client, workloads: &[&Value]) {
 fn pressure_yields_the_unfocused_session_and_spares_the_focused_one() {
     let daemon = DaemonProc::spawn("relief-yield", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    if !yield_supported(&mut control) {
+        return;
+    }
 
     let (focused_w, focused_s) = live_shell(&mut control);
     let (background_w, _background_s) = live_shell(&mut control);
@@ -188,6 +212,9 @@ fn pressure_yields_the_unfocused_session_and_spares_the_focused_one() {
 fn a_manual_restore_undoes_the_yield_and_is_not_re_yielded_under_pressure() {
     let daemon = DaemonProc::spawn("relief-manual-restore", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    if !yield_supported(&mut control) {
+        return;
+    }
 
     let (workload, session) = live_shell(&mut control);
     wait_relief(&mut control, &workload, "YIELDED", SETTLE);
@@ -226,6 +253,9 @@ fn a_manual_restore_undoes_the_yield_and_is_not_re_yielded_under_pressure() {
 fn focusing_a_yielded_session_restores_it() {
     let daemon = DaemonProc::spawn("relief-focus-restore", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    if !yield_supported(&mut control) {
+        return;
+    }
 
     let (keep, keep_session) = live_shell(&mut control);
     let (target, target_session) = live_shell(&mut control);
@@ -257,6 +287,9 @@ fn manual_yield_and_protect_work_without_any_pressure() {
         )),
     );
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    if !yield_supported(&mut control) {
+        return;
+    }
     let (workload, session) = live_shell(&mut control);
 
     let result = control
@@ -316,6 +349,10 @@ fn manual_yield_and_protect_work_without_any_pressure() {
 fn turning_auto_yield_off_stops_automatic_yields() {
     let daemon = DaemonProc::spawn("relief-policy", Some(always_critical()));
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
+    // 가드가 능력을 확인한다(불가 시 capabilities를 찍고 건너뛴다).
+    if !yield_supported(&mut control) {
+        return;
+    }
 
     let snapshot = control
         .request("system.snapshot", json!({}))
@@ -323,11 +360,6 @@ fn turning_auto_yield_off_stops_automatic_yields() {
     assert_eq!(
         snapshot["relief_policy"]["auto_yield"], true,
         "기본값은 켜짐(defaults.json relief.auto_yield)"
-    );
-    assert_eq!(
-        snapshot["capabilities"]["scheduling_yield"]["support"], "supported",
-        "이 플랫폼은 양보를 적용하고 되돌릴 수 있다: {}",
-        snapshot["capabilities"]
     );
 
     let policy = control

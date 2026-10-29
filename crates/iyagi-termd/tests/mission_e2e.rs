@@ -480,36 +480,71 @@ fn eventually<F: FnMut() -> Option<T>, T>(mut probe: F, timeout: Duration) -> Op
 /// Only model inference is deterministic; no task/run/candidate projections
 /// are injected by the test. This does not claim installed CLI compatibility.
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn actor_goal_to_acceptance_over_real_daemon_git_and_protocol_processes() {
     run_protocol_pipeline(PipelineScenario::Standard);
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn failed_plan_recovers_by_explicit_decision_over_real_daemon_and_protocol_processes() {
     run_protocol_pipeline(PipelineScenario::FailedPlan);
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn cost_budget_holds_paid_work_then_policy_expansion_completes_over_real_daemon() {
     run_protocol_pipeline(PipelineScenario::CostHold);
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn provider_reset_holds_builders_then_automatically_completes_over_real_daemon() {
     run_protocol_pipeline(PipelineScenario::RateLimit);
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn unsubmitted_transient_failure_retries_and_completes_over_real_daemon() {
     run_protocol_pipeline(PipelineScenario::TransientStart);
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn rejected_plan_is_corrected_with_its_diagnostic_over_real_daemon() {
     run_protocol_pipeline(PipelineScenario::PlanFormat);
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn required_worker_failure_gets_a_lead_replacement_over_real_daemon() {
     run_protocol_pipeline(PipelineScenario::RequiredRepair);
 }
@@ -557,6 +592,9 @@ fn integration_survives_daemon_crash_and_is_stopped_by_recovered_ownership() {
     run_protocol_pipeline(PipelineScenario::IntegrationRestart);
 }
 
+// Linux에서는 검증 완료 시나리오를 만드는 래퍼들이 macOS로 게이트되어 일부
+// variants가 "never constructed"로 보인다 — macOS에서는 전부 쓰인다.
+#[allow(dead_code)]
 enum PipelineScenario {
     Standard,
     FailedPlan,
@@ -574,6 +612,11 @@ enum PipelineScenario {
 }
 
 #[test]
+// 검증 완료(수용)까지 이르는 시나리오 — 검증 격리(verification_isolation)가
+// macOS의 sandbox-exec 전용이라 다른 OS에선 지원되지 않는다(Capability
+// Unsupported). 완료 전에 실패하는 시나리오(RequiredExhausted)와 재시작·
+// 복구 계열은 Linux에서도 돈다.
+#[cfg(target_os = "macos")]
 fn conflict_integrator_finishes_over_real_daemon_and_provider_execs() {
     run_protocol_pipeline(PipelineScenario::IntegrationConflict);
 }

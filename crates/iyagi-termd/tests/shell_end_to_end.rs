@@ -269,7 +269,10 @@ fn session_input_reports_write_completion() {
     let daemon = DaemonProc::spawn("input-complete", None);
     let (mut control, _) = Client::control(&daemon.endpoint, &daemon.token);
 
-    let req = shell_launch(&common::fixture_bin(), &["--hold-ms", "3000"]);
+    // 살아 있는 echo 픽스처여야 입력 큐가 열려 있다 — `--hold-ms`는 픽스처
+    // CLI의 최상위 인자가 아니라 즉시 exit 2로 죽고, 데몬보다 RPC가 먼저
+    // 도착하는지에 걸린 race였다(느린 CI 컨테이너에서 진다).
+    let req = shell_launch(&common::fixture_bin(), &["echo"]);
     let outcome = control
         .request("workload.launch", req)
         .expect("launch fixture");

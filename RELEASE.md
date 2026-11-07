@@ -5,6 +5,49 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.7 — 2026-11-07
+
+A small renderer release: long sessions in the WebGL renderer no longer pick up stray glyph
+fragments after the glyph atlas is cleared, and a frame that cannot settle on a stable atlas
+hands the pane to the DOM renderer instead of painting stale coordinates.
+
+### Terminal
+
+- **Clearing the glyph atlas clears every page.** The vendored WebGL addon decided that the
+  atlas was already empty by looking only at the first page's write cursor. After a page merge
+  that cursor can sit at the origin while other pages still hold glyphs, so a clear could be
+  skipped and those glyphs later drawn from stale page numbers — fragments of other glyphs in
+  long, colourful TUI sessions. Every page is now checked, and each page's glyph list and
+  usage are reset together with its cursor.
+- **Invisible cells restore the canvas state.** Rasterizing an invisible cell returned before
+  restoring the 2D context state it had saved, so the save stack grew with every such cell.
+  That path now restores it too.
+- **An unstable frame falls back instead of painting stale coordinates.** When the atlas page
+  layout keeps changing while one frame is built and the retry limit (32) is reached, the
+  renderer used to draw anyway with coordinates that could point at the wrong page. It now
+  retires that renderer through the existing context-loss path: the pane switches to the DOM
+  renderer and WebGL is recreated shortly after.
+
+### Tests
+
+- Daemon integration tests no longer fail where the platform or a slow runner, not the code,
+  is the cause: the Codex account-validation test waits (up to 5 s) for the run to finish
+  before asserting; relief specs skip on hosts without scheduling-yield support; mission e2e
+  scenarios that reach verification acceptance run only on macOS, where verification isolation
+  exists; and the shell input-completion fixture stays alive with `echo`.
+
+### Upgrading from 0.1.6
+
+The daemon is unchanged apart from its version number. Settings › General will say a newer
+daemon is installed; restarting it is optional. Restarting ends open terminals; agent
+conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.7_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.7/IYAGI.Term_0.1.7_aarch64.dmg) | `6d333024f5a6d772394d743c012fa720742f57e77fe76f1405a175dee0df8243` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.6 — 2026-10-28
 
 A small interface release: the tab bar keeps the group you switched to in view, and mission

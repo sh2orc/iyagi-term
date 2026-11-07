@@ -27,10 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.6](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.6)** (2026-10-28) —
-a small release: swiping to a group whose tab is scrolled out of the tab bar now scrolls the
-bar just enough to show it, without disturbing a position you pushed yourself.
-See [what's new](#whats-new-in-016).
+**Latest: [0.1.7](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.7)** (2026-11-07) —
+a small renderer release: long WebGL sessions no longer pick up stray glyph fragments after
+the glyph atlas is cleared, and a frame that cannot settle falls back to the DOM renderer
+instead of painting stale coordinates. See [what's new](#whats-new-in-017).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +40,12 @@ See [what's new](#whats-new-in-016).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.6_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.6/IYAGI.Term_0.1.6_aarch64.dmg) | 18 MB | `1ae3f0fa2efe29f7ab45fabe2fb3e16a2715011c676802b562088c38dde1e413` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.7_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.7/IYAGI.Term_0.1.7_aarch64.dmg) | 18 MB | `6d333024f5a6d772394d743c012fa720742f57e77fe76f1405a175dee0df8243` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.6_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.7_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +80,14 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.7
+
+- **Cleaner WebGL glyph atlas in long sessions.** Clearing the atlas now checks and resets
+  every page, not just the first, so glyphs left on merged pages can no longer reappear as
+  fragments of other characters. If the atlas layout keeps changing within one frame, the
+  pane switches to the DOM renderer (WebGL returns shortly after) instead of drawing stale
+  coordinates. Full notes: [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.6
 
@@ -399,7 +407,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.6** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.7** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

@@ -26,10 +26,10 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.6](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.6)** (2026-10-28) —
-작은 릴리스: 스와이프로 탭 막대의 보이는 창 밖으로 밀려난 그룹으로 넘어가면, 막대가 그 그룹이
-보이게 최소한으로 말아 들어갑니다. 직접 밀어 둔 위치는 흔들지 않습니다.
-[새로운 점](#016의-새로운-점)을 참고하세요.
+**최신: [0.1.7](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.7)** (2026-11-07) —
+작은 렌더러 릴리스: WebGL 렌더러를 오래 쓰다 글리프 아틀라스를 비운 뒤에도 다른 글자의 조각이
+남지 않고, 한 프레임 안에서 아틀라스가 안정되지 않으면 낡은 좌표로 그리는 대신 DOM 렌더러로
+넘어갑니다. [새로운 점](#017의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -39,12 +39,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.6_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.6/IYAGI.Term_0.1.6_aarch64.dmg) | 18 MB | `1ae3f0fa2efe29f7ab45fabe2fb3e16a2715011c676802b562088c38dde1e413` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.7_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.7/IYAGI.Term_0.1.7_aarch64.dmg) | 18 MB | `6d333024f5a6d772394d743c012fa720742f57e77fe76f1405a175dee0df8243` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.6_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.7_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -77,6 +77,14 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.7의 새로운 점
+
+- **오래 써도 깨끗한 WebGL 글리프 아틀라스.** 아틀라스를 비울 때 첫 페이지만이 아니라 모든
+  페이지를 확인하고 초기화하므로, 병합된 페이지에 남은 글리프가 다른 글자의 조각으로 다시
+  나타나지 않습니다. 한 프레임 안에서 아틀라스 구성이 계속 바뀌면 낡은 좌표로 그리지 않고 그
+  pane을 DOM 렌더러로 넘깁니다(WebGL은 잠시 뒤 다시 만들어집니다). 전체 노트:
+  [RELEASE.md](RELEASE.md).
 
 ## 0.1.6의 새로운 점
 
@@ -374,7 +382,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.6**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.7**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

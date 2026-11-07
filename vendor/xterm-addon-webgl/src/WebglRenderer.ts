@@ -360,7 +360,14 @@ export class WebglRenderer extends Disposable implements IRenderer {
     // (xterm.js #5883).
     let merged = false;
     let mergeRetries = 0;
-    while (this._charAtlas && this._glyphRenderer.value.beginFrame() && mergeRetries++ < Constants.MERGE_RETRY_LIMIT) {
+    while (this._charAtlas && this._glyphRenderer.value.beginFrame()) {
+      if (mergeRetries++ >= Constants.MERGE_RETRY_LIMIT) {
+        // The viewport cannot be represented by a stable atlas. Do not paint stale
+        // coordinates or spin on redraws; let the existing context-loss handler
+        // replace this renderer with the DOM renderer.
+        setTimeout(() => this._onContextLoss.fire(), 0);
+        return;
+      }
       merged = true;
       this._clearModel(true);
       this._updateModel(0, this._terminal.rows - 1);

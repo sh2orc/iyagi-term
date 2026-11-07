@@ -3171,7 +3171,7 @@ var TextureAtlas = class _TextureAtlas {
     return this._pageLayoutVersion;
   }
   clearTexture() {
-    if (this._pages.length === 0 || this._pages[0].currentRow.x === 0 && this._pages[0].currentRow.y === 0) {
+    if (this._pages.every((page) => page.glyphs.length === 0)) {
       return;
     }
     for (const page of this._pages) {
@@ -3448,6 +3448,7 @@ var TextureAtlas = class _TextureAtlas {
     this._workAttributeData.extended.ext = ext;
     const invisible = !!this._workAttributeData.isInvisible();
     if (invisible) {
+      this._tmpCtx.restore();
       return NULL_RASTERIZED_GLYPH;
     }
     const bold = !!this._workAttributeData.isBold();
@@ -3936,6 +3937,8 @@ var _AtlasPage = class _AtlasPage {
     this.currentRow.y = 0;
     this.currentRow.height = 0;
     this.fixedRows.length = 0;
+    this._glyphs.length = 0;
+    this._usedPixels = 0;
     this.version = ++_AtlasPage.nextVersion;
   }
 };
@@ -6686,7 +6689,11 @@ var WebglRenderer = class extends Disposable {
     }
     let merged = false;
     let mergeRetries = 0;
-    while (this._charAtlas && this._glyphRenderer.value.beginFrame() && mergeRetries++ < 32 /* MERGE_RETRY_LIMIT */) {
+    while (this._charAtlas && this._glyphRenderer.value.beginFrame()) {
+      if (mergeRetries++ >= 32 /* MERGE_RETRY_LIMIT */) {
+        setTimeout(() => this._onContextLoss.fire(), 0);
+        return;
+      }
       merged = true;
       this._clearModel(true);
       this._updateModel(0, this._terminal.rows - 1);

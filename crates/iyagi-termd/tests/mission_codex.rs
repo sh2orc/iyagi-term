@@ -380,6 +380,18 @@ async fn account_validation_failure_is_auth_required() {
         recorded.peer().sent_methods(),
         vec!["initialize", "initialized", "account/read"]
     );
+    // 실패 이벤트가 구독으로 먼저 오고 run의 Finished 종결은 비동기로 따라온다 —
+    // 느린 CI에서 즉시 단정하면 아직 Running인 순간이 잡힌다. 아래 689줄의
+    // 폴링과 같은 모양으로 유한하게 기다렸다가 단정한다.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !matches!(adapter.inspect(&run_id), RunProbe::Finished { .. }) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "run never finished: {:?}",
+            adapter.inspect(&run_id)
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     assert_eq!(adapter.inspect(&run_id), RunProbe::Finished { exit: None });
     assert_eq!(
         adapter.close(&run_id),

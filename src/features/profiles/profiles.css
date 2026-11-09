@@ -135,7 +135,7 @@
   border-bottom: 1px solid rgba(128, 128, 128, 0.25);
 }
 
-/* 셸 명령(ccd/ccg/cck) 카드 — 나머지 틀은 settings.css의 .integration-block을 쓴다. */
+/* 셸 명령(ccd/ccg) 카드 — 나머지 틀은 settings.css의 .integration-block을 쓴다. */
 .shell-profiles-script summary {
   cursor: pointer;
   font-size: 12px;

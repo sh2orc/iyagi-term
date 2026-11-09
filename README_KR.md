@@ -213,7 +213,7 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
   호스트 메모리가 치명적일 때는 기다립니다
 - 권한 요청·질문·응답 완료·관리 실행 종료를 모으는 알림 센터, 창이 숨어 있으면 데스크톱 알림.
   Claude/Codex hooks와 주입형 OpenCode 플러그인으로 동작하며 CLI 전역 설정은 건드리지 않습니다
-- 상태 표시줄의 Codex·Claude·Z.ai·Kimi 구독 사용량 게이지와 Open Platform 잔액. 팝오버는 창별 사용량과 초기화 시각을
+- 상태 표시줄의 Codex·Claude·Z.ai·Kimi Code 구독 사용량 게이지. 팝오버는 창별 사용량과 초기화 시각을
   보여주되 분 단위로 올립니다 — 공급자의 창은 16:59:59처럼 초 단위 경계에서 돌아가고,
   claude.ai 등 자체 대시보드도 17:00으로 올려 표기합니다
 
@@ -232,9 +232,11 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 
 **Kimi 연동**
 
-- **설정 › 연동 › Kimi**에서 Kimi Code 멤버십과 Open Platform 키를 각각 암호화 저장하고,
-  `cck` 셸 함수로 Claude Code를 실행합니다. K3와 K3.1 Pro(1M·256K)를 선택할 수 있으며,
-  멤버십 할당량과 Open Platform 잔액을 같은 사용량 팝오버에서 확인합니다
+- Kimi Code 멤버십 할당량(5시간·주간·월간)을 사용량 게이지에 보여 줍니다. `kimi` CLI 로그인 토큰이
+  유효한 동안은 그 로그인으로, 아니면 **설정 › 연동 › Kimi**에 저장한 멤버십 API 키로 읽으며,
+  계정이 속한 리전(kimi.ai 또는 kimi.com)을 따릅니다
+- Kimi CLI를 기본 실행 프로필로 제공하고, `kimi` CLI가 쓰는 provider·모델을 pane에 표시합니다.
+  종량제 Open Platform 키는 지원하지 않습니다
 
 **한글·CJK 입력**
 

@@ -39,9 +39,6 @@ describe("sanitizePreferences", () => {
         codexFullAutonomy: true,
         claudeProvider: "zai-coding-plan",
         zaiMainModel: "glm-5.3-flash[1m]",
-        kimiPlatform: "kimi-open-platform",
-        kimiCodeModel: "k3.1-pro",
-        kimiOpenModel: "kimi-k3.1-pro[1m]",
         gatewayObservability: true,
         gatewayBlocked: true,
         gatewayPoolStrategy: "fill_first",
@@ -68,9 +65,6 @@ describe("sanitizePreferences", () => {
       codexFullAutonomy: true,
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
-      kimiPlatform: "kimi-open-platform",
-      kimiCodeModel: "k3.1-pro",
-      kimiOpenModel: "kimi-k3.1-pro[1m]",
       gatewayObservability: true,
       gatewayBlocked: true,
       gatewayPoolStrategy: "fill_first",
@@ -93,6 +87,17 @@ describe("sanitizePreferences", () => {
       agentBackgrounds: true,
       agentBackgroundColors: DEFAULT_PREFERENCES.agentBackgroundColors,
     });
+  });
+
+  it("drops the Kimi launcher choices saved by 0.1.8", () => {
+    const value = sanitizePreferences({
+      kimiPlatform: "kimi-open-platform",
+      kimiOpenModel: "kimi-k3.1-pro[1m]",
+      kimiCodeModel: "k3.1-pro[1m]",
+    }) as unknown as Record<string, unknown>;
+    expect(value).not.toHaveProperty("kimiPlatform");
+    expect(value).not.toHaveProperty("kimiOpenModel");
+    expect(value).not.toHaveProperty("kimiCodeModel");
   });
 
   it("drops unknown themes, bad types and out-of-range sizes", () => {
@@ -204,9 +209,6 @@ describe("preferences store", () => {
     usePreferences.getState().setCliAutonomy("codex", false);
     usePreferences.getState().setClaudeProvider("zai-coding-plan");
     usePreferences.getState().setZaiMainModel("glm-5.3-flash[1m]");
-    usePreferences.getState().setKimiPlatform("kimi-open-platform");
-    usePreferences.getState().setKimiCodeModel("k3.1-pro");
-    usePreferences.getState().setKimiOpenModel("kimi-k3.1-pro[1m]");
     usePreferences.getState().setGatewayObservability(true);
     usePreferences.getState().setGatewayBlocked(true);
     usePreferences.getState().setGatewayPoolStrategy("fill_first");
@@ -219,9 +221,6 @@ describe("preferences store", () => {
       codexFullAutonomy: false,
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
-      kimiPlatform: "kimi-open-platform",
-      kimiCodeModel: "k3.1-pro",
-      kimiOpenModel: "kimi-k3.1-pro[1m]",
       gatewayObservability: true,
       gatewayBlocked: true,
       gatewayPoolStrategy: "fill_first",

@@ -18,6 +18,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 time = { version = "0.3.44", features = ["parsing"] }
+zeroize = "1.8"
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

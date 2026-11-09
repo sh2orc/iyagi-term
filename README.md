@@ -231,7 +231,7 @@ level, where the work actually runs:
 - Notification center for permission requests, questions, finished responses and finished
   managed runs, with desktop notifications while the window is hidden. It works through
   Claude/Codex hooks and an injected OpenCode plugin — your global CLI config is never edited
-- Subscription usage gauges for Codex, Claude, Z.ai and Kimi, plus Open Platform balance, in the status bar. The popover shows
+- Subscription usage gauges for Codex, Claude, Z.ai and Kimi Code in the status bar. The popover shows
   each window's usage and reset time, rounded up to the next minute — providers roll windows at
   second boundaries (e.g. 16:59:59) that their own dashboards already show rounded (17:00)
 
@@ -252,9 +252,11 @@ level, where the work actually runs:
 
 **Kimi integration**
 
-- Store separate Kimi Code membership and Open Platform keys under **Settings › Integrations › Kimi**,
-  then launch Claude Code with `cck`. Choose K3 or K3.1 Pro (1M/256K), inspect membership quotas and
-  Open Platform balance, and monitor the active provider/model of the `kimi` CLI
+- Kimi Code membership quota (5-hour, weekly, monthly) in the usage gauges — read from your `kimi`
+  CLI login while its token is valid, or from a membership API key stored under
+  **Settings › Integrations › Kimi**, in whichever region (kimi.ai or kimi.com) the account lives
+- Kimi CLI is a built-in launch profile, and panes show the provider/model it runs.
+  Pay-as-you-go Open Platform keys are not supported
 
 **Korean and CJK input**
 

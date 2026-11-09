@@ -1,5 +1,5 @@
 /**
- * 셸 명령(ccd/ccg/cck) 설치 카드 — 설정 → 실행 프로필 맨 아래.
+ * 셸 명령(ccd/ccg) 설치 카드 — 설정 → 실행 프로필 맨 아래.
  *
  * 다른 연동 카드(IntegrationPanel의 hooks·사용량)와 같은 동의 흐름을 쓴다:
  * 상태 조회 → 추가될 줄 미리보기 → 사용자가 누른 뒤에만 파일을 고친다.
@@ -61,8 +61,6 @@ export function ShellProfilesCard(): JSX.Element {
   // ccg가 쓸 주 모델 = Z.ai 라우팅 설정과 같은 값. 바뀌면 다시 조회해
   // "다시 적용" 여부(upToDate)를 데몬이 판정하게 한다.
   const mainModel = usePreferences((s) => s.zaiMainModel);
-  const kimiPlatform = usePreferences((s) => s.kimiPlatform);
-  const kimiModel = usePreferences((s) => s.kimiPlatform === "kimi-code" ? s.kimiCodeModel : s.kimiOpenModel);
   const [status, setStatus] = useState<ShellProfilesStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,14 +71,14 @@ export function ShellProfilesCard(): JSX.Element {
     if (!available) return;
     setBusy(true);
     setError(null);
-    try { setStatus(await getShellProfilesStatus(mainModel, kimiPlatform, kimiModel)); }
+    try { setStatus(await getShellProfilesStatus(mainModel)); }
     catch (value) { setError(errorText(value)); }
     finally { setBusy(false); setLoaded(true); }
-  }, [available, mainModel, kimiPlatform, kimiModel]);
+  }, [available, mainModel]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // "replace"는 사용자 정의 ccd/ccg/cck를 지우지 않고 우리 블록을 rc 끝으로 옮겨
+  // "replace"는 사용자 정의 ccd/ccg를 지우지 않고 우리 블록을 rc 끝으로 옮겨
   // 가리는 적용이다. 이미 교체해 둔 설치를 다시 적용할 때도 같은 길을 쓴다.
   const run = async (action: "apply" | "replace" | "remove"): Promise<void> => {
     setBusy(true);
@@ -88,14 +86,14 @@ export function ShellProfilesCard(): JSX.Element {
     try {
       setStatus(
         action === "remove"
-          ? await removeShellProfiles(mainModel, kimiPlatform, kimiModel)
-          : await applyShellProfiles(mainModel, action === "replace", kimiPlatform, kimiModel),
+          ? await removeShellProfiles(mainModel)
+          : await applyShellProfiles(mainModel, action === "replace"),
       );
     } catch (value) {
       setError(errorText(value));
       // 충돌로 거절됐다면 어떤 줄이 걸렸는지 보여 주려고 상태를 다시 읽는다.
       if (isConflictError(value)) {
-        try { setStatus(await getShellProfilesStatus(mainModel, kimiPlatform, kimiModel)); }
+        try { setStatus(await getShellProfilesStatus(mainModel)); }
         catch { /* 위에서 담은 오류 문구를 그대로 둔다. */ }
       }
     } finally { setBusy(false); }
@@ -134,10 +132,6 @@ export function ShellProfilesCard(): JSX.Element {
             {t("settings.shellProfiles.daemonBinary")}: <code className="hooks-path">{view.status.daemonBinary ?? "—"}</code>
           </p>
           <p className="muted">{t("settings.shellProfiles.model", { model: view.status.mainModel })}</p>
-          <p className="muted">{t("settings.shellProfiles.kimiModel", {
-            platform: view.status.kimiPlatform,
-            model: view.status.kimiModel,
-          })}</p>
 
           {(view.kind === "installed" || view.kind === "outdated") && view.status.overriding ? (
             <>

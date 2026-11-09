@@ -1,7 +1,7 @@
-//! zsh 런치 프로필(`ccd`/`ccg`/`cck`) 설치 — Settings → Launch profiles.
+//! zsh 런치 프로필(`ccd`/`ccg`) 설치 — Settings → Launch profiles.
 //!
-//! `ccd`는 Claude Code를 사용자의 기본 로그인(Anthropic)으로, `ccg`는 Z.ai,
-//! `cck`는 선택한 Kimi 플랫폼으로 띄운다. 세 함수 모두 데몬의
+//! `ccd`는 Claude Code를 사용자의 기본 로그인(Anthropic)으로, `ccg`는 iyagi
+//! Term에 등록한 Z.ai Coding Plan 키로 띄운다. 두 함수 모두 데몬의
 //! `claude-exec` 서브커맨드를 부를 뿐이라 **비밀은 어디에도 적히지 않는다**
 //! (키는 데몬이 자기 비밀 저장소에서 푼다 — `claude_provider` 라우팅과 같은 길).
 //!
@@ -15,7 +15,7 @@
 //! - rc에 넣는 것은 마커 블록 **한 덩어리**(`source` 한 줄)뿐이다. 함수 본문은
 //!   우리가 소유한 `<data_dir>/config/shell/claude-profiles.zsh`에 있어서,
 //!   모델을 바꿔도 rc는 그대로고 제거는 마커 사이만 정확히 도려낸다.
-//! - 이미 `ccd`/`ccg`/`cck`를 쓰고 있는 사용자의 정의는 **기본적으로** 건드리지 않는다.
+//! - 이미 `ccd`/`ccg`를 쓰고 있는 사용자의 정의는 **기본적으로** 건드리지 않는다.
 //!   정적 스캔(+설치 전에 한해 `zsh -ic 'whence -w …'` 동적 탐지)에서 하나라도
 //!   걸리면 `apply`는 거절하고 무엇이 어디에 있었는지 그대로 돌려준다.
 //! - 사용자가 명시적으로 "교체"를 고르면(`replace_existing`) 사용자의 줄은
@@ -46,15 +46,11 @@ const SCRIPT_FILE: &str = "claude-profiles.zsh";
 /// 블록이 들어가는 rc 파일. zsh의 대화형 rc 하나만 고친다.
 const RC_FILE: &str = ".zshrc";
 
-/// `ccd`/`ccg`/`cck`가 Claude Code에 항상 넘기는 권한 모드 플래그([`render_script`]).
+/// `ccd`/`ccg`가 Claude Code에 항상 넘기는 권한 모드 플래그([`render_script`]).
 const BYPASS_FLAG: &str = "--dangerously-skip-permissions";
 
 /// 설치하는 함수 이름(충돌 검사 대상).
-const PROFILE_NAMES: [&str; 3] = ["ccd", "ccg", "cck"];
-pub const KIMI_PLATFORMS: [&str; 2] = ["kimi-code", "kimi-open-platform"];
-pub const DEFAULT_KIMI_PLATFORM: &str = KIMI_PLATFORMS[0];
-pub const KIMI_CODE_MODELS: [&str; 3] = ["k3[1m]", "k3.1-pro[1m]", "k3.1-pro"];
-pub const KIMI_OPEN_MODELS: [&str; 2] = ["kimi-k3[1m]", "kimi-k3.1-pro[1m]"];
+const PROFILE_NAMES: [&str; 2] = ["ccd", "ccg"];
 
 /// 정적 충돌 스캔 대상. 존재하는 것만 읽고, 각각 1 MiB까지만 본다.
 const SCANNED_FILES: [&str; 6] = [
@@ -100,17 +96,13 @@ pub enum ShellProfilesError {
     Unsupported(&'static str),
     #[error("unknown main model")]
     InvalidModel,
-    #[error("unknown Kimi platform")]
-    InvalidKimiPlatform,
-    #[error("unknown Kimi model")]
-    InvalidKimiModel,
     #[error("file unreadable: {0}")]
     Read(String),
     #[error("write failed: {0}")]
     Write(String),
-    #[error("{} conflicting ccd/ccg/cck definition(s) already exist", .0.len())]
+    #[error("{} conflicting ccd/ccg definition(s) already exist", .0.len())]
     Conflict(Vec<Conflict>),
-    #[error("{} ccd/ccg/cck definition(s) load after ~/.zshrc and cannot be replaced", .0.len())]
+    #[error("{} ccd/ccg definition(s) load after ~/.zshrc and cannot be replaced", .0.len())]
     Unreplaceable(Vec<Conflict>),
 }
 
@@ -120,8 +112,6 @@ impl ShellProfilesError {
             ShellProfilesError::NoHome => "no_home",
             ShellProfilesError::Unsupported(_) => "shell_profiles_unsupported",
             ShellProfilesError::InvalidModel => "invalid_main_model",
-            ShellProfilesError::InvalidKimiPlatform => "invalid_kimi_platform",
-            ShellProfilesError::InvalidKimiModel => "invalid_kimi_model",
             ShellProfilesError::Read(_) => "read_failed",
             ShellProfilesError::Write(_) => "write_failed",
             ShellProfilesError::Conflict(_) => "shell_profiles_conflict",
@@ -130,7 +120,7 @@ impl ShellProfilesError {
     }
 }
 
-/// 이미 존재하는 `ccd`/`ccg`/`cck` 정의 한 건. 우리는 이 줄을 고치지 않는다 — 사용자가
+/// 이미 존재하는 `ccd`/`ccg` 정의 한 건. 우리는 이 줄을 고치지 않는다 — 사용자가
 /// 직접 정리하거나 "교체"(우리 블록이 나중에 정의해 가린다)를 고르도록
 /// "어느 파일 몇 번째 줄"을 그대로 보여 준다.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -174,16 +164,13 @@ pub struct ShellProfilesStatus {
     pub proposed_block: Option<String>,
     /// 적용하면 스크립트 파일에 들어갈 내용(항상 미리보기로 제공).
     pub script_preview: String,
-    /// 우리 블록 밖에 이미 존재하는 `ccd`/`ccg`/`cck` 정의들.
+    /// 우리 블록 밖에 이미 존재하는 `ccd`/`ccg` 정의들.
     pub conflicts: Vec<Conflict>,
     /// 설치돼 있고, 위 충돌이 **모두** 우리 블록보다 먼저 읽혀 지금 우리
     /// 함수가 이기고 있는가(= 사용자가 교체를 골랐던 상태). 충돌이 없으면 거짓.
     pub overriding: bool,
     /// `ccg`가 쓸 주 모델.
     pub main_model: String,
-    /// `cck`가 쓸 Kimi 플랫폼과 모델.
-    pub kimi_platform: String,
-    pub kimi_model: String,
 }
 
 /// 환경 의존 입력 묶음. 테스트가 로그인 셸을 주입하고 동적 탐지를 끌 수 있게
@@ -259,38 +246,6 @@ pub fn sanitize_main_model(value: Option<String>) -> String {
         .unwrap_or_else(|| DEFAULT_MAIN_MODEL.to_string())
 }
 
-pub fn is_known_kimi_platform(value: &str) -> bool {
-    KIMI_PLATFORMS.contains(&value)
-}
-
-pub fn sanitize_kimi_platform(value: Option<String>) -> String {
-    value
-        .filter(|platform| is_known_kimi_platform(platform))
-        .unwrap_or_else(|| DEFAULT_KIMI_PLATFORM.to_string())
-}
-
-pub fn default_kimi_model(platform: &str) -> &'static str {
-    if platform == "kimi-open-platform" {
-        KIMI_OPEN_MODELS[0]
-    } else {
-        KIMI_CODE_MODELS[0]
-    }
-}
-
-pub fn is_known_kimi_model(platform: &str, model: &str) -> bool {
-    match platform {
-        "kimi-code" => KIMI_CODE_MODELS.contains(&model),
-        "kimi-open-platform" => KIMI_OPEN_MODELS.contains(&model),
-        _ => false,
-    }
-}
-
-pub fn sanitize_kimi_model(platform: &str, value: Option<String>) -> String {
-    value
-        .filter(|model| is_known_kimi_model(platform, model))
-        .unwrap_or_else(|| default_kimi_model(platform).to_string())
-}
-
 /// 우리가 소유한 스크립트 경로.
 pub fn script_path(data_dir: &Path) -> PathBuf {
     data_dir.join("config").join("shell").join(SCRIPT_FILE)
@@ -330,48 +285,28 @@ fn double_quoted_escape(value: &str) -> String {
 /// 값은 데몬이 PTY마다 자기 실행 경로로 주입하므로, repo 이름을 바꾸거나 빌드
 /// 산출물을 지운 뒤에도 오래 떠 있던 데몬의 셸에는 **없는 경로**가 남는다.
 /// 그래서 실행 가능할 때만 쓰고, 아니면 박아 둔 안정 사본으로 넘어간다 —
-/// 어느 셸에서 부르든 `ccd`/`ccg`/`cck`가 죽지 않게 하는 것이 이 함수의 계약이다.
+/// 어느 셸에서 부르든 `ccd`/`ccg`가 죽지 않게 하는 것이 이 함수의 계약이다.
 ///
-/// 세 함수 모두 `--dangerously-skip-permissions`로 띄운다(bypass permissions
-/// 모드). `ccd`/`ccg`/`cck`는 손으로 쓰던 같은 이름의 헬퍼를 대체하는 것이라 그
+/// 두 함수 모두 `--dangerously-skip-permissions`로 띄운다(bypass permissions
+/// 모드). `ccd`/`ccg`는 손으로 쓰던 같은 이름의 헬퍼를 대체하는 것이라 그
 /// 동작을 그대로 잇는다 — 플래그가 없으면 Claude Code가 설정의 기본 모드
 /// (auto 등)로 떠서 "교체" 뒤에 권한 모드가 조용히 바뀐다.
 pub fn render_script(daemon_bin_abs: &str, data_dir: &str, main_model: &str) -> String {
-    render_script_for(
-        daemon_bin_abs,
-        data_dir,
-        main_model,
-        DEFAULT_KIMI_PLATFORM,
-        default_kimi_model(DEFAULT_KIMI_PLATFORM),
-    )
-}
-
-pub fn render_script_for(
-    daemon_bin_abs: &str,
-    data_dir: &str,
-    main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
-) -> String {
     let binary = double_quoted_escape(daemon_bin_abs);
     let dir = shell_quote(data_dir);
     let model = shell_quote(main_model);
-    let kimi_platform = shell_quote(kimi_platform);
-    let kimi_model = shell_quote(kimi_model);
     format!(
-        "# Generated by iyagi (Settings → Launch profiles → ccd / ccg / cck). Do not edit — re-apply from the app.\n\
+        "# Generated by iyagi (Settings → Launch profiles → ccd / ccg). Do not edit — re-apply from the app.\n\
          # ccd: Claude Code → Anthropic (your default login)\n\
          # ccg: Claude Code → Z.ai GLM (Coding Plan key registered in iyagi)\n\
-         # cck: Claude Code → Kimi (platform key registered in iyagi)\n\
-         # All start in bypass-permissions mode ({BYPASS_FLAG}).\n\
+         # Both start in bypass-permissions mode ({BYPASS_FLAG}).\n\
          # `|| true`: 두 별칭이 없으면 unalias가 1을 돌려주는데, 사용자의\n\
          # `setopt err_exit`가 스크립트 첫 줄에서 소싱을 끊어버리는 것을 막는다.\n\
-         unalias ccd ccg cck 2>/dev/null || true\n\
+         unalias ccd ccg 2>/dev/null || true\n\
          # IYAGI_DAEMON_BIN은 실행 가능할 때만 쓴다(옛 데몬이 남긴 죽은 경로 무시).\n\
          __iyagi_daemon() {{ local bin=\"${{IYAGI_DAEMON_BIN-}}\"; [ -n \"$bin\" ] && [ -x \"$bin\" ] || bin=\"{binary}\"; \"$bin\" \"$@\"; }}\n\
          ccd() {{ __iyagi_daemon --data-dir {dir} claude-exec --provider anthropic -- {BYPASS_FLAG} \"$@\"; }}\n\
-         ccg() {{ __iyagi_daemon --data-dir {dir} claude-exec --provider zai --main-model {model} -- {BYPASS_FLAG} \"$@\"; }}\n\
-         cck() {{ __iyagi_daemon --data-dir {dir} claude-exec --provider {kimi_platform} --main-model {kimi_model} -- {BYPASS_FLAG} \"$@\"; }}\n"
+         ccg() {{ __iyagi_daemon --data-dir {dir} claude-exec --provider zai --main-model {model} -- {BYPASS_FLAG} \"$@\"; }}\n"
     )
 }
 
@@ -430,7 +365,7 @@ pub fn upsert_block(rc: &str, block: &str) -> String {
 }
 
 /// 블록을 rc **맨 끝**에 둔다(이미 있던 블록은 걷어내고 다시 붙인다). 교체
-/// 모드 전용이다 — 사용자의 `ccd`/`ccg`/`cck`보다 나중에 읽혀야 우리 정의가 이긴다.
+/// 모드 전용이다 — 사용자의 `ccd`/`ccg`보다 나중에 읽혀야 우리 정의가 이긴다.
 /// 이미 끝에 같은 블록이 있으면 글자 하나 바뀌지 않는다(멱등).
 pub fn move_block_to_end(rc: &str, block: &str) -> String {
     let (stripped, _) = strip_block(rc);
@@ -546,7 +481,7 @@ fn scan_text(
     }
 }
 
-/// 홈의 zsh rc 계열 파일들을 정적으로 훑어 이미 존재하는 `ccd`/`ccg`/`cck` 정의를
+/// 홈의 zsh rc 계열 파일들을 정적으로 훑어 이미 존재하는 `ccd`/`ccg` 정의를
 /// 찾는다(우리 관리 블록 안은 제외). 파일을 고치지 않는 순수 조회다.
 pub fn find_conflicts(home: &Path) -> Vec<Conflict> {
     let mut out = Vec::new();
@@ -622,7 +557,7 @@ fn parse_whence(stdout: &str) -> Vec<Conflict> {
     out
 }
 
-/// 최선 노력 동적 탐지: 사용자의 대화형 zsh를 한 번 띄워 `ccd`/`ccg`/`cck`가 이미
+/// 최선 노력 동적 탐지: 사용자의 대화형 zsh를 한 번 띄워 `ccd`/`ccg`가 이미
 /// 잡혀 있는지 묻는다. 정적 스캔이 못 보는 곳(oh-my-zsh 플러그인, `.zshrc`가
 /// source하는 사설 파일)을 잡기 위한 것이라, 3초 안에 답하지 않거나 어떤
 /// 이유로든 실패하면 **조용히 빈 목록**을 돌려준다(설치를 막지 않는다).
@@ -630,7 +565,7 @@ fn probe_dynamic_conflicts() -> Vec<Conflict> {
     let mut command = std::process::Command::new("zsh");
     command
         .arg("-ic")
-        .arg("whence -w ccd ccg cck")
+        .arg("whence -w ccd ccg")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -740,17 +675,13 @@ pub fn status(
     data_dir: &Path,
     daemon_bin: Option<&Path>,
     main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
 ) -> ShellProfilesStatus {
     // 일반 조회는 캐시를 쓴다 — 아래 `status_with`의 `fresh_probe` 설명 참고.
-    status_with_platform(
+    status_with(
         home,
         data_dir,
         daemon_bin,
         main_model,
-        kimi_platform,
-        kimi_model,
         &Probe::from_env(),
         false,
     )
@@ -760,34 +691,11 @@ pub fn status(
 /// (`apply_with`가 쓰기 직전에 쓴다). 그 외에는 [`DYNAMIC_PROBE_CACHE`]를
 /// 그대로 재사용한다 — 마운트 때와 모델 변경 때마다 반복되는 `status` 호출이
 /// 매번 대화형 zsh를 새로 띄우지 않게 한다.
-#[cfg(test)]
 fn status_with(
     home: Option<&Path>,
     data_dir: &Path,
     daemon_bin: Option<&Path>,
     main_model: &str,
-    probe: &Probe,
-    fresh_probe: bool,
-) -> ShellProfilesStatus {
-    status_with_platform(
-        home,
-        data_dir,
-        daemon_bin,
-        main_model,
-        DEFAULT_KIMI_PLATFORM,
-        default_kimi_model(DEFAULT_KIMI_PLATFORM),
-        probe,
-        fresh_probe,
-    )
-}
-
-fn status_with_platform(
-    home: Option<&Path>,
-    data_dir: &Path,
-    daemon_bin: Option<&Path>,
-    main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
     probe: &Probe,
     fresh_probe: bool,
 ) -> ShellProfilesStatus {
@@ -797,14 +705,12 @@ fn status_with_platform(
     let binary = daemon_bin.map(|path| path.display().to_string());
     // 미리보기는 데몬을 못 찾아도 보여 준다 — 사용자가 무엇이 설치될지 읽고
     // 판단할 수 있어야 한다(설치 자체는 `daemon_binary_missing`으로 막힌다).
-    let script_text = render_script_for(
+    let script_text = render_script(
         binary
             .as_deref()
             .unwrap_or_else(|| crate::daemon_name::daemon_binary_name()),
         &data_dir.display().to_string(),
         main_model,
-        kimi_platform,
-        kimi_model,
     );
 
     let rc = home.map(rc_path);
@@ -881,15 +787,13 @@ fn status_with_platform(
         conflicts,
         overriding,
         main_model: main_model.to_string(),
-        kimi_platform: kimi_platform.to_string(),
-        kimi_model: kimi_model.to_string(),
     }
 }
 
 /// 동의 후 적용: 스크립트를 쓰고 rc에 블록을 넣는다(백업 + atomic 쓰기).
 /// 이미 같은 내용이면 어느 파일도 다시 쓰지 않는다(멱등).
 ///
-/// `replace_existing`이 거짓이면 사용자 정의 `ccd`/`ccg`/`cck`가 있을 때 거절한다.
+/// `replace_existing`이 거짓이면 사용자 정의 `ccd`/`ccg`가 있을 때 거절한다.
 /// 참이면(사용자가 "교체"를 고름) 사용자의 줄은 그대로 두고 블록을 rc 맨
 /// 끝으로 옮겨 우리 정의가 이기게 한다 — `.zlogin`처럼 그 뒤에 읽히는
 /// 정의가 하나라도 있으면 가릴 수 없으므로 그때도 거절한다.
@@ -898,24 +802,19 @@ pub fn apply(
     data_dir: &Path,
     daemon_bin: Option<&Path>,
     main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
     replace_existing: bool,
 ) -> Result<ShellProfilesStatus, ShellProfilesError> {
     let probe = Probe::from_env();
-    apply_with_platform(
+    apply_with(
         home,
         data_dir,
         daemon_bin,
         main_model,
-        kimi_platform,
-        kimi_model,
         replace_existing,
         &probe,
     )
 }
 
-#[cfg(test)]
 fn apply_with(
     home: &Path,
     data_dir: &Path,
@@ -924,55 +823,18 @@ fn apply_with(
     replace_existing: bool,
     probe: &Probe,
 ) -> Result<ShellProfilesStatus, ShellProfilesError> {
-    apply_with_platform(
-        home,
-        data_dir,
-        daemon_bin,
-        main_model,
-        DEFAULT_KIMI_PLATFORM,
-        default_kimi_model(DEFAULT_KIMI_PLATFORM),
-        replace_existing,
-        probe,
-    )
-}
-
-fn apply_with_platform(
-    home: &Path,
-    data_dir: &Path,
-    daemon_bin: Option<&Path>,
-    main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
-    replace_existing: bool,
-    probe: &Probe,
-) -> Result<ShellProfilesStatus, ShellProfilesError> {
     if !is_known_main_model(main_model) {
         return Err(ShellProfilesError::InvalidModel);
     }
-    if !is_known_kimi_platform(kimi_platform) {
-        return Err(ShellProfilesError::InvalidKimiPlatform);
-    }
-    if !is_known_kimi_model(kimi_platform, kimi_model) {
-        return Err(ShellProfilesError::InvalidKimiModel);
-    }
     // 쓰기 직전 판정이다 — 캐시된 "충돌 없음"을 믿고 사용자 정의를 덮어쓰지
     // 않도록 항상 새로 탐지한다(`fresh_probe = true`).
-    let current = status_with_platform(
-        Some(home),
-        data_dir,
-        daemon_bin,
-        main_model,
-        kimi_platform,
-        kimi_model,
-        probe,
-        true,
-    );
+    let current = status_with(Some(home), data_dir, daemon_bin, main_model, probe, true);
     if !current.supported {
         return Err(ShellProfilesError::Unsupported(
             current.reason.unwrap_or("unsupported"),
         ));
     }
-    // 사용자가 이미 쓰고 있는 `ccd`/`ccg`/`cck`는 우리 것이 아니다 — 교체를 고르지
+    // 사용자가 이미 쓰고 있는 `ccd`/`ccg`는 우리 것이 아니다 — 교체를 고르지
     // 않았다면 무엇이 걸렸는지 그대로 돌려주고 멈춘다(파일은 하나도 건드리지
     // 않았다). 교체를 골랐어도 `.zshrc` 뒤에 읽히는 정의는 가릴 수 없다.
     let replacing = !current.conflicts.is_empty();
@@ -996,12 +858,10 @@ fn apply_with_platform(
 
     let script = script_path(data_dir);
     ensure_private_dir(script.parent().expect("script path has a parent"))?;
-    let script_text = render_script_for(
+    let script_text = render_script(
         &binary.display().to_string(),
         &data_dir.display().to_string(),
         main_model,
-        kimi_platform,
-        kimi_model,
     );
     if std::fs::read_to_string(&script).ok().as_deref() != Some(script_text.as_str()) {
         hooks_json::write_settings_file(&script, &script_text).map_err(write_error)?;
@@ -1022,13 +882,11 @@ fn apply_with_platform(
     }
     // 설치 직후라 `installed = true` — 아래 `status_with`는 동적 탐지를 아예
     // 건너뛰므로 `fresh_probe` 값은 결과에 영향을 주지 않는다.
-    Ok(status_with_platform(
+    Ok(status_with(
         Some(home),
         data_dir,
         daemon_bin,
         main_model,
-        kimi_platform,
-        kimi_model,
         probe,
         false,
     ))
@@ -1041,46 +899,15 @@ pub fn remove(
     data_dir: &Path,
     daemon_bin: Option<&Path>,
     main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
 ) -> Result<ShellProfilesStatus, ShellProfilesError> {
-    remove_with_platform(
-        home,
-        data_dir,
-        daemon_bin,
-        main_model,
-        kimi_platform,
-        kimi_model,
-        &Probe::from_env(),
-    )
+    remove_with(home, data_dir, daemon_bin, main_model, &Probe::from_env())
 }
 
-#[cfg(test)]
 fn remove_with(
     home: &Path,
     data_dir: &Path,
     daemon_bin: Option<&Path>,
     main_model: &str,
-    probe: &Probe,
-) -> Result<ShellProfilesStatus, ShellProfilesError> {
-    remove_with_platform(
-        home,
-        data_dir,
-        daemon_bin,
-        main_model,
-        DEFAULT_KIMI_PLATFORM,
-        default_kimi_model(DEFAULT_KIMI_PLATFORM),
-        probe,
-    )
-}
-
-fn remove_with_platform(
-    home: &Path,
-    data_dir: &Path,
-    daemon_bin: Option<&Path>,
-    main_model: &str,
-    kimi_platform: &str,
-    kimi_model: &str,
     probe: &Probe,
 ) -> Result<ShellProfilesStatus, ShellProfilesError> {
     let rc = rc_path(home);
@@ -1096,13 +923,11 @@ fn remove_with_platform(
         Err(error) => return Err(ShellProfilesError::Write(error.to_string())),
     }
     // 제거는 반환 상태의 충돌 목록이 즉시 최신일 필요가 없다 — 캐시를 쓴다.
-    Ok(status_with_platform(
+    Ok(status_with(
         Some(home),
         data_dir,
         daemon_bin,
         main_model,
-        kimi_platform,
-        kimi_model,
         probe,
         false,
     ))
@@ -1286,7 +1111,7 @@ mod tests {
     }
 
     /// 이름이 바뀐 repo에서 떠 있던 데몬이 죽은 `IYAGI_DAEMON_BIN`을 주입해도
-    /// `ccd`/`ccg`/`cck`는 박아 둔 경로로 실행돼야 한다. 살아 있는 값은 여전히 이긴다.
+    /// `ccd`/`ccg`는 박아 둔 경로로 실행돼야 한다. 살아 있는 값은 여전히 이긴다.
     #[cfg(unix)]
     #[test]
     fn rendered_functions_skip_a_stale_daemon_override() {
@@ -1419,30 +1244,6 @@ mod tests {
             sanitize_main_model(Some("glm-5.3-flash[1m]".into())),
             "glm-5.3-flash[1m]"
         );
-    }
-
-    #[test]
-    fn kimi_platform_and_model_choices_are_validated_per_platform() {
-        for model in KIMI_CODE_MODELS {
-            assert!(is_known_kimi_model("kimi-code", model));
-        }
-        for model in KIMI_OPEN_MODELS {
-            assert!(is_known_kimi_model("kimi-open-platform", model));
-        }
-        assert!(!is_known_kimi_model("kimi-code", "kimi-k3.1-pro[1m]"));
-        assert!(!is_known_kimi_model("kimi-open-platform", "k3.1-pro"));
-        assert_eq!(default_kimi_model("kimi-code"), "k3[1m]");
-        assert_eq!(default_kimi_model("kimi-open-platform"), "kimi-k3[1m]");
-        let script = render_script_for(
-            "/opt/iyagi-termd",
-            "/data",
-            DEFAULT_MAIN_MODEL,
-            "kimi-open-platform",
-            "kimi-k3.1-pro[1m]",
-        );
-        assert!(script.contains("cck() {"));
-        assert!(script.contains("--provider 'kimi-open-platform' --main-model 'kimi-k3.1-pro[1m]'"));
-        assert!(script.contains("unalias ccd ccg cck"));
     }
 
     #[cfg(unix)]
@@ -1673,7 +1474,7 @@ mod tests {
         // 없는 셸(setopt err_exit)에서 unalias의 exit 1이 스크립트를 끊는다.
         let script = std::fs::read_to_string(script_path(data.path())).unwrap();
         let unalias = script
-            .find("unalias ccd ccg cck 2>/dev/null || true\n")
+            .find("unalias ccd ccg 2>/dev/null || true\n")
             .unwrap();
         assert!(unalias < script.find("\nccd() {").unwrap());
 

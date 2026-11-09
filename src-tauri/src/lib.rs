@@ -148,7 +148,7 @@ pub fn run() {
     // 첫 키 입력 전에 등록해야 한다 — 창·웹뷰를 만들기 전.
     #[cfg(target_os = "macos")]
     disable_press_and_hold();
-    // Refresh the per-user daemon copy that the baked paths (ccd/ccg/cck, CLI
+    // Refresh the per-user daemon copy that the baked paths (ccd/ccg, CLI
     // hooks) point at — heals a moved/renamed checkout just by launching the
     // app, and is a no-op when nothing changed (stamp check).
     bridge::daemon_manager::refresh_stable_daemon_copy();

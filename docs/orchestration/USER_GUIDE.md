@@ -139,14 +139,14 @@ Windows: install Claude Code with the native installer and register its `claude.
 
 Launch errors and what to do: `zai_key_missing` — register the key under Settings → Z.ai Coding Plan; `daemon_outdated` — the running daemon does not advertise routing, update or restart it; `claude_provider_program_mismatch` — the profile's executable is not Claude Code; `claude_provider_env_conflict` — remove the conflicting variables from the profile. [Z.ai Claude Code guide](https://docs.z.ai/devpack/tool/claude), [Claude Code environment variables](https://code.claude.com/docs/en/env-vars), [LLM gateway configuration](https://code.claude.com/docs/en/llm-gateway-connect)
 
-### ccd / ccg / cck shell commands
+### ccd / ccg shell commands
 
-Three shell functions start Claude Code straight from a terminal, without an app pane: `ccd` uses Anthropic (your regular claude.ai login), `ccg` routes through Z.ai (GLM), and `cck` uses the platform and model selected under **Settings → Integrations → Kimi**. `ccg` and `cck` follow their respective selected main model.
+Two shell functions start Claude Code straight from a terminal, without an app pane: `ccd` uses Anthropic (your regular claude.ai login), `ccg` routes through Z.ai (GLM) with the key registered above. Both follow whichever main model is currently selected in this section.
 
-Kimi Code membership and Open Platform keys are incompatible and live in separate encrypted slots. The status bar shows 5-hour, weekly and monthly allowance for membership, and the available balance for Open Platform. Kimi Code offers `k3[1m]`, `k3.1-pro[1m]` and `k3.1-pro` (256K); Open Platform offers `kimi-k3[1m]` and `kimi-k3.1-pro[1m]`. K3.1 Pro always requires Thinking.
+Install them from **Settings → Launch profiles → Shell commands ccd / ccg**. Installation writes a 3-line marker block to `~/.zshrc` plus an app-owned script; run `source ~/.zshrc` or open a new terminal to pick them up. If a `ccd` or `ccg` alias or function you defined yourself already exists anywhere in your shell startup files, installation is refused rather than overwriting it.
 
-Install them from **Settings → Launch profiles → Shell commands ccd / ccg / cck**. Installation writes a 3-line marker block to `~/.zshrc` plus an app-owned script; run `source ~/.zshrc` or open a new terminal to pick them up. If a `ccd`, `ccg` or `cck` alias or function you defined yourself already exists anywhere in your shell startup files, installation is refused rather than overwriting it. Re-apply the profile after changing the Kimi platform or model.
+Version 0.1.8 also installed a `cck` (Claude Code on Kimi), which has been retired. If you applied the shell commands in 0.1.8, apply them once more to drop it; until then `cck` only prints how to remove it. Run Kimi with the `kimi` CLI instead (it is a built-in launch profile).
 
-`ccd` cannot override a Z.ai `env` block already present in `~/.claude/settings.json` — if you previously ran Z.ai's own installer, remove that block by hand, or `ccd` will still talk to Z.ai instead of Anthropic. If you delete the stored Z.ai key, `ccg` prints a registration message; `cck` does the same when the selected Kimi platform's key is missing.
+`ccd` cannot override a Z.ai `env` block already present in `~/.claude/settings.json` — if you previously ran Z.ai's own installer, remove that block by hand, or `ccd` will still talk to Z.ai instead of Anthropic. If you delete the stored Z.ai key, `ccg` prints a message asking you to register one instead of starting.
 
 zsh only (macOS/Linux); Windows is not supported.

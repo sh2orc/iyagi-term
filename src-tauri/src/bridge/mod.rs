@@ -22,7 +22,7 @@ mod hooks_json;
 pub mod ime;
 pub mod kimi;
 pub mod paste_image;
-/// zsh `ccd`/`ccg`/`cck` 런치 프로필 설치(동의 기반 — hooks 연동과 같은 계약).
+/// zsh `ccd`/`ccg` 런치 프로필 설치(동의 기반 — hooks 연동과 같은 계약).
 pub mod shell_profiles;
 pub mod state;
 pub mod subscriptions;

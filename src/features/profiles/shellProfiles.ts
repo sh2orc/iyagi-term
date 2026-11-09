@@ -1,14 +1,14 @@
 /**
- * zsh 셸 명령(ccd/ccg/cck) 설치 연동 — 프론트 측 순수 판정 + Tauri 명령 래퍼.
+ * zsh 셸 명령(ccd/ccg) 설치 연동 — 프론트 측 순수 판정 + Tauri 명령 래퍼.
  *
- * `ccd`는 Anthropic, `ccg`는 Z.ai, `cck`는 선택한 Kimi 플랫폼·모델로
- * Claude Code를 실행하는 zsh 함수다. 파일을 실제로 만들고 `~/.zshrc`를
+ * `ccd`는 Claude Code를 Anthropic 인증 그대로, `ccg`는 설정에 저장한 Z.ai
+ * 키로 GLM에 붙여 실행하는 zsh 함수다. 파일을 실제로 만들고 `~/.zshrc`를
  * 고치는 일은 전부 Rust(`shell_profiles_*` 명령)가 한다 — 이 모듈은 그
  * 상태를 UI 판정으로 정리하고, 명령을 부르는 얇은 래퍼만 갖는다.
  *
  * 동의 계약(§2.1): 상태 조회 → 추가될 줄 미리보기 → 사용자가 "적용"을
  * 눌러야 파일을 고친다. 브라우저 dev(비-Tauri)에서는 수동 안내(붙여넣기
- * 조각)로 폴백한다. 사용자가 직접 정의한 ccd/ccg/cck가 있으면(conflicts)
+ * 조각)로 폴백한다. 사용자가 직접 정의한 ccd/ccg가 있으면(conflicts)
  * 기본적으로 거절하고, 사용자가 "교체"를 고르면 그 줄은 지우지 않은 채
  * 우리 블록을 rc 맨 끝으로 옮겨 우리 정의가 이기게 한다(replaceExisting).
  */
@@ -69,9 +69,6 @@ export interface ShellProfilesStatus {
   overriding: boolean;
   /** ccg가 쓸 주 모델(설정의 zaiMainModel을 그대로 넘긴 값). */
   mainModel: string;
-  /** cck가 쓸 플랫폼과 모델. */
-  kimiPlatform: "kimi-code" | "kimi-open-platform";
-  kimiModel: string;
 }
 
 export type ShellProfilesAvailability =
@@ -84,7 +81,7 @@ export type ShellProfilesAvailability =
  * - "would-install": 아직 설치 안 됨 — 추가될 줄 미리보기 + 적용.
  * - "outdated": 설치돼 있지만 내용이 낡음(앱 업데이트·모델 변경) — 다시 적용.
  * - "installed": 설치돼 있고 최신 — 제거만 보여 준다.
- * - "conflict": 사용자가 정의한 ccd/ccg/cck가 있어 그냥 적용은 막는다. 모두
+ * - "conflict": 사용자가 정의한 ccd/ccg가 있어 그냥 적용은 막는다. 모두
  *   가릴 수 있으면(replaceable) "교체"를 제안한다 — 사용자의 줄은 지우지
  *   않고 우리 블록을 rc 끝으로 옮긴다. 이미 교체해 둔 상태(overriding)는
  *   충돌이 아니라 installed/outdated로 그린다.
@@ -239,16 +236,10 @@ export function isConflictError(value: unknown): boolean {
 
 // ------------------------------------------------------------ Tauri 명령
 
-export function getShellProfilesStatus(
-  mainModel?: string,
-  kimiPlatform?: ShellProfilesStatus["kimiPlatform"],
-  kimiModel?: string,
-): Promise<ShellProfilesStatus> {
+export function getShellProfilesStatus(mainModel?: string): Promise<ShellProfilesStatus> {
   return tauriIpcAdapter.invoke<ShellProfilesStatus>(
     "shell_profiles_status",
-    mainModel === undefined && kimiPlatform === undefined && kimiModel === undefined
-      ? undefined
-      : { mainModel, kimiPlatform, kimiModel },
+    mainModel === undefined ? undefined : { mainModel },
   );
 }
 
@@ -259,26 +250,16 @@ export function getShellProfilesStatus(
 export function applyShellProfiles(
   mainModel: string,
   replaceExisting = false,
-  kimiPlatform: ShellProfilesStatus["kimiPlatform"] = "kimi-code",
-  kimiModel = "k3[1m]",
 ): Promise<ShellProfilesStatus> {
   return tauriIpcAdapter.invoke<ShellProfilesStatus>("shell_profiles_apply", {
     mainModel,
-    kimiPlatform,
-    kimiModel,
     replaceExisting,
   });
 }
 
-export function removeShellProfiles(
-  mainModel?: string,
-  kimiPlatform?: ShellProfilesStatus["kimiPlatform"],
-  kimiModel?: string,
-): Promise<ShellProfilesStatus> {
+export function removeShellProfiles(mainModel?: string): Promise<ShellProfilesStatus> {
   return tauriIpcAdapter.invoke<ShellProfilesStatus>(
     "shell_profiles_remove",
-    mainModel === undefined && kimiPlatform === undefined && kimiModel === undefined
-      ? undefined
-      : { mainModel, kimiPlatform, kimiModel },
+    mainModel === undefined ? undefined : { mainModel },
   );
 }

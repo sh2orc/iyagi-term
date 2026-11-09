@@ -139,14 +139,14 @@ Windows: Claude Code를 네이티브 설치 프로그램으로 설치하고 그 
 
 실행 오류와 대처: `zai_key_missing` — 설정 → Z.ai Coding Plan에서 키를 등록한다. `daemon_outdated` — 실행 중인 데몬이 라우팅을 지원하지 않으므로 데몬을 업데이트하거나 다시 시작한다. `claude_provider_program_mismatch` — 프로필의 실행 파일이 Claude Code가 아니다. `claude_provider_env_conflict` — 프로필에서 충돌하는 환경 변수를 제거한다. [Z.ai Claude Code 연결 안내](https://docs.z.ai/devpack/tool/claude), [Claude Code 환경 변수](https://code.claude.com/docs/en/env-vars), [LLM gateway 설정](https://code.claude.com/docs/en/llm-gateway-connect)
 
-### ccd / ccg / cck 셸 명령
+### ccd / ccg 셸 명령
 
-pane 없이 터미널에서 바로 Claude Code를 시작하는 셸 함수 세 개다. `ccd`는 Anthropic(사용자의 claude.ai 로그인), `ccg`는 위에서 등록한 키의 Z.ai(GLM), `cck`는 **설정 → 연동 → Kimi**에서 고른 플랫폼과 모델로 시작한다. `ccg`와 `cck`는 각각 현재 고른 주 모델을 그대로 따른다.
+pane 없이 터미널에서 바로 Claude Code를 시작하는 셸 함수 두 개다. `ccd`는 Anthropic(사용자의 claude.ai 로그인)으로, `ccg`는 위에서 등록한 키로 Z.ai(GLM)로 라우팅해 시작한다. 둘 다 이 절에서 현재 고른 주 모델을 그대로 따른다.
 
-Kimi Code 멤버십과 Open Platform 키는 서로 호환되지 않으므로 별도 암호화 슬롯에 저장한다. 멤버십은 5시간·주간·월간 할당량을, Open Platform은 사용 가능 잔액을 상태 표시줄에서 확인한다. Kimi Code는 `k3[1m]`, `k3.1-pro[1m]`, `k3.1-pro`(256K)를, Open Platform은 `kimi-k3[1m]`, `kimi-k3.1-pro[1m]`을 고를 수 있다. K3.1 Pro는 항상 Thinking을 켜고 사용한다.
+**설정 → 실행 프로필 → 셸 명령 ccd / ccg**에서 설치한다. 설치하면 `~/.zshrc`에 3줄짜리 마커 블록과 앱 전용 스크립트가 함께 쓰이며, `source ~/.zshrc`를 실행하거나 새 터미널을 열어야 반영된다. 셸 시작 파일 어디에든 사용자가 직접 만든 `ccd`나 `ccg` alias·함수가 이미 있으면 덮어쓰지 않고 설치를 거부한다.
 
-**설정 → 실행 프로필 → 셸 명령 ccd / ccg / cck**에서 설치한다. 설치하면 `~/.zshrc`에 3줄짜리 마커 블록과 앱 전용 스크립트가 함께 쓰이며, `source ~/.zshrc`를 실행하거나 새 터미널을 열어야 반영된다. 셸 시작 파일 어디에든 사용자가 직접 만든 `ccd`·`ccg`·`cck` alias·함수가 이미 있으면 덮어쓰지 않고 설치를 거부한다. Kimi 플랫폼이나 모델을 바꾸면 이 카드도 다시 적용한다.
+0.1.8은 `cck`(Kimi로 실행하는 Claude Code)도 설치했지만 이 명령은 없어졌다. 0.1.8에서 셸 명령을 적용했다면 한 번 다시 적용해 `cck`를 지운다. 그 전까지 `cck`는 지우는 방법만 출력한다. Kimi는 `kimi` CLI(기본 실행 프로필)로 실행한다.
 
-`ccd`는 `~/.claude/settings.json`에 이미 있는 Z.ai `env` 블록을 덮어쓰지 못한다 — Z.ai 자체 설치 스크립트를 이전에 실행했다면 그 블록을 직접 지워야 `ccd`가 Anthropic이 아닌 Z.ai로 계속 연결되는 일을 막을 수 있다. 저장한 Z.ai 키를 삭제하면 `ccg`는, 선택한 Kimi 플랫폼의 키를 삭제하면 `cck`는 시작하는 대신 키를 등록하라는 안내 메시지를 출력한다.
+`ccd`는 `~/.claude/settings.json`에 이미 있는 Z.ai `env` 블록을 덮어쓰지 못한다 — Z.ai 자체 설치 스크립트를 이전에 실행했다면 그 블록을 직접 지워야 `ccd`가 Anthropic이 아닌 Z.ai로 계속 연결되는 일을 막을 수 있다. 저장한 Z.ai 키를 삭제하면 `ccg`는 시작하는 대신 키를 등록하라는 안내 메시지를 출력한다.
 
 zsh 전용(macOS/Linux)이며 Windows는 지원하지 않는다.

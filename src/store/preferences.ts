@@ -67,16 +67,6 @@ export const CLAUDE_PROVIDER_PREFERENCES: readonly ClaudeProviderPreference[] = 
   "zai-coding-plan",
 ];
 
-export type KimiPlatformPreference = "kimi-code" | "kimi-open-platform";
-export const KIMI_PLATFORM_PREFERENCES: readonly KimiPlatformPreference[] = [
-  "kimi-code",
-  "kimi-open-platform",
-];
-export type KimiCodeModel = "k3[1m]" | "k3.1-pro[1m]" | "k3.1-pro";
-export const KIMI_CODE_MODELS: readonly KimiCodeModel[] = ["k3[1m]", "k3.1-pro[1m]", "k3.1-pro"];
-export type KimiOpenModel = "kimi-k3[1m]" | "kimi-k3.1-pro[1m]";
-export const KIMI_OPEN_MODELS: readonly KimiOpenModel[] = ["kimi-k3[1m]", "kimi-k3.1-pro[1m]"];
-
 /**
  * Z.ai 라우팅 시 opus/sonnet 슬롯에 들어갈 주 모델 —
  * term-contracts `ZAI_CLAUDE_MAIN_MODELS`의 미러(데몬이 같은 목록으로 검증한다).
@@ -105,10 +95,6 @@ export interface PreferenceValues {
   claudeProvider: ClaudeProviderPreference;
   /** Z.ai 라우팅 시 주 모델(opus·sonnet 슬롯). claudeProvider가 zai-coding-plan일 때만 쓰인다. */
   zaiMainModel: ZaiMainModel;
-  /** cck가 사용할 Kimi 플랫폼. 각 플랫폼의 키와 모델은 별도로 보관한다. */
-  kimiPlatform: KimiPlatformPreference;
-  kimiCodeModel: KimiCodeModel;
-  kimiOpenModel: KimiOpenModel;
   /** 관측 게이트웨이: Z.ai 라우팅 Claude pane의 토큰 사용량을 데몬이 계량하고
    *  킬 스위치를 제공한다. 데몬 정책은 세션 수명이라 앱이 붙을 때마다 다시
    *  적용한다(참 진실 원본은 이 설정). */
@@ -189,9 +175,6 @@ export const DEFAULT_PREFERENCES: PreferenceValues = {
   codexFullAutonomy: true,
   claudeProvider: "anthropic",
   zaiMainModel: "glm-5.3[1m]",
-  kimiPlatform: "kimi-code",
-  kimiCodeModel: "k3[1m]",
-  kimiOpenModel: "kimi-k3[1m]",
   gatewayObservability: false,
   gatewayBlocked: false,
   gatewayPoolStrategy: "round_robin",
@@ -273,15 +256,6 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
     zaiMainModel: ZAI_MAIN_MODELS.includes(value.zaiMainModel as ZaiMainModel)
       ? (value.zaiMainModel as ZaiMainModel)
       : DEFAULT_PREFERENCES.zaiMainModel,
-    kimiPlatform: KIMI_PLATFORM_PREFERENCES.includes(value.kimiPlatform as KimiPlatformPreference)
-      ? (value.kimiPlatform as KimiPlatformPreference)
-      : DEFAULT_PREFERENCES.kimiPlatform,
-    kimiCodeModel: KIMI_CODE_MODELS.includes(value.kimiCodeModel as KimiCodeModel)
-      ? (value.kimiCodeModel as KimiCodeModel)
-      : DEFAULT_PREFERENCES.kimiCodeModel,
-    kimiOpenModel: KIMI_OPEN_MODELS.includes(value.kimiOpenModel as KimiOpenModel)
-      ? (value.kimiOpenModel as KimiOpenModel)
-      : DEFAULT_PREFERENCES.kimiOpenModel,
     gatewayObservability:
       typeof value.gatewayObservability === "boolean"
         ? value.gatewayObservability
@@ -415,9 +389,6 @@ export interface PreferencesState extends PreferenceValues {
   setClaudeProvider(provider: ClaudeProviderPreference): void;
   /** Z.ai 라우팅 주 모델 — 목록 밖 값은 기본 모델로 되돌린다. */
   setZaiMainModel(model: ZaiMainModel): void;
-  setKimiPlatform(platform: KimiPlatformPreference): void;
-  setKimiCodeModel(model: KimiCodeModel): void;
-  setKimiOpenModel(model: KimiOpenModel): void;
   setGatewayObservability(enabled: boolean): void;
   setGatewayBlocked(blocked: boolean): void;
   /** 키 풀 회전 전략 — 모르는 값은 round_robin으로 되돌린다. */
@@ -496,16 +467,6 @@ export const usePreferences = create<PreferencesState>()(
         }),
       setZaiMainModel: (model) =>
         set({ zaiMainModel: ZAI_MAIN_MODELS.includes(model) ? model : DEFAULT_PREFERENCES.zaiMainModel }),
-      setKimiPlatform: (platform) =>
-        set({
-          kimiPlatform: KIMI_PLATFORM_PREFERENCES.includes(platform)
-            ? platform
-            : DEFAULT_PREFERENCES.kimiPlatform,
-        }),
-      setKimiCodeModel: (model) =>
-        set({ kimiCodeModel: KIMI_CODE_MODELS.includes(model) ? model : DEFAULT_PREFERENCES.kimiCodeModel }),
-      setKimiOpenModel: (model) =>
-        set({ kimiOpenModel: KIMI_OPEN_MODELS.includes(model) ? model : DEFAULT_PREFERENCES.kimiOpenModel }),
       setGatewayObservability: (gatewayObservability) => set({ gatewayObservability }),
       setGatewayBlocked: (gatewayBlocked) => set({ gatewayBlocked }),
       setGatewayPoolStrategy: (strategy) =>
@@ -565,9 +526,6 @@ export const usePreferences = create<PreferencesState>()(
         resourceGuardOverrides: state.resourceGuardOverrides,
         reliefAutoYield: state.reliefAutoYield,
         zaiMainModel: state.zaiMainModel,
-        kimiPlatform: state.kimiPlatform,
-        kimiCodeModel: state.kimiCodeModel,
-        kimiOpenModel: state.kimiOpenModel,
         baseFontSize: state.baseFontSize,
         terminateOnClose: state.terminateOnClose,
         quitBehavior: state.quitBehavior,

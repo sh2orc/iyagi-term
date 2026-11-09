@@ -126,7 +126,7 @@ export function ProfilesPanel(props: ProfilesPanelProps): JSX.Element {
         <CompatibilityMatrix capabilities={props.capabilities ?? null} />
       </> : null}
 
-      {/* 셸에서 바로 쓰는 ccd/ccg/cck — 프로필과 같은 "실행 방법" 묶음이라 여기에 둔다. */}
+      {/* 셸에서 바로 쓰는 ccd/ccg — 프로필과 같은 "실행 방법" 묶음이라 여기에 둔다. */}
       <ShellProfilesCard />
     </section>
   );

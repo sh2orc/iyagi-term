@@ -4,13 +4,9 @@ import { useCallback, useContext, useEffect, useId, useRef, useState } from "rea
 import { isTauri, tauriIpcAdapter } from "../bridge/ipc";
 import { useI18n } from "../../i18n";
 import {
-  KIMI_CODE_MODELS,
-  KIMI_OPEN_MODELS,
   usePreferences,
   ZAI_HAIKU_MODEL,
   ZAI_MAIN_MODELS,
-  type KimiCodeModel,
-  type KimiOpenModel,
   type ZaiMainModel,
 } from "../../store/preferences";
 import { useWorkbenchStore } from "../../store/workbenchStore";
@@ -354,26 +350,9 @@ function ZaiPanel(): JSX.Element {
   );
 }
 
-const KIMI_CODE_MODEL_LABELS: Record<KimiCodeModel, string> = {
-  "k3[1m]": "K3 · 1M",
-  "k3.1-pro[1m]": "K3.1 Pro · 1M",
-  "k3.1-pro": "K3.1 Pro · 256K",
-};
-
-const KIMI_OPEN_MODEL_LABELS: Record<KimiOpenModel, string> = {
-  "kimi-k3[1m]": "Kimi K3 · 1M",
-  "kimi-k3.1-pro[1m]": "Kimi K3.1 Pro · 1M",
-};
-
 function KimiPanel(): JSX.Element {
   const { t } = useI18n();
   const available = isTauri();
-  const platform = usePreferences((s) => s.kimiPlatform);
-  const codeModel = usePreferences((s) => s.kimiCodeModel);
-  const openModel = usePreferences((s) => s.kimiOpenModel);
-  const setPlatform = usePreferences((s) => s.setKimiPlatform);
-  const setCodeModel = usePreferences((s) => s.setKimiCodeModel);
-  const setOpenModel = usePreferences((s) => s.setKimiOpenModel);
   const [configured, setConfigured] = useState(false);
   const [keyLoaded, setKeyLoaded] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -381,8 +360,6 @@ function KimiPanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(false);
-  const platformId = useId();
-  const modelId = useId();
 
   useEffect(() => {
     if (!available) return;
@@ -392,7 +369,7 @@ function KimiPanel(): JSX.Element {
     setEditing(false);
     setApiKey("");
     setError(null);
-    void getKimiKeyStatus(platform).then(
+    void getKimiKeyStatus().then(
       (status) => {
         if (active) {
           setConfigured(status.configured);
@@ -407,14 +384,14 @@ function KimiPanel(): JSX.Element {
       },
     );
     return () => { active = false; };
-  }, [available, platform]);
+  }, [available]);
 
   const save = async () => {
     setBusy(true);
     setError(null);
     setSaved(false);
     try {
-      const status = await saveKimiKey(platform, apiKey);
+      const status = await saveKimiKey(apiKey);
       setConfigured(status.configured);
       setKeyLoaded(true);
       setApiKey("");
@@ -430,7 +407,7 @@ function KimiPanel(): JSX.Element {
     setError(null);
     setSaved(false);
     try {
-      const status = await removeKimiKey(platform);
+      const status = await removeKimiKey();
       setConfigured(status.configured);
       setKeyLoaded(true);
       setApiKey("");
@@ -440,46 +417,13 @@ function KimiPanel(): JSX.Element {
     finally { setBusy(false); }
   };
 
-  const model = platform === "kimi-code" ? codeModel : openModel;
   return (
     <section className="integration-block" data-setting-id="kimi">
       <h2>{t("settings.item.kimi.label")}</h2>
       <p>{t("settings.item.kimi.description")}</p>
       {!available ? <p className="muted">{t("settings.usage.desktopOnly")}</p> : (
         <>
-          <div className="zai-route">
-            <label className="zai-route-model" htmlFor={platformId}>
-              <span>{t("settings.kimi.platform.label")}</span>
-              <select
-                id={platformId}
-                className="setting-select"
-                value={platform}
-                disabled={busy}
-                onChange={(event) => setPlatform(event.target.value as typeof platform)}
-              >
-                <option value="kimi-code">{t("settings.kimi.platform.code")}</option>
-                <option value="kimi-open-platform">{t("settings.kimi.platform.open")}</option>
-              </select>
-            </label>
-            <label className="zai-route-model" htmlFor={modelId}>
-              <span>{t("settings.kimi.model")}</span>
-              <select
-                id={modelId}
-                className="setting-select"
-                value={model}
-                disabled={busy}
-                onChange={(event) => {
-                  if (platform === "kimi-code") setCodeModel(event.target.value as KimiCodeModel);
-                  else setOpenModel(event.target.value as KimiOpenModel);
-                }}
-              >
-                {platform === "kimi-code"
-                  ? KIMI_CODE_MODELS.map((id) => <option key={id} value={id}>{KIMI_CODE_MODEL_LABELS[id]} ({id})</option>)
-                  : KIMI_OPEN_MODELS.map((id) => <option key={id} value={id}>{KIMI_OPEN_MODEL_LABELS[id]} ({id})</option>)}
-              </select>
-            </label>
-            <p className="muted">{t("settings.kimi.modelHint")}</p>
-          </div>
+          <p className="muted">{t("settings.kimi.loginHint")}</p>
           {!keyLoaded ? <p role="status">{t("settings.kimi.checking")}</p> : configured && !editing ? (
             <>
               <p role="status">{saved ? t("settings.kimi.saved") : t("settings.kimi.configured")}</p>
@@ -520,7 +464,6 @@ function KimiPanel(): JSX.Element {
             </>
           )}
           <p className="muted">{t("settings.kimi.security")}</p>
-          <p className="muted">{t("settings.kimi.cckHint")}</p>
         </>
       )}
       {error ? <p className="setting-error" role="alert">{t("settings.usage.error", { message: error })}</p> : null}

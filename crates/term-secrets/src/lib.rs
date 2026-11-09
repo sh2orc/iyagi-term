@@ -1,8 +1,8 @@
 //! Local authenticated encryption. This store never calls an OS keychain.
 //! The random key and ciphertext live in owner-only files, outside settings.
 //!
-//! Shared by the Tauri shell (Z.ai and platform-specific Kimi key settings)
-//! and by `iyagi-termd` (resolves keys at launch time). Both sides open the
+//! Shared by the Tauri shell (Z.ai and Kimi Code key settings) and by
+//! `iyagi-termd` (resolves keys at launch time). Both sides open the
 //! same `<data_dir>/secrets/` directory; the on-disk format
 //! (`FORMAT`/per-slot context/`LIMIT`) is frozen so ciphertext written by an
 //! older app build still decrypts here.
@@ -18,7 +18,6 @@ use zeroize::Zeroizing;
 pub(crate) const FORMAT: &[u8] = b"IYAGI-SECRET-1\0";
 const CONTEXT: &[u8] = b"iyagi:zai-coding-plan-api-key:v1";
 const KIMI_CODE_CONTEXT: &[u8] = b"iyagi:kimi-code-api-key:v1";
-const KIMI_OPEN_PLATFORM_CONTEXT: &[u8] = b"iyagi:kimi-open-platform-api-key:v1";
 pub(crate) const LIMIT: u64 = 4096;
 static ACCESS: Mutex<()> = Mutex::new(());
 
@@ -38,14 +37,6 @@ impl LocalSecretStore {
 
     pub fn kimi_code(data_dir: &Path) -> Self {
         Self::slot(data_dir, "kimi-code.enc", KIMI_CODE_CONTEXT)
-    }
-
-    pub fn kimi_open_platform(data_dir: &Path) -> Self {
-        Self::slot(
-            data_dir,
-            "kimi-open-platform.enc",
-            KIMI_OPEN_PLATFORM_CONTEXT,
-        )
     }
 
     fn slot(data_dir: &Path, file_name: &'static str, context: &'static [u8]) -> Self {
@@ -142,12 +133,18 @@ impl LocalSecretStore {
 }
 
 /// master.key로 암호화하는 저장소 파일(단일 키, 키 풀).
-const MASTER_KEY_USERS: [&str; 4] = [
-    "zai.enc",
-    "keys.enc",
-    "kimi-code.enc",
-    "kimi-open-platform.enc",
-];
+const MASTER_KEY_USERS: [&str; 3] = ["zai.enc", "keys.enc", "kimi-code.enc"];
+
+/// 더는 쓰지 않는 슬롯. 0.1.8의 Kimi Open Platform(종량제) 키가 여기 남는다.
+const RETIRED_SLOTS: [&str; 1] = ["kimi-open-platform.enc"];
+
+/// 은퇴한 슬롯의 암호문을 지운다. 없으면 아무것도 하지 않는다.
+pub fn remove_retired_slots(data_dir: &Path) {
+    let _guard = ACCESS.lock();
+    for file in RETIRED_SLOTS {
+        let _ = fs::remove_file(data_dir.join("secrets").join(file));
+    }
+}
 
 /// master.key가 없으면 만든다. **이미 암호문([`MASTER_KEY_USERS`] 중
 /// 하나)이 있는데 키가 없는 상태에서는 새 키를 만들지 않는다** — 그렇게
@@ -289,6 +286,19 @@ mod tests {
         assert_ne!(bytes, fs::read(store.directory.join("zai.enc")).unwrap());
         store.remove().unwrap();
         assert_eq!(reopened.read().unwrap(), None);
+    }
+
+    #[test]
+    fn retired_open_platform_slot_is_removed_and_others_survive() {
+        let dir = tempfile::tempdir().unwrap();
+        let code = LocalSecretStore::kimi_code(dir.path());
+        code.write("kimi-code-secret").unwrap();
+        let retired = dir.path().join("secrets").join("kimi-open-platform.enc");
+        fs::write(&retired, b"old ciphertext").unwrap();
+        remove_retired_slots(dir.path());
+        assert!(!retired.exists());
+        assert_eq!(code.read().unwrap().as_deref(), Some("kimi-code-secret"));
+        remove_retired_slots(dir.path());
     }
 
     /// `read_zeroizing`은 `read`와 같은 평문을 돌려주되 drop 시 지워지는

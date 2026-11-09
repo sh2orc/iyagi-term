@@ -94,8 +94,6 @@ export const ko = {
   "monitor.quota.remaining": "{percent}% 남음",
   "monitor.quota.usedRemaining": "{used}% 사용 · {remaining}% 남음",
   "monitor.quota.count": "{used} / {limit} 사용",
-  "monitor.quota.balance": "사용 가능 잔액",
-  "monitor.quota.balanceBreakdown": "현금 {cash} · 바우처 {voucher}",
   "monitor.quota.resets": "{time} 초기화",
   "monitor.quota.updated": "{time} 확인",
   "monitor.quota.reason.cli_not_found": "CLI를 찾지 못했습니다.",
@@ -114,6 +112,8 @@ export const ko = {
   "monitor.quota.reason.timeout": "조회 시간이 초과되었습니다.",
   "monitor.quota.reason.credential_store_error": "앱 전용 암호화 키 저장소를 읽지 못했습니다.",
   "monitor.quota.reason.unavailable": "현재 사용량을 확인할 수 없습니다.",
+  "monitor.quota.reason.kimi_login_stale": "kimi CLI 로그인 토큰이 만료됐습니다. kimi를 실행하거나 설정 › 연동 › Kimi에 멤버십 키를 저장하세요.",
+  "monitor.quota.reason.kimi_key_rejected": "저장된 키를 Kimi Code가 받아들이지 않습니다. Open Platform(종량제) 키가 아니라 Kimi Code 콘솔에서 만든 멤버십 키인지 확인하세요.",
 
   // GraphDrawer
   "monitor.graph.aria": "자원 그래프 — 최근 5분",
@@ -225,8 +225,6 @@ export const en: Record<keyof typeof ko, string> = {
   "monitor.quota.remaining": "{percent}% left",
   "monitor.quota.usedRemaining": "{used}% used · {remaining}% left",
   "monitor.quota.count": "{used} / {limit} used",
-  "monitor.quota.balance": "Available balance",
-  "monitor.quota.balanceBreakdown": "Cash {cash} · voucher {voucher}",
   "monitor.quota.resets": "Resets {time}",
   "monitor.quota.updated": "Checked {time}",
   "monitor.quota.reason.cli_not_found": "CLI was not found.",
@@ -245,6 +243,8 @@ export const en: Record<keyof typeof ko, string> = {
   "monitor.quota.reason.timeout": "The usage query timed out.",
   "monitor.quota.reason.credential_store_error": "The app-local encrypted key store could not be read.",
   "monitor.quota.reason.unavailable": "Usage is currently unavailable.",
+  "monitor.quota.reason.kimi_login_stale": "The kimi CLI login token has expired. Run kimi, or store a membership key under Settings › Integrations › Kimi.",
+  "monitor.quota.reason.kimi_key_rejected": "Kimi Code rejects the stored key. Make sure it is a membership key from the Kimi Code console, not a pay-as-you-go Open Platform key.",
 
   // GraphDrawer
   "monitor.graph.aria": "Resource graphs — last 5 minutes",

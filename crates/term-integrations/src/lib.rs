@@ -6,9 +6,9 @@
 //!
 //! * `system` — CLI 탐색/검증, 셸 탐지, 콘솔 숨김.
 //! * `subscriptions` — Z.ai 키 저장/상태, 키 풀, 구독 사용량 조회.
-//! * `kimi` — 플랫폼별 Kimi 키, 멤버십 할당량과 Open Platform 잔액.
+//! * `kimi` — Kimi Code 멤버십 할당량(CLI 로그인 또는 멤버십 키).
 //! * `claude_usage` — Claude Code 상태줄 사용량 캡처 스크립트 관리.
-//! * `shell_profiles` — zsh `ccd`/`ccg`/`cck` 프로필 설치(동의 기반).
+//! * `shell_profiles` — zsh `ccd`/`ccg` 프로필 설치(동의 기반).
 //! * `hooks_json` — CLI hooks settings.json 편집(claude/codex 공용).
 //!
 //! 이 crate에 tauri/React/Ratatui 타입이 들어가지 않는다. bridge는 얇은

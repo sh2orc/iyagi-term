@@ -264,17 +264,14 @@ export const SETTINGS_ITEMS: readonly SettingsItemDef[] = [
   item("kimi", "integrations", [
     "kimi",
     "moonshot",
-    "k3",
-    "k3.1",
-    "pro",
     "coding plan",
-    "open platform",
+    "membership",
+    "멤버십",
     "api key",
-    "cck",
+    "login",
+    "로그인",
+    "usage",
     "사용량",
-    "잔액",
-    "model",
-    "모델",
   ]),
   // 두 hook 카드. id는 IntegrationPanel의 `data-setting-id`와 같아야
   // 검색 결과에서 그 카드로 스크롤된다(HooksPanel의 settingId props).
@@ -301,7 +298,7 @@ export const SETTINGS_ITEMS: readonly SettingsItemDef[] = [
     "hooks.json",
   ]),
   // 실행 프로필 패널 맨 아래의 ShellProfilesCard(data-setting-id와 같은 id).
-  item("shellProfiles", "profiles", ["ccd", "ccg", "cck", "zsh", "zshrc", "alias", "shell", "셸", "함수", "z.ai", "glm", "kimi"]),
+  item("shellProfiles", "profiles", ["ccd", "ccg", "zsh", "zshrc", "alias", "shell", "셸", "함수", "z.ai", "glm"]),
 ];
 
 export function itemsInGroup(id: SettingsGroupId): SettingsItemDef[] {

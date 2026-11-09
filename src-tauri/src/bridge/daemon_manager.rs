@@ -114,7 +114,7 @@ pub async fn binary_build_version(binary: &Path) -> Option<String> {
 // stable per-user location and spawned from there.
 //
 // The same instability exists in dev without any AppImage: a checkout path
-// (`…/target/debug/iyagi-termd`) baked into hooks or the ccd/ccg/cck script dies
+// (`…/target/debug/iyagi-termd`) baked into hooks or the ccd/ccg script dies
 // the moment the repo is moved or renamed. So every path we BAKE — hook
 // commands and the shell profiles alike — points at the stable copy on all
 // platforms, and launching the app refreshes the copy in place (the stamp
@@ -235,7 +235,7 @@ pub fn effective_daemon_binary(located: PathBuf, data_dir: &Path) -> PathBuf {
 }
 
 /// Binary path to bake into hook commands (`iyagi-termd hook`) and the
-/// ccd/ccg/cck shell script: the per-user stable copy, refreshed right here. A
+/// ccd/ccg shell script: the per-user stable copy, refreshed right here. A
 /// baked absolute path must outlive the checkout it came from — a moved or
 /// renamed repo would otherwise leave every baked path dead, and the app
 /// updating would leave it stale. A failed copy falls back to the located
@@ -262,7 +262,7 @@ fn baked_daemon_binary(located: Option<PathBuf>, data_dir: Option<&Path>) -> Opt
     }
 }
 
-/// Startup refresh of the stable copy. The baked paths (ccd/ccg/cck, CLI hooks)
+/// Startup refresh of the stable copy. The baked paths (ccd/ccg, CLI hooks)
 /// point at the copy, so a moved checkout heals just by launching the app;
 /// the stamp check makes this a no-op when nothing changed.
 pub fn refresh_stable_daemon_copy() {

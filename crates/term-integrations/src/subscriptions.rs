@@ -1,5 +1,5 @@
 //! Subscription allowance readers for Codex, Claude Code and Z.ai Coding Plan.
-//! Kimi readers live in `kimi` because their credentials and balance schema differ.
+//! The Kimi Code reader lives in `kimi` because it reads the Kimi CLI login.
 //! Results are normalized and never include account identities or credentials.
 
 use std::path::Path;
@@ -26,17 +26,7 @@ pub struct ProviderUsage {
     pub detail: Option<String>,
     pub plan: Option<String>,
     pub windows: Vec<UsageWindow>,
-    pub balance: Option<ProviderBalance>,
     pub observed_at: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderBalance {
-    pub available: f64,
-    pub cash: f64,
-    pub voucher: f64,
-    pub currency: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,7 +58,6 @@ impl ProviderUsage {
             detail: None,
             plan: None,
             windows: Vec::new(),
-            balance: None,
             observed_at: None,
         }
     }
@@ -145,9 +134,7 @@ pub async fn refresh(
         read_zai(secrets_data_dir),
         crate::kimi::refresh(secrets_data_dir)
     );
-    let mut providers = vec![codex, claude, zai];
-    providers.extend(kimi);
-    providers
+    vec![codex, claude, zai, kimi]
 }
 
 /// 공급자 탐침 결과 캐시 한 칸: (관측 시각, 결과). 탐침하는 동안 잠금을
@@ -411,7 +398,6 @@ fn parse_codex(response: &Value, account_plan: Option<&str>) -> Option<ProviderU
         detail: None,
         plan,
         windows,
-        balance: None,
         observed_at: Some(unix_now()),
     })
 }
@@ -567,7 +553,6 @@ fn parse_claude_usage(value: &Value) -> Option<ProviderUsage> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         windows,
-        balance: None,
         observed_at: Some(unix_now()),
     })
 }
@@ -636,7 +621,6 @@ fn read_claude_cache(data_dir: &Path) -> ProviderUsage {
         detail: None,
         plan: None,
         windows,
-        balance: None,
         observed_at: value.get("observedAt").and_then(Value::as_u64),
     }
 }
@@ -775,7 +759,6 @@ fn parse_zai(value: &Value) -> Option<ProviderUsage> {
             .and_then(Value::as_str)
             .map(str::to_string),
         windows,
-        balance: None,
         observed_at: Some(unix_now()),
     })
 }

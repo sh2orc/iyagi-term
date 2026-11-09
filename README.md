@@ -214,8 +214,8 @@ level, where the work actually runs:
 
 **AI agent awareness**
 
-- Detects Claude Code, Codex and OpenCode in any pane by observing processes, not by scanning
-  output. The pane header shows agent, session, model and effort, and panes, tabs and the
+- Detects Claude Code, Codex, OpenCode and Kimi CLI in any pane by observing processes, not by scanning
+  output. The pane header shows agent, session, provider, model and effort, and panes, tabs and the
   window title carry working/waiting markers
 - Ended sessions offer **Resume** in place, and the recent agent sessions dialog jumps to,
   resumes or forgets a session. On relaunch, restored panes resume their conversation — at most
@@ -223,7 +223,7 @@ level, where the work actually runs:
 - Notification center for permission requests, questions, finished responses and finished
   managed runs, with desktop notifications while the window is hidden. It works through
   Claude/Codex hooks and an injected OpenCode plugin — your global CLI config is never edited
-- Subscription usage gauges for Codex, Claude and Z.ai in the status bar. The popover shows
+- Subscription usage gauges for Codex, Claude, Z.ai and Kimi, plus Open Platform balance, in the status bar. The popover shows
   each window's usage and reset time, rounded up to the next minute — providers roll windows at
   second boundaries (e.g. 16:59:59) that their own dashboards already show rounded (17:00)
 
@@ -241,6 +241,12 @@ level, where the work actually runs:
   cooldown after rate limits, quarantine after authentication errors, and one failover before
   the response starts streaming. Keys never change mid-conversation
   ([design](docs/implementation/09-key-pool-rotation.md))
+
+**Kimi integration**
+
+- Store separate Kimi Code membership and Open Platform keys under **Settings › Integrations › Kimi**,
+  then launch Claude Code with `cck`. Choose K3 or K3.1 Pro (1M/256K), inspect membership quotas and
+  Open Platform balance, and monitor the active provider/model of the `kimi` CLI
 
 **Korean and CJK input**
 

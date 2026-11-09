@@ -41,6 +41,8 @@ const status = (overrides: Partial<ShellProfilesStatus> = {}): ShellProfilesStat
   conflicts: [],
   overriding: false,
   mainModel: "glm-5.3[1m]",
+  kimiPlatform: "kimi-code",
+  kimiModel: "k3[1m]",
   ...overrides,
 });
 

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { t } from "../../i18n";
-import { agentActivityFromStatus, agentActivityLabel, isAgentBusy, resolveAgentActivity } from "./agentNames";
+import { agentActivityFromStatus, agentActivityLabel, agentDisplayName, isAgentBusy, isKnownAgent, resolveAgentActivity } from "./agentNames";
 
 describe("agentActivityFromStatus", () => {
   it("Claude 레지스트리 status 넷을 세 상태로 접는다", () => {
@@ -58,5 +58,15 @@ describe("agentActivityLabel / isAgentBusy", () => {
     expect(isAgentBusy({ session_status: "shell" })).toBe(true);
     expect(isAgentBusy({ session_status: "waiting" })).toBe(false);
     expect(isAgentBusy({ session_status: null })).toBe(false);
+  });
+});
+
+describe("Kimi CLI provider 표시", () => {
+  it("Kimi provider와 다른 provider를 구분하고 CLI 자체를 인식한다", () => {
+    expect(isKnownAgent("kimi")).toBe(true);
+    expect(agentDisplayName("kimi", "K3", "Kimi Code")).toBe("Kimi Code");
+    expect(agentDisplayName("kimi", "gpt-4.1", "openai")).toBe("Kimi CLI · openai");
+    expect(agentDisplayName("kimi", "kimi-k3.1-pro", "Kimi Open Platform")).toBe("Kimi CLI · Kimi Open Platform");
+    expect(agentDisplayName("kimi", null, null)).toBe("Kimi CLI");
   });
 });

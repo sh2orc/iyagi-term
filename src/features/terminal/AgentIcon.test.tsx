@@ -7,6 +7,7 @@ describe("AgentIcon", () => {
   it.each([
     ["claude", "Claude"],
     ["codex", "OpenAI"],
+    ["kimi", "Kimi"],
   ])("inlines the bundled %s mark as SVG markup", (agent, title) => {
     const html = renderToStaticMarkup(<AgentIcon agent={agent} />);
     // Inline markup is coloured by `.agent-icon svg { fill: currentColor }`. A CSS mask instead

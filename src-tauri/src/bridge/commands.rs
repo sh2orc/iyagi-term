@@ -356,9 +356,9 @@ pub async fn system_query_version(
 /// Two data roots, each matching its writer: the Claude fallback cache is
 /// written by the `claude-usage` hook, whose command line carries no
 /// `--data-dir` (platform default, the same root `claude_usage_call` keeps
-/// the status-line backup under), while the Z.ai key store is read back by
-/// the daemon under the root it was spawned with (`effective_data_dir`, the
-/// same resolution the `zai_api_key_*` commands write through).
+/// the status-line backup under), while Z.ai and Kimi key slots are read back
+/// under the daemon's root (`effective_data_dir`, the same resolution the
+/// `zai_api_key_*` and `kimi_api_key_*` commands write through).
 /// CLI-backed rows are served from a short result cache; `force` (an explicit
 /// user refresh) bypasses it.
 #[tauri::command]
@@ -377,11 +377,10 @@ pub async fn subscription_usage_refresh(
     .await)
 }
 
-/// Data root of the Z.ai key store: the dir the daemon was started with, so
-/// the key saved from Settings is the one `claude_provider` routing resolves
-/// at launch. A resolution failure surfaces as the generic
+/// Shared secret data root: keys saved from Settings are the ones provider
+/// routing and `claude-exec` resolve at launch. A resolution failure surfaces as the generic
 /// `credential_store_error` code — never a path or OS detail.
-fn zai_secret_data_dir(state: &BridgeState) -> Result<std::path::PathBuf, RpcError> {
+fn secret_data_dir(state: &BridgeState) -> Result<std::path::PathBuf, RpcError> {
     state
         .effective_data_dir()
         .map_err(|_| invalid_argument("credential_store_error"))
@@ -391,7 +390,7 @@ fn zai_secret_data_dir(state: &BridgeState) -> Result<std::path::PathBuf, RpcErr
 pub async fn zai_api_key_status(
     state: State<'_, BridgeState>,
 ) -> Result<crate::bridge::subscriptions::KeyStatus, RpcError> {
-    let data_dir = zai_secret_data_dir(&state)?;
+    let data_dir = secret_data_dir(&state)?;
     tokio::task::spawn_blocking(move || crate::bridge::subscriptions::key_status(&data_dir))
         .await
         .map_err(|_| invalid_argument("credential_store_error"))?
@@ -403,7 +402,7 @@ pub async fn zai_api_key_set(
     state: State<'_, BridgeState>,
     api_key: String,
 ) -> Result<crate::bridge::subscriptions::KeyStatus, RpcError> {
-    let data_dir = zai_secret_data_dir(&state)?;
+    let data_dir = secret_data_dir(&state)?;
     tokio::task::spawn_blocking(move || {
         crate::bridge::subscriptions::set_zai_key(&data_dir, &api_key)
     })
@@ -419,8 +418,56 @@ pub async fn zai_api_key_set(
 pub async fn zai_api_key_remove(
     state: State<'_, BridgeState>,
 ) -> Result<crate::bridge::subscriptions::KeyStatus, RpcError> {
-    let data_dir = zai_secret_data_dir(&state)?;
+    let data_dir = secret_data_dir(&state)?;
     tokio::task::spawn_blocking(move || crate::bridge::subscriptions::remove_zai_key(&data_dir))
+        .await
+        .map_err(|_| invalid_argument("credential_store_error"))?
+        .map_err(invalid_argument)?;
+    Ok(crate::bridge::subscriptions::KeyStatus { configured: false })
+}
+
+fn kimi_platform(value: &str) -> Result<crate::bridge::kimi::KimiPlatform, RpcError> {
+    crate::bridge::kimi::KimiPlatform::parse(value).map_err(invalid_argument)
+}
+
+#[tauri::command]
+pub async fn kimi_api_key_status(
+    state: State<'_, BridgeState>,
+    platform: String,
+) -> Result<crate::bridge::subscriptions::KeyStatus, RpcError> {
+    let platform = kimi_platform(&platform)?;
+    let data_dir = secret_data_dir(&state)?;
+    tokio::task::spawn_blocking(move || crate::bridge::kimi::key_status(&data_dir, platform))
+        .await
+        .map_err(|_| invalid_argument("credential_store_error"))?
+        .map_err(invalid_argument)
+}
+
+#[tauri::command]
+pub async fn kimi_api_key_set(
+    state: State<'_, BridgeState>,
+    platform: String,
+    api_key: String,
+) -> Result<crate::bridge::subscriptions::KeyStatus, RpcError> {
+    let platform = kimi_platform(&platform)?;
+    let data_dir = secret_data_dir(&state)?;
+    tokio::task::spawn_blocking(move || {
+        crate::bridge::kimi::set_key(&data_dir, platform, &api_key)
+    })
+    .await
+    .map_err(|_| invalid_argument("credential_store_error"))?
+    .map_err(invalid_argument)?;
+    Ok(crate::bridge::subscriptions::KeyStatus { configured: true })
+}
+
+#[tauri::command]
+pub async fn kimi_api_key_remove(
+    state: State<'_, BridgeState>,
+    platform: String,
+) -> Result<crate::bridge::subscriptions::KeyStatus, RpcError> {
+    let platform = kimi_platform(&platform)?;
+    let data_dir = secret_data_dir(&state)?;
+    tokio::task::spawn_blocking(move || crate::bridge::kimi::remove_key(&data_dir, platform))
         .await
         .map_err(|_| invalid_argument("credential_store_error"))?
         .map_err(invalid_argument)?;
@@ -431,7 +478,7 @@ pub async fn zai_api_key_remove(
 pub async fn zai_key_pool_list(
     state: State<'_, BridgeState>,
 ) -> Result<Vec<crate::bridge::subscriptions::PoolKeyView>, RpcError> {
-    let data_dir = zai_secret_data_dir(&state)?;
+    let data_dir = secret_data_dir(&state)?;
     tokio::task::spawn_blocking(move || crate::bridge::subscriptions::pool_list(&data_dir))
         .await
         .map_err(|_| invalid_argument("credential_store_error"))?
@@ -444,7 +491,7 @@ pub async fn zai_key_pool_add(
     label: String,
     api_key: String,
 ) -> Result<Vec<crate::bridge::subscriptions::PoolKeyView>, RpcError> {
-    let data_dir = zai_secret_data_dir(&state)?;
+    let data_dir = secret_data_dir(&state)?;
     tokio::task::spawn_blocking(move || {
         crate::bridge::subscriptions::pool_add(&data_dir, &label, &api_key)
     })
@@ -458,7 +505,7 @@ pub async fn zai_key_pool_remove(
     state: State<'_, BridgeState>,
     id: String,
 ) -> Result<Vec<crate::bridge::subscriptions::PoolKeyView>, RpcError> {
-    let data_dir = zai_secret_data_dir(&state)?;
+    let data_dir = secret_data_dir(&state)?;
     tokio::task::spawn_blocking(move || crate::bridge::subscriptions::pool_remove(&data_dir, &id))
         .await
         .map_err(|_| invalid_argument("credential_store_error"))?
@@ -834,7 +881,7 @@ fn hooks_rpc_error(e: &crate::bridge::hooks_json::HooksError) -> RpcError {
     RpcError::new(code, format!("{}: {e}", e.code()))
 }
 
-/// zsh 런치 프로필(`ccd`/`ccg`) 상태: 설치 여부 + 적용될 블록·스크립트
+/// zsh 런치 프로필(`ccd`/`ccg`/`cck`) 상태: 설치 여부 + 적용될 블록·스크립트
 /// 미리보기 + 이미 존재하는 정의(충돌). 파일은 건드리지 않는다 — 동의는
 /// 프론트에서 미리보기를 보고 이뤄진다(hooks 연동과 같은 계약).
 ///
@@ -844,29 +891,46 @@ fn hooks_rpc_error(e: &crate::bridge::hooks_json::HooksError) -> RpcError {
 pub async fn shell_profiles_status(
     state: State<'_, BridgeState>,
     main_model: Option<String>,
+    kimi_platform: Option<String>,
+    kimi_model: Option<String>,
 ) -> Result<shell_profiles::ShellProfilesStatus, RpcError> {
     let data_dir = state.effective_data_dir().map_err(BridgeError::into_rpc)?;
     let binary = shell_profiles_binary();
     let model = shell_profiles::sanitize_main_model(main_model);
+    let kimi_platform = shell_profiles::sanitize_kimi_platform(kimi_platform);
+    let kimi_model = shell_profiles::sanitize_kimi_model(&kimi_platform, kimi_model);
     // rc 스캔과 (설치 전) `zsh -ic` 탐지는 최대 3초까지 막힌다 — 워커 스레드로.
     tokio::task::spawn_blocking(move || {
         let home = shell_profiles::home_dir();
-        shell_profiles::status(home.as_deref(), &data_dir, binary.as_deref(), &model)
+        shell_profiles::status(
+            home.as_deref(),
+            &data_dir,
+            binary.as_deref(),
+            &model,
+            &kimi_platform,
+            &kimi_model,
+        )
     })
     .await
     .map_err(|_| shell_profiles_task_error())
 }
 
 /// 동의 후 적용: 스크립트를 쓰고 `~/.zshrc`에 마커 블록을 넣는다(백업 +
-/// atomic 쓰기). 이미 `ccd`/`ccg`가 있으면 거절한다 — 단 `replace_existing`
+/// atomic 쓰기). 이미 `ccd`/`ccg`/`cck`가 있으면 거절한다 — 단 `replace_existing`
 /// (사용자가 "교체"를 고름)이면 그 줄은 남긴 채 블록을 rc 끝으로 옮겨 가린다.
 #[tauri::command]
 pub async fn shell_profiles_apply(
     state: State<'_, BridgeState>,
     main_model: String,
+    kimi_platform: Option<String>,
+    kimi_model: Option<String>,
     replace_existing: Option<bool>,
 ) -> Result<shell_profiles::ShellProfilesStatus, RpcError> {
     let replace_existing = replace_existing.unwrap_or(false);
+    let kimi_platform =
+        kimi_platform.unwrap_or_else(|| shell_profiles::DEFAULT_KIMI_PLATFORM.to_string());
+    let kimi_model = kimi_model
+        .unwrap_or_else(|| shell_profiles::default_kimi_model(&kimi_platform).to_string());
     let data_dir = state.effective_data_dir().map_err(BridgeError::into_rpc)?;
     let binary = shell_profiles_binary();
     tokio::task::spawn_blocking(move || {
@@ -876,6 +940,8 @@ pub async fn shell_profiles_apply(
             &data_dir,
             binary.as_deref(),
             &main_model,
+            &kimi_platform,
+            &kimi_model,
             replace_existing,
         )
     })
@@ -894,13 +960,24 @@ pub async fn shell_profiles_apply(
 pub async fn shell_profiles_remove(
     state: State<'_, BridgeState>,
     main_model: Option<String>,
+    kimi_platform: Option<String>,
+    kimi_model: Option<String>,
 ) -> Result<shell_profiles::ShellProfilesStatus, RpcError> {
     let data_dir = state.effective_data_dir().map_err(BridgeError::into_rpc)?;
     let binary = shell_profiles_binary();
     let model = shell_profiles::sanitize_main_model(main_model);
+    let kimi_platform = shell_profiles::sanitize_kimi_platform(kimi_platform);
+    let kimi_model = shell_profiles::sanitize_kimi_model(&kimi_platform, kimi_model);
     tokio::task::spawn_blocking(move || {
         let home = shell_profiles::home_dir().ok_or(ShellProfilesError::NoHome)?;
-        shell_profiles::remove(&home, &data_dir, binary.as_deref(), &model)
+        shell_profiles::remove(
+            &home,
+            &data_dir,
+            binary.as_deref(),
+            &model,
+            &kimi_platform,
+            &kimi_model,
+        )
     })
     .await
     .map_err(|_| shell_profiles_task_error())?
@@ -913,7 +990,7 @@ pub async fn shell_profiles_remove(
 /// 바뀐다. 앱 기동 때 사본이 갱신되므로 repo를 옮겨도 이 스크립트는 살아
 /// 있다. 상대경로는 절대화(`absolute_daemon_binary`)한다. 이 스크립트는
 /// `~/.zshrc`가 셸마다 source하므로, 실행마다 바뀌는 경로를 박으면 다음
-/// 로그인부터 `ccd`/`ccg`가 죽는다.
+/// 로그인부터 `ccd`/`ccg`/`cck`가 죽는다.
 fn shell_profiles_binary() -> Option<std::path::PathBuf> {
     absolute_daemon_binary(crate::bridge::daemon_manager::hook_daemon_binary())
 }
@@ -928,7 +1005,9 @@ fn shell_profiles_task_error() -> RpcError {
 fn shell_profiles_rpc_error(error: &ShellProfilesError) -> RpcError {
     use crate::bridge::shell_profiles::ShellProfilesError as E;
     let code = match error {
-        E::NoHome | E::InvalidModel => ErrorCode::InvalidArgument,
+        E::NoHome | E::InvalidModel | E::InvalidKimiPlatform | E::InvalidKimiModel => {
+            ErrorCode::InvalidArgument
+        }
         E::Unsupported(_) | E::Read(_) | E::Write(_) | E::Conflict(_) | E::Unreplaceable(_) => {
             ErrorCode::InvalidState
         }

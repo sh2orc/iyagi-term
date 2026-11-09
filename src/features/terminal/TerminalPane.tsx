@@ -525,7 +525,7 @@ function AgentBadge({ agent }: { agent: AgentStatus }): JSX.Element {
       title={agentBadgeTooltip(agent)}
     >
       <AgentIcon agent={agent.agent} />
-      {agentDisplayName(agent.agent, agent.model)}
+      {agentDisplayName(agent.agent, agent.model, agent.provider)}
       {session ? <span className="pane-agent-session">{` \u00b7 ${session}`}</span> : null}
       {model ? (
         <span className={`pane-agent-model${isAgentModelProvisional(agent) ? " provisional" : ""}`}>

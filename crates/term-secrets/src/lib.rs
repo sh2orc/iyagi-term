@@ -1,11 +1,11 @@
 //! Local authenticated encryption. This store never calls an OS keychain.
 //! The random key and ciphertext live in owner-only files, outside settings.
 //!
-//! Shared by the Tauri shell (Settings → Z.ai Coding Plan writes the key) and
-//! by `iyagi-termd` (resolves it at launch time for `claude_provider`
-//! routing). Both sides open the same `<data_dir>/secrets/` directory; the
-//! on-disk format (`FORMAT`/`CONTEXT`/`LIMIT`) is frozen so a `zai.enc`
-//! written by an older app build still decrypts here.
+//! Shared by the Tauri shell (Z.ai and platform-specific Kimi key settings)
+//! and by `iyagi-termd` (resolves keys at launch time). Both sides open the
+//! same `<data_dir>/secrets/` directory; the on-disk format
+//! (`FORMAT`/per-slot context/`LIMIT`) is frozen so ciphertext written by an
+//! older app build still decrypts here.
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -17,6 +17,8 @@ use zeroize::Zeroizing;
 
 pub(crate) const FORMAT: &[u8] = b"IYAGI-SECRET-1\0";
 const CONTEXT: &[u8] = b"iyagi:zai-coding-plan-api-key:v1";
+const KIMI_CODE_CONTEXT: &[u8] = b"iyagi:kimi-code-api-key:v1";
+const KIMI_OPEN_PLATFORM_CONTEXT: &[u8] = b"iyagi:kimi-open-platform-api-key:v1";
 pub(crate) const LIMIT: u64 = 4096;
 static ACCESS: Mutex<()> = Mutex::new(());
 
@@ -25,18 +27,42 @@ pub use pool::{KeyPoolStore, PoolKeyInfo};
 
 pub struct LocalSecretStore {
     directory: PathBuf,
+    file_name: &'static str,
+    context: &'static [u8],
 }
 
 impl LocalSecretStore {
     pub fn new(data_dir: &Path) -> Self {
+        Self::slot(data_dir, "zai.enc", CONTEXT)
+    }
+
+    pub fn kimi_code(data_dir: &Path) -> Self {
+        Self::slot(data_dir, "kimi-code.enc", KIMI_CODE_CONTEXT)
+    }
+
+    pub fn kimi_open_platform(data_dir: &Path) -> Self {
+        Self::slot(
+            data_dir,
+            "kimi-open-platform.enc",
+            KIMI_OPEN_PLATFORM_CONTEXT,
+        )
+    }
+
+    fn slot(data_dir: &Path, file_name: &'static str, context: &'static [u8]) -> Self {
         Self {
             directory: data_dir.join("secrets"),
+            file_name,
+            context,
         }
+    }
+
+    fn path(&self) -> PathBuf {
+        self.directory.join(self.file_name)
     }
 
     pub fn read(&self) -> Result<Option<String>, &'static str> {
         let _guard = ACCESS.lock().map_err(|_| "credential_store_error")?;
-        let Some(bytes) = read_private(&self.directory.join("zai.enc"))? else {
+        let Some(bytes) = read_private(&self.path())? else {
             return Ok(None);
         };
         let key = load_master_key(&self.directory)?;
@@ -52,7 +78,7 @@ impl LocalSecretStore {
         let plain = cipher(&key)?
             .open_in_place(
                 Nonce::assume_unique_for_key(nonce),
-                Aad::from(CONTEXT),
+                Aad::from(self.context),
                 ciphertext.as_mut_slice(),
             )
             .map_err(|_| "credential_store_error")?;
@@ -90,7 +116,7 @@ impl LocalSecretStore {
         cipher(&key)?
             .seal_in_place_append_tag(
                 Nonce::assume_unique_for_key(nonce),
-                Aad::from(CONTEXT),
+                Aad::from(self.context),
                 &mut encrypted,
             )
             .map_err(|_| "credential_store_error")?;
@@ -98,7 +124,7 @@ impl LocalSecretStore {
         envelope.extend_from_slice(&nonce);
         envelope.extend_from_slice(&encrypted);
         let temp = write_private_temp(&self.directory, &envelope)?;
-        let result = fs::rename(&temp, self.directory.join("zai.enc"));
+        let result = fs::rename(&temp, self.path());
         if result.is_err() {
             let _ = fs::remove_file(&temp);
         }
@@ -107,7 +133,7 @@ impl LocalSecretStore {
 
     pub fn remove(&self) -> Result<(), &'static str> {
         let _guard = ACCESS.lock().map_err(|_| "credential_store_error")?;
-        match fs::remove_file(self.directory.join("zai.enc")) {
+        match fs::remove_file(self.path()) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err("credential_store_error"),
@@ -116,7 +142,12 @@ impl LocalSecretStore {
 }
 
 /// master.key로 암호화하는 저장소 파일(단일 키, 키 풀).
-const MASTER_KEY_USERS: [&str; 2] = ["zai.enc", "keys.enc"];
+const MASTER_KEY_USERS: [&str; 4] = [
+    "zai.enc",
+    "keys.enc",
+    "kimi-code.enc",
+    "kimi-open-platform.enc",
+];
 
 /// master.key가 없으면 만든다. **이미 암호문([`MASTER_KEY_USERS`] 중
 /// 하나)이 있는데 키가 없는 상태에서는 새 키를 만들지 않는다** — 그렇게

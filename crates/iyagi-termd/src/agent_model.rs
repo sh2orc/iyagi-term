@@ -652,6 +652,217 @@ pub fn codex_config_model(text: &str, profile_override: Option<&str>) -> ModelOb
 }
 
 // ---------------------------------------------------------------------------
+// Kimi Code CLI 설정
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KimiConfigObservation {
+    pub observation: ModelObservation,
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct KimiProviderConfig {
+    kind: Option<String>,
+    base_url: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct KimiModelConfig {
+    provider: Option<String>,
+    model: Option<String>,
+    display_name: Option<String>,
+    default_effort: Option<String>,
+}
+
+fn kimi_provider_label(name: &str, provider: &KimiProviderConfig) -> Option<String> {
+    let kind = provider.kind.as_deref().unwrap_or("");
+    let base = provider.base_url.as_deref().unwrap_or("");
+    let label = if name == "managed:kimi-code"
+        || (kind == "kimi"
+            && (base.contains("api.kimi.com/coding") || base.contains("api.kimi.ai/coding")))
+    {
+        "Kimi Code".to_string()
+    } else if kind == "kimi"
+        && (base.contains("api.moonshot.ai") || base.contains("api.moonshot.cn"))
+    {
+        "Kimi Open Platform".to_string()
+    } else {
+        name.to_string()
+    };
+    clean_label(&label)
+}
+
+fn kimi_selected_observation(
+    text_default_model: Option<String>,
+    model_override: Option<&str>,
+    providers: &std::collections::HashMap<String, KimiProviderConfig>,
+    models: &std::collections::HashMap<String, KimiModelConfig>,
+    thinking_effort: Option<String>,
+) -> KimiConfigObservation {
+    let alias = model_override.map(str::to_string).or(text_default_model);
+    let Some(alias) = alias else {
+        return KimiConfigObservation::default();
+    };
+    let Some(model) = models.get(&alias) else {
+        return KimiConfigObservation {
+            observation: ModelObservation {
+                model: clean_label(&alias),
+                effort: thinking_effort,
+            },
+            provider: None,
+        };
+    };
+    let provider_name = model.provider.as_deref();
+    let provider = provider_name.and_then(|name| {
+        providers
+            .get(name)
+            .and_then(|provider| kimi_provider_label(name, provider))
+            .or_else(|| clean_label(name))
+    });
+    KimiConfigObservation {
+        observation: ModelObservation {
+            model: model
+                .display_name
+                .as_deref()
+                .and_then(clean_label)
+                .or_else(|| model.model.as_deref().and_then(clean_label))
+                .or_else(|| clean_label(&alias)),
+            effort: model.default_effort.clone().or(thinking_effort),
+        },
+        provider,
+    }
+}
+
+fn kimi_json_config(value: &Value, model_override: Option<&str>) -> KimiConfigObservation {
+    let mut providers = std::collections::HashMap::new();
+    if let Some(entries) = value.get("providers").and_then(Value::as_object) {
+        for (name, entry) in entries {
+            providers.insert(
+                name.clone(),
+                KimiProviderConfig {
+                    kind: entry
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    base_url: entry
+                        .get("base_url")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                },
+            );
+        }
+    }
+    let mut models = std::collections::HashMap::new();
+    if let Some(entries) = value.get("models").and_then(Value::as_object) {
+        for (name, entry) in entries {
+            models.insert(
+                name.clone(),
+                KimiModelConfig {
+                    provider: entry
+                        .get("provider")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    model: entry
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    display_name: entry
+                        .get("display_name")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    default_effort: entry
+                        .get("default_effort")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                },
+            );
+        }
+    }
+    let default_model = value
+        .get("default_model")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let effort = value
+        .pointer("/thinking/effort")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    kimi_selected_observation(default_model, model_override, &providers, &models, effort)
+}
+
+/// Kimi의 `default_model`(또는 `-m`)이 가리키는 실제 모델과 provider.
+/// TOML 설정과 `--config`로 전달되는 JSON을 같은 규칙으로 해석한다.
+pub fn kimi_config_model(text: &str, model_override: Option<&str>) -> KimiConfigObservation {
+    if text.trim_start().starts_with('{') {
+        if let Ok(value) = serde_json::from_str::<Value>(text) {
+            return kimi_json_config(&value, model_override);
+        }
+    }
+    let mut table: Vec<String> = Vec::new();
+    let mut default_model = None;
+    let mut thinking_effort = None;
+    let mut providers: std::collections::HashMap<String, KimiProviderConfig> = Default::default();
+    let mut models: std::collections::HashMap<String, KimiModelConfig> = Default::default();
+    for raw_line in text.lines() {
+        let line = strip_toml_comment(raw_line).trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("[[") {
+            table = vec!["<array>".to_string()];
+            continue;
+        }
+        if let Some(header) = line
+            .strip_prefix('[')
+            .and_then(|line| line.strip_suffix(']'))
+        {
+            table = toml_table_path(header);
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().trim_matches('"');
+        match table.as_slice() {
+            [] => match key {
+                "default_model" => default_model = toml_string(value),
+                _ => {}
+            },
+            [section] if *section == "thinking" && key == "effort" => {
+                thinking_effort = toml_string(value).as_deref().and_then(effort_word)
+            }
+            [section, name] if *section == "providers" => {
+                let provider = providers.entry(name.clone()).or_default();
+                match key {
+                    "type" => provider.kind = toml_string(value),
+                    "base_url" => provider.base_url = toml_string(value),
+                    _ => {}
+                }
+            }
+            [section, name] if *section == "models" => {
+                let model = models.entry(name.clone()).or_default();
+                match key {
+                    "provider" => model.provider = toml_string(value),
+                    "model" => model.model = toml_string(value),
+                    "display_name" => model.display_name = toml_string(value),
+                    "default_effort" => {
+                        model.default_effort = toml_string(value).as_deref().and_then(effort_word)
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    kimi_selected_observation(
+        default_model,
+        model_override,
+        &providers,
+        &models,
+        thinking_effort,
+    )
+}
+
+// ---------------------------------------------------------------------------
 // 실행 인수
 
 /// 실행 인수에서 읽은 모델·effort와(Codex) 프로필.
@@ -659,6 +870,9 @@ pub fn codex_config_model(text: &str, profile_override: Option<&str>) -> ModelOb
 pub struct LaunchModel {
     pub observation: ModelObservation,
     pub codex_profile: Option<String>,
+    pub kimi_model: Option<String>,
+    pub kimi_config: Option<String>,
+    pub kimi_config_file: Option<PathBuf>,
 }
 
 /// `--flag value` 또는 `--flag=value`.
@@ -715,6 +929,20 @@ pub fn launch_model(agent: &str, argv: &[String]) -> LaunchModel {
                             _ => {}
                         }
                     }
+                    step
+                } else {
+                    1
+                }
+            }
+            "kimi" => {
+                if let Some((value, step)) = flag_value(argv, i, &["--model", "-m"]) {
+                    out.kimi_model = clean_label(value);
+                    step
+                } else if let Some((value, step)) = flag_value(argv, i, &["--config-file"]) {
+                    out.kimi_config_file = Some(PathBuf::from(value));
+                    step
+                } else if let Some((value, step)) = flag_value(argv, i, &["--config"]) {
+                    out.kimi_config = Some(value.to_string());
                     step
                 } else {
                     1
@@ -1086,6 +1314,59 @@ model = "not-a-codex-model"
         assert_eq!(
             launch_model("opencode", &args(&["opencode", "--model", "x"])),
             LaunchModel::default()
+        );
+    }
+
+    #[test]
+    fn kimi_config_resolves_alias_model_and_actual_provider() {
+        let config = r#"
+            default_model = "kimi-code/k3"
+            [providers."managed:kimi-code"]
+            type = "kimi"
+            base_url = "https://api.kimi.com/coding/v1"
+            [models."kimi-code/k3"]
+            provider = "managed:kimi-code"
+            model = "k3"
+            display_name = "K3"
+            default_effort = "max"
+            [providers.openai]
+            type = "openai_responses"
+            base_url = "https://api.openai.com/v1"
+            [models."gpt-4.1"]
+            provider = "openai"
+            model = "gpt-4.1"
+        "#;
+        let kimi = kimi_config_model(config, None);
+        assert_eq!(kimi.provider.as_deref(), Some("Kimi Code"));
+        assert_eq!(kimi.observation.model.as_deref(), Some("K3"));
+        assert_eq!(kimi.observation.effort.as_deref(), Some("max"));
+        let openai = kimi_config_model(config, Some("gpt-4.1"));
+        assert_eq!(openai.provider.as_deref(), Some("openai"));
+        assert_eq!(openai.observation.model.as_deref(), Some("gpt-4.1"));
+    }
+
+    #[test]
+    fn kimi_json_config_and_launch_overrides_are_preserved() {
+        let inline = r#"{"default_model":"main","providers":{"moonshot":{"type":"kimi","base_url":"https://api.moonshot.ai/v1"}},"models":{"main":{"provider":"moonshot","model":"kimi-k3.1-pro"}}}"#;
+        let parsed = kimi_config_model(inline, None);
+        assert_eq!(parsed.provider.as_deref(), Some("Kimi Open Platform"));
+        assert_eq!(parsed.observation.model.as_deref(), Some("kimi-k3.1-pro"));
+        let launch = launch_model(
+            "kimi",
+            &args(&[
+                "kimi",
+                "--config",
+                inline,
+                "--model=other",
+                "--config-file",
+                "/tmp/other.toml",
+            ]),
+        );
+        assert_eq!(launch.kimi_model.as_deref(), Some("other"));
+        assert_eq!(launch.kimi_config.as_deref(), Some(inline));
+        assert_eq!(
+            launch.kimi_config_file,
+            Some(PathBuf::from("/tmp/other.toml"))
         );
     }
 

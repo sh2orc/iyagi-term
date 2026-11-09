@@ -205,6 +205,8 @@ pub struct ModelContext<'a> {
     pub data_dir: PathBuf,
     pub claude_home: Option<PathBuf>,
     pub codex_home: Option<PathBuf>,
+    pub kimi_home: Option<PathBuf>,
+    pub kimi_code_home: Option<PathBuf>,
     inputs: &'a InputLog,
     codex_config: &'a CodexConfigCache,
 }
@@ -216,6 +218,8 @@ impl ModelContext<'static> {
             data_dir: state.paths.root().to_path_buf(),
             claude_home: agent_session::claude_home(),
             codex_home: agent_session::codex_home(),
+            kimi_home: agent_session::kimi_home(),
+            kimi_code_home: agent_session::kimi_code_home(),
             inputs: &INPUT_LOG,
             codex_config: &CODEX_CONFIG,
         }
@@ -310,6 +314,8 @@ pub struct ModelWatch {
     rollout: Option<Cached<Option<(u64, ModelObservation)>>>,
     /// Codex `/model`의 즉시 저장값을 이 pane에 귀속한 것(벽시계 ms, 값).
     config_change: Option<(u64, ModelObservation)>,
+    kimi_config: Option<Cached<Option<agent_model::KimiConfigObservation>>>,
+    provider: Option<String>,
     current: Option<(ModelObservation, AgentModelSource)>,
 }
 
@@ -338,6 +344,8 @@ impl ModelWatch {
             rollout_locator: LogLocator::default(),
             rollout: None,
             config_change: None,
+            kimi_config: None,
+            provider: None,
             current: None,
         }
     }
@@ -345,6 +353,10 @@ impl ModelWatch {
     /// 지금 아는 모델·effort와 출처. 한 번도 못 알아냈으면 `None`.
     pub fn current(&self) -> Option<&(ModelObservation, AgentModelSource)> {
         self.current.as_ref()
+    }
+
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
     }
 
     /// 상태줄 브리지가 마지막으로 기록한 사용량 한도 스냅숏(세션별).
@@ -395,9 +407,28 @@ pub fn refresh(
         watch.rollout_locator = LogLocator::default();
     }
     let next = match agent {
-        "claude" => claude_current(ctx, resolved, watch),
-        "codex" => codex_current(ctx, resolved, brief.map(|b| b.pid), watch),
-        _ => None,
+        "claude" => {
+            watch.provider = None;
+            claude_current(ctx, resolved, watch)
+        }
+        "codex" => {
+            watch.provider = None;
+            codex_current(ctx, resolved, brief.map(|b| b.pid), watch)
+        }
+        "kimi" => match kimi_current(ctx, watch) {
+            Some((observation, source, provider)) => {
+                watch.provider = provider;
+                Some((observation, source))
+            }
+            None => {
+                watch.provider = None;
+                None
+            }
+        },
+        _ => {
+            watch.provider = None;
+            None
+        }
     };
     if next.is_some() {
         watch.current = next;
@@ -530,6 +561,51 @@ fn claude_transcript_path(
         .take(PROJECT_SCAN_MAX)
         .map(|entry| entry.path().join(&file_name))
         .find(|path| path.is_file())
+}
+
+fn kimi_current(
+    ctx: &ModelContext<'_>,
+    watch: &mut ModelWatch,
+) -> Option<(ModelObservation, AgentModelSource, Option<String>)> {
+    let launch = watch.launch.as_ref()?;
+    let model_override = launch.kimi_model.as_deref();
+    if let Some(inline) = launch.kimi_config.as_deref() {
+        let parsed = agent_model::kimi_config_model(inline, model_override);
+        if parsed.observation.model.is_some() || parsed.provider.is_some() {
+            return Some((
+                parsed.observation,
+                AgentModelSource::Defaults,
+                parsed.provider,
+            ));
+        }
+        return None;
+    }
+    let path = launch.kimi_config_file.clone().or_else(|| {
+        let current = ctx.kimi_code_home.as_ref()?.join("config.toml");
+        if current.is_file() {
+            Some(current)
+        } else {
+            Some(ctx.kimi_home.as_ref()?.join("config.toml"))
+        }
+    })?;
+    refresh_cached(&mut watch.kimi_config, &path, |path| {
+        if file_stamp(path).is_some_and(|stamp| stamp.len > CODEX_CONFIG_READ_MAX) {
+            return None;
+        }
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|text| agent_model::kimi_config_model(&text, model_override))
+    });
+    let parsed = watch.kimi_config.as_ref()?.value.clone()?;
+    if parsed.observation.model.is_none() && parsed.provider.is_none() {
+        return None;
+    }
+    let source = if model_override.is_some() {
+        AgentModelSource::Defaults
+    } else {
+        AgentModelSource::Config
+    };
+    Some((parsed.observation, source, parsed.provider))
 }
 
 fn codex_current(
@@ -667,6 +743,8 @@ mod tests {
                 data_dir: self.root.join("iyagi"),
                 claude_home: Some(self.root.join("claude")),
                 codex_home: Some(self.root.join("codex")),
+                kimi_home: Some(self.root.join("kimi")),
+                kimi_code_home: Some(self.root.join("kimi-code")),
                 inputs: &self.inputs,
                 codex_config: &self.config,
             }
@@ -972,6 +1050,41 @@ mod tests {
                 Some(AgentModelSource::Rollout)
             )
         );
+    }
+
+    #[test]
+    fn kimi_model_and_provider_follow_the_active_config() {
+        let env = Env::new("kimi-config");
+        env.write(
+            "kimi-code/config.toml",
+            "default_model = \"kimi-code/k3\"\n[providers.\"managed:kimi-code\"]\ntype = \"kimi\"\nbase_url = \"https://api.kimi.com/coding/v1\"\n[models.\"kimi-code/k3\"]\nprovider = \"managed:kimi-code\"\nmodel = \"k3\"\ndisplay_name = \"K3\"\n",
+        );
+        let ctx = env.ctx();
+        let process = brief(9, &["kimi"]);
+        let mut watch = ModelWatch::started_at(1_000);
+        refresh(&ctx, "kimi", Some(&process), None, &mut watch);
+        assert_eq!(observed(&watch).0, Some("K3"));
+        assert_eq!(watch.provider(), Some("Kimi Code"));
+
+        env.write(
+            "kimi-code/config.toml",
+            "default_model = \"gpt\"\n[providers.openai]\ntype = \"openai_responses\"\n[models.gpt]\nprovider = \"openai\"\nmodel = \"gpt-4.1\"\n",
+        );
+        refresh(&ctx, "kimi", Some(&process), None, &mut watch);
+        assert_eq!(observed(&watch).0, Some("gpt-4.1"));
+        assert_eq!(watch.provider(), Some("openai"));
+    }
+
+    #[test]
+    fn kimi_inline_config_is_read_without_the_default_files() {
+        let env = Env::new("kimi-inline");
+        let ctx = env.ctx();
+        let inline = r#"{"default_model":"main","providers":{"moonshot":{"type":"kimi","base_url":"https://api.moonshot.ai/v1"}},"models":{"main":{"provider":"moonshot","model":"kimi-k3.1-pro"}}}"#;
+        let process = brief(9, &["kimi", "--config", inline]);
+        let mut watch = ModelWatch::started_at(1_000);
+        refresh(&ctx, "kimi", Some(&process), None, &mut watch);
+        assert_eq!(observed(&watch).0, Some("kimi-k3.1-pro"));
+        assert_eq!(watch.provider(), Some("Kimi Open Platform"));
     }
 
     #[test]

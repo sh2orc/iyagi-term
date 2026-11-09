@@ -36,7 +36,7 @@ enum Command {
     /// process over to it (outside a terminal pane).
     ClaudeExec {
         /// Provider routing to apply.
-        #[arg(long, value_parser = ["zai", "anthropic"])]
+        #[arg(long, value_parser = ["zai", "anthropic", "kimi-code", "kimi-open-platform"])]
         provider: String,
         /// Z.ai main model for the opus/sonnet slots. Defaults to glm-5.3[1m].
         #[arg(long, value_name = "ID")]

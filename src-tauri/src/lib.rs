@@ -10,10 +10,11 @@ use bridge::commands::{
     bridge_revision, bridge_rpc, bridge_subscribe_events, bridge_subscribe_session,
     bridge_unsubscribe_session, claude_hooks_apply, claude_hooks_remove, claude_hooks_status,
     claude_usage_apply, claude_usage_remove, claude_usage_status, codex_hooks_apply,
-    codex_hooks_remove, codex_hooks_status, shell_profiles_apply, shell_profiles_remove,
-    shell_profiles_status, subscription_usage_refresh, system_git_branch, system_list_clis,
-    system_list_shells, system_locate_program, system_query_version, zai_api_key_remove,
-    zai_api_key_set, zai_api_key_status, zai_key_pool_add, zai_key_pool_list, zai_key_pool_remove,
+    codex_hooks_remove, codex_hooks_status, kimi_api_key_remove, kimi_api_key_set,
+    kimi_api_key_status, shell_profiles_apply, shell_profiles_remove, shell_profiles_status,
+    subscription_usage_refresh, system_git_branch, system_list_clis, system_list_shells,
+    system_locate_program, system_query_version, zai_api_key_remove, zai_api_key_set,
+    zai_api_key_status, zai_key_pool_add, zai_key_pool_list, zai_key_pool_remove,
 };
 use bridge::ime::{ime_state, ime_toggle};
 use bridge::paste_image::paste_save_image;
@@ -147,7 +148,7 @@ pub fn run() {
     // 첫 키 입력 전에 등록해야 한다 — 창·웹뷰를 만들기 전.
     #[cfg(target_os = "macos")]
     disable_press_and_hold();
-    // Refresh the per-user daemon copy that the baked paths (ccd/ccg, CLI
+    // Refresh the per-user daemon copy that the baked paths (ccd/ccg/cck, CLI
     // hooks) point at — heals a moved/renamed checkout just by launching the
     // app, and is a no-op when nothing changed (stamp check).
     bridge::daemon_manager::refresh_stable_daemon_copy();
@@ -190,6 +191,9 @@ pub fn run() {
             zai_key_pool_list,
             zai_key_pool_add,
             zai_key_pool_remove,
+            kimi_api_key_status,
+            kimi_api_key_set,
+            kimi_api_key_remove,
             shell_profiles_status,
             shell_profiles_apply,
             shell_profiles_remove,

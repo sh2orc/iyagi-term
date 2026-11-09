@@ -1,5 +1,5 @@
 import { isTauri, tauriIpcAdapter } from "../bridge/ipc";
-import type { ApiKeyStatus, ClaudeUsageStatus, ProviderUsage } from "./types";
+import type { ApiKeyStatus, ClaudeUsageStatus, KimiPlatform, ProviderUsage } from "./types";
 
 export const SUBSCRIPTION_REFRESH_EVENT = "iyagi-subscription-refresh";
 
@@ -29,6 +29,18 @@ export function saveZaiKey(apiKey: string): Promise<ApiKeyStatus> {
 
 export function removeZaiKey(): Promise<ApiKeyStatus> {
   return tauriIpcAdapter.invoke<ApiKeyStatus>("zai_api_key_remove");
+}
+
+export function getKimiKeyStatus(platform: KimiPlatform): Promise<ApiKeyStatus> {
+  return tauriIpcAdapter.invoke<ApiKeyStatus>("kimi_api_key_status", { platform });
+}
+
+export function saveKimiKey(platform: KimiPlatform, apiKey: string): Promise<ApiKeyStatus> {
+  return tauriIpcAdapter.invoke<ApiKeyStatus>("kimi_api_key_set", { platform, apiKey });
+}
+
+export function removeKimiKey(platform: KimiPlatform): Promise<ApiKeyStatus> {
+  return tauriIpcAdapter.invoke<ApiKeyStatus>("kimi_api_key_remove", { platform });
 }
 
 /** 풀 키 요약(비밀 없음) — 09-key-pool-rotation. */

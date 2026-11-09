@@ -34,7 +34,7 @@ export function summarizeAgents(
   for (const pane of panes) {
     if (!pane.agent || pane.phase !== "live") continue;
     const id = agentDisplayId(pane.agent.agent, pane.agent.model);
-    const kind = kinds.get(id) ?? { id, name: agentDisplayName(pane.agent.agent, pane.agent.model), count: 0 };
+    const kind = kinds.get(id) ?? { id, name: agentDisplayName(pane.agent.agent, pane.agent.model, pane.agent.provider), count: 0 };
     kind.count += 1;
     kinds.set(id, kind);
     total += 1;

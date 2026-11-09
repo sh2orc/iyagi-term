@@ -9,7 +9,7 @@ import { resumeCommand, sessionDisplayLabel } from "../agentSessions/types";
 import { t } from "../../i18n";
 import { isAgentModelProvisional } from "./agentModel";
 
-const KNOWN_AGENTS = new Set(["claude", "codex", "opencode"]);
+const KNOWN_AGENTS = new Set(["claude", "codex", "opencode", "kimi"]);
 
 /** 서명 테이블이 아는 에이전트 id인가(claude/codex/opencode). */
 export function isKnownAgent(id: string): boolean {
@@ -21,7 +21,12 @@ export function agentDisplayId(id: string, model?: string | null): string {
   return id === "claude" && model?.trim().toLowerCase().startsWith("glm") ? "zai" : id;
 }
 
-export function agentDisplayName(id: string, model?: string | null): string {
+export function agentDisplayName(id: string, model?: string | null, provider?: string | null): string {
+  if (id === "kimi") {
+    const actual = provider?.trim();
+    if (actual === "Kimi Code") return "Kimi Code";
+    return actual ? `${t("terminal.agent.kimi")} · ${actual}` : t("terminal.agent.kimi");
+  }
   if (agentDisplayId(id, model) === "zai") return "Z.ai";
   return KNOWN_AGENTS.has(id) ? t(`terminal.agent.${id}`) : id;
 }
@@ -43,7 +48,8 @@ export function agentSessionBadgeLabel(
  * 명령. 명령은 사용자가 터미널에서 직접 칠 수 있는 원문 그대로다.
  */
 export function agentBadgeTooltip(status: AgentStatus): string {
-  const lines = [t("terminal.agent.tooltip", { name: agentDisplayName(status.agent, status.model) })];
+  const lines = [t("terminal.agent.tooltip", { name: agentDisplayName(status.agent, status.model, status.provider) })];
+  if (status.provider) lines.push(t("terminal.agent.provider", { provider: status.provider }));
   if (status.session_id) {
     lines.push(t("terminal.agent.sessionId", { id: status.session_id }));
     const command = resumeCommand(status.agent, status.session_id);

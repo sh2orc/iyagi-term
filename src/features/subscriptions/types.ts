@@ -1,4 +1,5 @@
-export type ProviderId = "codex" | "claude" | "zai";
+export type ProviderId = "codex" | "claude" | "zai" | "kimi-code" | "kimi-open-platform";
+export type KimiPlatform = "kimi-code" | "kimi-open-platform";
 export type ProviderStatus = "ready" | "unavailable" | "notConfigured" | "error";
 
 export interface UsageWindow {
@@ -12,6 +13,13 @@ export interface UsageWindow {
   limit: number | null;
 }
 
+export interface ProviderBalance {
+  available: number;
+  cash: number;
+  voucher: number;
+  currency: "USD";
+}
+
 export interface ProviderUsage {
   provider: ProviderId;
   displayName: string;
@@ -20,6 +28,7 @@ export interface ProviderUsage {
   detail: string | null;
   plan: string | null;
   windows: UsageWindow[];
+  balance?: ProviderBalance | null;
   observedAt: number | null;
 }
 

@@ -1,4 +1,5 @@
 import claude from "../../assets/agents/claude.svg?raw";
+import kimi from "../../assets/agents/kimi.svg?raw";
 import openai from "../../assets/agents/openai.svg?raw";
 import opencodeDark from "../../assets/agents/opencode-dark.svg";
 import opencodeLight from "../../assets/agents/opencode-light.svg";
@@ -11,7 +12,7 @@ export function AgentIcon({ agent }: { agent: string }): JSX.Element | null {
       <img className="agent-icon-light" src={opencodeLight} alt="" />
     </span>
   );
-  const source = agent === "claude" ? claude : agent === "codex" ? openai : null;
+  const source = agent === "claude" ? claude : agent === "codex" ? openai : agent === "kimi" ? kimi : null;
   if (!source) return null;
   // Inline the trusted, bundled marks so Windows WebView2 does not need a CSS
   // image mask. Only these local SVG assets may be used as markup here.

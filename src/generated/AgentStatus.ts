@@ -4,13 +4,13 @@ import type { AgentSessionSource } from "./AgentSessionSource";
 import type { AgentUsageLimits } from "./AgentUsageLimits";
 
 /**
- * 셸 세션 안에서 감지된 AI 코딩 에이전트(claude/codex/opencode) —
+ * 셸 세션 안에서 감지된 AI 코딩 에이전트(claude/codex/opencode/kimi) —
  * 런타임 관찰 결과. 이 구조체 자체는 영속화하지 않고, 세션 id가
  * 확인되면 `agent_sessions` 표에 별도 행으로 기록한다(02 §8).
  */
 export type AgentStatus = { 
 /**
- * 서명 테이블의 에이전트 id("claude" | "codex" | "opencode").
+ * 서명 테이블의 에이전트 id("claude" | "codex" | "opencode" | "kimi").
  */
 agent: string, 
 /**
@@ -39,6 +39,11 @@ session_source?: AgentSessionSource | null,
  * `status`: "idle" | "busy" 등). 라벨용이며 해석하지 않는다.
  */
 session_status?: string | null, 
+/**
+ * 에이전트가 실제로 사용하는 provider 표시 이름(Kimi CLI의 providers.*).
+ * CLI가 여러 백엔드를 지원할 때만 관찰값을 싣고, 알 수 없으면 없음.
+ */
+provider?: string | null, 
 /**
  * 에이전트의 현재 모델 표시 이름(관찰값 — "Opus 5 (1M context)",
  * "gpt-5.6-sol"). `/model` 등으로 바뀌면 즉시 따라간다. 모르면 없음.

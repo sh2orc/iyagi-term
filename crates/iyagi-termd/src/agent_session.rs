@@ -225,6 +225,14 @@ pub(crate) fn codex_home() -> Option<PathBuf> {
     home_dir_from_env("CODEX_HOME", ".codex")
 }
 
+pub(crate) fn kimi_home() -> Option<PathBuf> {
+    home_dir_from_env("KIMI_SHARE_DIR", ".kimi")
+}
+
+pub(crate) fn kimi_code_home() -> Option<PathBuf> {
+    home_dir_from_env("KIMI_CODE_HOME", ".kimi-code")
+}
+
 fn resolve_codex(codex_home: &Path, pid: u32) -> Option<Resolved> {
     let lock_dir = codex_home.join("thread-writer-locks");
     let session_id = codex_session_from_open_fds(pid, &lock_dir)

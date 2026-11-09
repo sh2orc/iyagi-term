@@ -1,23 +1,24 @@
 //! `iyagi-termd claude-exec` — 터미널 pane 밖에서 Claude Code를 띄울 때도
 //! Iyagi이 쓰는 provider 라우팅을 그대로 씌우는 일회성 CLI.
 //!
-//! pane 런치(`claude_provider::resolve`)와 같은 표를 쓰지만 IPC도 데몬도
-//! 거치지 않는다: 이 프로세스가 환경을 정리하고 **자기 자신을 Claude Code로
-//! 바꾼다**(unix `exec`). 그래서 셸 함수·alias(`ccg`)가 이 명령을 감싸면
-//! 사용자는 평소처럼 `claude`를 쓰면서 Z.ai Coding Plan으로 돌 수 있다.
+//! pane 런치와 같은 provider 개념을 쓰지만 IPC도 데몬도 거치지 않는다:
+//! 이 프로세스가 환경을 정리하고 **자기 자신을 Claude Code로 바꾼다**(unix
+//! `exec`). 그래서 셸 함수·alias(`ccg`/`cck`)가 이 명령을 감싸면 Z.ai나
+//! 선택한 Kimi 플랫폼으로 돌 수 있다.
 //!
 //! ```text
-//! iyagi-termd [--data-dir DIR] claude-exec --provider zai|anthropic
+//! iyagi-termd [--data-dir DIR] claude-exec
+//!            --provider zai|anthropic|kimi-code|kimi-open-platform
 //!            [--main-model <id>] [--program <path>] [--] <claude args...>
 //! ```
 //!
 //! 규칙:
 //!
-//! * `--provider zai` — 비밀이 아닌 변수는 `claude_provider::zai_env`가
-//!   만든다(pane과 한 글자도 다르지 않다). 상속받은 다른 provider 키·백엔드
-//!   스위치·모델 지정은 `claude_provider::routed_env_remove`로 먼저 지운다.
-//!   토큰은 데몬 데이터 루트의 로컬 암호화 저장소에서 **실행 시점에** 읽어
-//!   자식 환경에만 얹는다.
+//! * `--provider zai` — 비밀이 아닌 변수는 `claude_provider::zai_env`가 만든다.
+//! * `--provider kimi-code` / `kimi-open-platform` — 공식 Anthropic 호환
+//!   엔드포인트·모델·컨텍스트를 맞추고 각 플랫폼의 인증 변수를 쓴다.
+//! * 라우팅은 상속받은 다른 provider 키·백엔드 스위치·모델 지정을 먼저 지우고,
+//!   토큰은 데이터 루트의 암호화 저장소에서 **실행 시점에** 읽어 자식 환경에만 얹는다.
 //! * `--provider anthropic` — 호스트가 관리하던 변수(base URL·토큰·관리 표식)를
 //!   지워 Claude Code가 원래 구독/API 키로 돌아가게 한다. 나머지는 "우리
 //!   흔적일 때만" 지운다: 모델 변수는 값이 `glm`으로 시작할 때, 튜닝
@@ -38,6 +39,11 @@ use term_contracts::launch::ZAI_CLAUDE_MAIN_MODELS;
 
 /// `--main-model`을 주지 않았을 때의 Z.ai 주 모델(pane 기본값과 같다).
 pub const DEFAULT_ZAI_MAIN_MODEL: &str = ZAI_CLAUDE_MAIN_MODELS[0];
+pub const KIMI_CODE_MAIN_MODEL: &str = "k3[1m]";
+pub const KIMI_OPEN_MAIN_MODEL: &str = "kimi-k3[1m]";
+pub const KIMI_OPEN_HAIKU_MODEL: &str = "kimi-k2.7-code";
+const KIMI_CODE_MODELS: [&str; 3] = ["k3[1m]", "k3.1-pro[1m]", "k3.1-pro"];
+const KIMI_OPEN_MODELS: [&str; 2] = ["kimi-k3[1m]", "kimi-k3.1-pro[1m]"];
 
 /// `--provider anthropic`에서 조건 없이 지우는 변수: 호스트(iyagi)가
 /// 넣어 둔 라우팅 흔적이다. 남아 있으면 Anthropic 구독으로 못 돌아간다.
@@ -72,9 +78,11 @@ const ANTHROPIC_ROUTED_TUNING: [(&str, &str); 3] = [
 /// `--provider` 선택자. 문자열 검증은 clap과 [`plan`] 양쪽에서 한다(직접
 /// 호출하는 테스트·스크립트가 clap을 안 거칠 수 있다).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Provider {
+pub(crate) enum Provider {
     Zai,
     Anthropic,
+    KimiCode,
+    KimiOpenPlatform,
 }
 
 impl Provider {
@@ -82,7 +90,40 @@ impl Provider {
         match raw {
             "zai" => Ok(Self::Zai),
             "anthropic" => Ok(Self::Anthropic),
+            "kimi-code" => Ok(Self::KimiCode),
+            "kimi-open-platform" => Ok(Self::KimiOpenPlatform),
             other => Err(ExecError::UnknownProvider(other.to_string())),
+        }
+    }
+
+    fn token_env(self) -> &'static str {
+        match self {
+            Self::KimiCode => "ANTHROPIC_API_KEY",
+            _ => TOKEN_ENV,
+        }
+    }
+
+    fn settings_label(self) -> &'static str {
+        match self {
+            Self::KimiCode => "Kimi Code",
+            Self::KimiOpenPlatform => "Kimi Open Platform",
+            _ => "Kimi",
+        }
+    }
+
+    fn models(self) -> &'static [&'static str] {
+        match self {
+            Self::KimiCode => &KIMI_CODE_MODELS,
+            Self::KimiOpenPlatform => &KIMI_OPEN_MODELS,
+            _ => &[],
+        }
+    }
+
+    fn default_model(self) -> &'static str {
+        match self {
+            Self::KimiCode => KIMI_CODE_MAIN_MODEL,
+            Self::KimiOpenPlatform => KIMI_OPEN_MAIN_MODEL,
+            _ => "",
         }
     }
 }
@@ -103,9 +144,12 @@ pub struct ExecPlan {
 pub enum ExecError {
     UnknownProvider(String),
     UnsupportedMainModel(String),
+    UnsupportedKimiModel(Provider, String),
     ProgramNotFound,
     KeyMissing,
     KeyUnreadable,
+    KimiKeyMissing(Provider),
+    KimiKeyUnreadable(Provider),
 }
 
 impl ExecError {
@@ -114,15 +158,29 @@ impl ExecError {
     pub fn message(&self) -> String {
         match self {
             Self::UnknownProvider(value) => {
-                format!("claude-exec: unknown --provider `{value}` (expected `zai` or `anthropic`)")
+                format!("claude-exec: unknown --provider `{value}` (expected `zai`, `anthropic`, `kimi-code` or `kimi-open-platform`)")
             }
             Self::UnsupportedMainModel(value) => format!(
                 "claude-exec: unsupported --main-model `{value}` (expected one of {})",
                 ZAI_CLAUDE_MAIN_MODELS.join(", ")
             ),
+            Self::UnsupportedKimiModel(provider, value) => format!(
+                "claude-exec: unsupported --main-model `{value}` for {} (expected one of {})",
+                provider.settings_label(),
+                provider.models().join(", ")
+            ),
             Self::ProgramNotFound => "claude-exec: `claude` was not found on PATH".to_string(),
             Self::KeyMissing => "ccg: Z.ai Coding Plan API key is not registered. Open iyagi → Settings → Z.ai Coding Plan and save your key.".to_string(),
             Self::KeyUnreadable => "ccg: the iyagi key store could not be read (Settings → Z.ai Coding Plan).".to_string(),
+            Self::KimiKeyMissing(provider) => format!(
+                "cck: {} API key is not registered. Open iyagi → Settings → Kimi and save the {} key.",
+                provider.settings_label(),
+                provider.settings_label()
+            ),
+            Self::KimiKeyUnreadable(provider) => format!(
+                "cck: the iyagi key store could not be read (Settings → Kimi → {}).",
+                provider.settings_label()
+            ),
         }
     }
 
@@ -157,6 +215,19 @@ pub fn plan(
                 remove: claude_provider::routed_env_remove(),
             })
         }
+        provider @ (Provider::KimiCode | Provider::KimiOpenPlatform) => {
+            let main_model = main_model.unwrap_or_else(|| provider.default_model());
+            if !provider.models().contains(&main_model) {
+                return Err(ExecError::UnsupportedKimiModel(
+                    provider,
+                    main_model.to_string(),
+                ));
+            }
+            Ok(ExecPlan {
+                set: kimi_env(provider, main_model),
+                remove: kimi_env_remove(),
+            })
+        }
         // Anthropic으로 돌아갈 때는 아무것도 얹지 않는다: Claude Code가
         // 자기 설정(`~/.claude`)과 구독 자격증명을 그대로 쓰게 둔다.
         Provider::Anthropic => Ok(ExecPlan {
@@ -164,6 +235,83 @@ pub fn plan(
             remove: anthropic_remove(current_env),
         }),
     }
+}
+
+fn kimi_env_remove() -> Vec<String> {
+    let mut remove = claude_provider::routed_env_remove();
+    for name in [
+        TOKEN_ENV,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+        "CLAUDE_CODE_EFFORT_LEVEL",
+    ] {
+        if !remove.iter().any(|existing| existing == name) {
+            remove.push(name.to_string());
+        }
+    }
+    remove
+}
+
+fn kimi_env(provider: Provider, main_model: &str) -> BTreeMap<String, String> {
+    let code = provider == Provider::KimiCode;
+    let haiku_model = if code {
+        main_model
+    } else {
+        KIMI_OPEN_HAIKU_MODEL
+    };
+    let context = if code && main_model == "k3.1-pro" {
+        "262144"
+    } else if code {
+        "1048576"
+    } else {
+        "1000000"
+    };
+    let mut env = BTreeMap::new();
+    env.insert(
+        "ANTHROPIC_BASE_URL".to_string(),
+        if code {
+            "https://api.kimi.com/coding/"
+        } else {
+            "https://api.moonshot.ai/anthropic"
+        }
+        .to_string(),
+    );
+    for name in [
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ] {
+        env.insert(name.to_string(), main_model.to_string());
+    }
+    env.insert(
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+        haiku_model.to_string(),
+    );
+    env.insert(
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+        context.to_string(),
+    );
+    env.insert(
+        "CLAUDE_CODE_EFFORT_LEVEL".to_string(),
+        if code { "high" } else { "max" }.to_string(),
+    );
+    if code {
+        env.insert(
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS".to_string(),
+            context.to_string(),
+        );
+    }
+    env.insert(
+        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST".to_string(),
+        "1".to_string(),
+    );
+    env
 }
 
 /// `--provider anthropic`의 `env_remove` 목록. 항상 지우는 것들이 먼저 오고,
@@ -307,10 +455,11 @@ pub fn run(
         Err(error) => return fail(&error),
     };
 
-    // (3) 토큰. Z.ai 라우팅일 때만, 실행 직전에 읽는다. OS 오류 내용은 싣지
+    // (3) 토큰. 라우팅일 때만, 실행 직전에 읽는다. OS 오류 내용은 싣지
     // 않고 reason code를 사용자 안내 문구로만 바꾼다.
-    let token = match Provider::parse(provider) {
-        Ok(Provider::Zai) => match StartToken::read(data_dir) {
+    let selected = Provider::parse(provider).expect("provider was validated by plan");
+    let token = match selected {
+        Provider::Zai => match StartToken::read(data_dir) {
             Ok(start) => Some(start.token),
             Err(error) => {
                 let unreadable =
@@ -323,8 +472,19 @@ pub fn run(
                 return fail(&error);
             }
         },
-        // provider 문자열은 (1)에서 이미 통과했다.
-        _ => None,
+        Provider::KimiCode | Provider::KimiOpenPlatform => {
+            let store = if selected == Provider::KimiCode {
+                term_secrets::LocalSecretStore::kimi_code(data_dir)
+            } else {
+                term_secrets::LocalSecretStore::kimi_open_platform(data_dir)
+            };
+            match store.read_zeroizing() {
+                Ok(Some(token)) if !token.is_empty() => Some(token),
+                Ok(_) => return fail(&ExecError::KimiKeyMissing(selected)),
+                Err(_) => return fail(&ExecError::KimiKeyUnreadable(selected)),
+            }
+        }
+        Provider::Anthropic => None,
     };
 
     // 선택자만 남긴다 — 토큰은 물론이고 실행 인수(프롬프트가 섞일 수 있다)도
@@ -335,7 +495,13 @@ pub fn run(
         "claude-exec: handing off to Claude Code"
     );
     handoff(
-        build_command(&program, args, &planned, token.as_ref().map(|t| t.as_str())),
+        build_command(
+            &program,
+            args,
+            &planned,
+            selected.token_env(),
+            token.as_ref().map(|t| t.as_str()),
+        ),
         &program,
     )
 }
@@ -353,6 +519,7 @@ fn build_command(
     program: &Path,
     args: &[String],
     planned: &ExecPlan,
+    token_env: &str,
     token: Option<&str>,
 ) -> Command {
     let mut command = Command::new(program);
@@ -364,7 +531,7 @@ fn build_command(
         command.env(name, value);
     }
     if let Some(token) = token {
-        command.env(TOKEN_ENV, token);
+        command.env(token_env, token);
     }
     command
         .stdin(Stdio::inherit())
@@ -608,6 +775,126 @@ mod tests {
         let removed: Vec<&str> = planned.remove.iter().map(String::as_str).collect();
         assert_eq!(removed, ANTHROPIC_ALWAYS_REMOVE.to_vec());
         assert!(planned.set.is_empty());
+    }
+
+    #[test]
+    fn kimi_plans_apply_platform_credentials_models_and_context_limits() {
+        let code = plan("kimi-code", Some("k3.1-pro[1m]"), env(&[])).unwrap();
+        assert_eq!(
+            code.set.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.kimi.com/coding/")
+        );
+        assert_eq!(
+            code.set.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("k3.1-pro[1m]")
+        );
+        assert_eq!(
+            code.set
+                .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                .map(String::as_str),
+            Some("k3.1-pro[1m]")
+        );
+        assert_eq!(
+            code.set
+                .get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("1048576")
+        );
+        assert_eq!(Provider::KimiCode.token_env(), "ANTHROPIC_API_KEY");
+
+        let code_256k = plan("kimi-code", Some("k3.1-pro"), env(&[])).unwrap();
+        assert_eq!(
+            code_256k
+                .set
+                .get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("262144")
+        );
+        assert_eq!(
+            code_256k
+                .set
+                .get("CLAUDE_CODE_MAX_CONTEXT_TOKENS")
+                .map(String::as_str),
+            Some("262144")
+        );
+
+        let open = plan("kimi-open-platform", Some("kimi-k3.1-pro[1m]"), env(&[])).unwrap();
+        assert_eq!(
+            open.set.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.moonshot.ai/anthropic")
+        );
+        assert_eq!(
+            open.set.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("kimi-k3.1-pro[1m]")
+        );
+        assert_eq!(
+            open.set
+                .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                .map(String::as_str),
+            Some("kimi-k2.7-code")
+        );
+        assert_eq!(Provider::KimiOpenPlatform.token_env(), TOKEN_ENV);
+        assert!(!code.set.contains_key(TOKEN_ENV));
+        assert!(!open.set.contains_key("ANTHROPIC_API_KEY"));
+
+        let rejected = plan("kimi-code", Some("kimi-k3.1-pro[1m]"), env(&[])).unwrap_err();
+        assert!(matches!(
+            rejected,
+            ExecError::UnsupportedKimiModel(Provider::KimiCode, _)
+        ));
+    }
+
+    #[test]
+    fn kimi_commands_inject_each_stored_key_into_the_official_credential_variable() {
+        let root = tempfile::tempdir().unwrap();
+        term_secrets::LocalSecretStore::kimi_code(root.path())
+            .write("code-secret")
+            .unwrap();
+        term_secrets::LocalSecretStore::kimi_open_platform(root.path())
+            .write("open-secret")
+            .unwrap();
+        for (provider, secret) in [
+            (Provider::KimiCode, "code-secret"),
+            (Provider::KimiOpenPlatform, "open-secret"),
+        ] {
+            let store = if provider == Provider::KimiCode {
+                term_secrets::LocalSecretStore::kimi_code(root.path())
+            } else {
+                term_secrets::LocalSecretStore::kimi_open_platform(root.path())
+            };
+            let token = store.read_zeroizing().unwrap().unwrap();
+            let planned = plan(
+                if provider == Provider::KimiCode {
+                    "kimi-code"
+                } else {
+                    "kimi-open-platform"
+                },
+                Some(provider.default_model()),
+                env(&[]),
+            )
+            .unwrap();
+            let command = build_command(
+                Path::new("claude"),
+                &[],
+                &planned,
+                provider.token_env(),
+                Some(token.as_str()),
+            );
+            let value = command
+                .get_envs()
+                .find(|(name, _)| *name == provider.token_env())
+                .and_then(|(_, value)| value)
+                .unwrap();
+            assert_eq!(value, secret);
+            let other = if provider == Provider::KimiCode {
+                TOKEN_ENV
+            } else {
+                "ANTHROPIC_API_KEY"
+            };
+            assert!(command
+                .get_envs()
+                .any(|(name, value)| name.to_str() == Some(other) && value.is_none()));
+        }
     }
 
     #[test]

@@ -167,6 +167,7 @@ export const ko = {
   "terminal.agent.waiting": "{name} 확인 대기 중 — 권한·질문·대화상자에 답이 필요합니다",
   // 현재 모델·effort(에이전트 기록 — /model·/effort 즉시 반영). 잠정값은 세션 기록 전.
   "terminal.agent.model": "모델: {model}",
+  "terminal.agent.provider": "provider: {provider}",
   "terminal.agent.effort": "effort: {effort}",
   "terminal.agent.modelProvisional": "세션 기록 전 잠정값(실행 인자·설정 기본값)",
   "terminal.resume.title": "{agent} 세션 이어서 열기",
@@ -188,6 +189,7 @@ export const ko = {
   "terminal.agent.claude": "Claude Code",
   "terminal.agent.codex": "Codex",
   "terminal.agent.opencode": "OpenCode",
+  "terminal.agent.kimi": "Kimi CLI",
 } satisfies Record<string, string>;
 
 export const en: Record<keyof typeof ko, string> = {
@@ -353,6 +355,7 @@ export const en: Record<keyof typeof ko, string> = {
   "terminal.agent.waiting": "{name} is waiting for you — a permission, question, or dialog needs an answer",
   // Current model / effort (agent's own record — follows /model and /effort immediately).
   "terminal.agent.model": "Model: {model}",
+  "terminal.agent.provider": "Provider: {provider}",
   "terminal.agent.effort": "Effort: {effort}",
   "terminal.agent.modelProvisional": "Provisional until the session records it (launch flags / config defaults)",
   "terminal.resume.title": "Resume the {agent} session",
@@ -373,6 +376,7 @@ export const en: Record<keyof typeof ko, string> = {
   "terminal.agent.claude": "Claude Code",
   "terminal.agent.codex": "Codex",
   "terminal.agent.opencode": "OpenCode",
+  "terminal.agent.kimi": "Kimi CLI",
 };
 
 export const terminalSection: SectionMessages = { ko, en };

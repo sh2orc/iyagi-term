@@ -1,4 +1,5 @@
 //! Subscription allowance readers for Codex, Claude Code and Z.ai Coding Plan.
+//! Kimi readers live in `kimi` because their credentials and balance schema differ.
 //! Results are normalized and never include account identities or credentials.
 
 use std::path::Path;
@@ -25,7 +26,17 @@ pub struct ProviderUsage {
     pub detail: Option<String>,
     pub plan: Option<String>,
     pub windows: Vec<UsageWindow>,
+    pub balance: Option<ProviderBalance>,
     pub observed_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderBalance {
+    pub available: f64,
+    pub cash: f64,
+    pub voucher: f64,
+    pub currency: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +68,7 @@ impl ProviderUsage {
             detail: None,
             plan: None,
             windows: Vec::new(),
+            balance: None,
             observed_at: None,
         }
     }
@@ -110,9 +122,8 @@ async fn agent_program(
 ///   the platform default on its own (`daemon_manager::default_data_dir`),
 ///   whatever root the daemon process was spawned with.
 /// - `secrets_data_dir`: the daemon's data root
-///   (`BridgeState::effective_data_dir`). The Z.ai key store lives under it
-///   because `iyagi-termd` opens `<root>/secrets` when it resolves
-///   `claude_provider` at launch.
+///   (`BridgeState::effective_data_dir`). Z.ai and Kimi key slots live under it
+///   because the daemon and `claude-exec` open `<root>/secrets` at launch.
 ///
 /// The two only differ while a `--data-dir` override is in play; the
 /// frontend never passes one today, but the split keeps each reader pinned
@@ -128,12 +139,15 @@ pub async fn refresh(
     secrets_data_dir: &Path,
     force: bool,
 ) -> Vec<ProviderUsage> {
-    let (codex, claude, zai) = tokio::join!(
+    let (codex, claude, zai, kimi) = tokio::join!(
         read_codex(force),
         read_claude(hook_data_dir, force),
-        read_zai(secrets_data_dir)
+        read_zai(secrets_data_dir),
+        crate::kimi::refresh(secrets_data_dir)
     );
-    vec![codex, claude, zai]
+    let mut providers = vec![codex, claude, zai];
+    providers.extend(kimi);
+    providers
 }
 
 /// 공급자 탐침 결과 캐시 한 칸: (관측 시각, 결과). 탐침하는 동안 잠금을
@@ -397,6 +411,7 @@ fn parse_codex(response: &Value, account_plan: Option<&str>) -> Option<ProviderU
         detail: None,
         plan,
         windows,
+        balance: None,
         observed_at: Some(unix_now()),
     })
 }
@@ -552,6 +567,7 @@ fn parse_claude_usage(value: &Value) -> Option<ProviderUsage> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         windows,
+        balance: None,
         observed_at: Some(unix_now()),
     })
 }
@@ -620,6 +636,7 @@ fn read_claude_cache(data_dir: &Path) -> ProviderUsage {
         detail: None,
         plan: None,
         windows,
+        balance: None,
         observed_at: value.get("observedAt").and_then(Value::as_u64),
     }
 }
@@ -758,6 +775,7 @@ fn parse_zai(value: &Value) -> Option<ProviderUsage> {
             .and_then(Value::as_str)
             .map(str::to_string),
         windows,
+        balance: None,
         observed_at: Some(unix_now()),
     })
 }

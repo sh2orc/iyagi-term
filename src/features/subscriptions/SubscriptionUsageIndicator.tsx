@@ -104,7 +104,11 @@ export function SubscriptionUsageIndicator(): JSX.Element {
   }, [open]);
 
   const gauges = useMemo(() => quotaGauges(providers), [providers]);
-  const unavailable = providers.filter((provider) => !gauges.some((gauge) => gauge.provider === provider.provider));
+  const balances = providers.filter((provider) => provider.status === "ready" && provider.balance);
+  const unavailable = providers.filter((provider) =>
+    !gauges.some((gauge) => gauge.provider === provider.provider)
+    && !(provider.status === "ready" && provider.balance),
+  );
   const unavailableLabel = (provider: ProviderUsage) => t(
     provider.status === "notConfigured" || provider.reasonCode === "not_configured"
       ? "monitor.quota.needsSetup"
@@ -112,6 +116,7 @@ export function SubscriptionUsageIndicator(): JSX.Element {
   );
   const summary = failed ? t("monitor.quota.refreshFailed") : [
     ...gauges.map((gauge) => `${gauge.name} ${gauge.remaining}%`),
+    ...balances.map((provider) => `${provider.displayName} ${formatBalance(provider.balance!.available)}`),
     ...unavailable.map((provider) => `${provider.displayName} ${unavailableLabel(provider)}`),
   ].join(" · ");
 
@@ -128,6 +133,12 @@ export function SubscriptionUsageIndicator(): JSX.Element {
         {failed ? t("monitor.quota.queryFailed") : providers.length > 0 ? (
           <>
             <QuotaGauges gauges={gauges} />
+            {balances.map((provider) => (
+              <span key={provider.provider} className="strip-quota">
+                <span className="strip-label">{provider.displayName}</span>
+                <span className="strip-quota-value">{formatBalance(provider.balance!.available)}</span>
+              </span>
+            ))}
             {unavailable.map((provider) => (
               <span key={provider.provider} className="strip-quota strip-quota-unavailable"
                 title={reasonText(provider.reasonCode ?? "no_data", t)}>
@@ -156,7 +167,15 @@ export function SubscriptionUsageIndicator(): JSX.Element {
                 <strong>{provider.displayName}</strong>
                 {provider.plan ? <span>{provider.plan}</span> : null}
               </div>
-              {provider.status === "ready" ? provider.windows.map((window) => (
+              {provider.status === "ready" ? provider.balance ? (
+                <div className="subscription-window">
+                  <div><span>{t("monitor.quota.balance")}</span><strong>{formatBalance(provider.balance.available)}</strong></div>
+                  <small>{t("monitor.quota.balanceBreakdown", {
+                    cash: formatBalance(provider.balance.cash),
+                    voucher: formatBalance(provider.balance.voucher),
+                  })}</small>
+                </div>
+              ) : provider.windows.map((window) => (
                 <QuotaWindow key={window.id} window={window} />
               )) : (
                 <p className="muted">{reasonText(provider.reasonCode, t)}</p>
@@ -207,6 +226,15 @@ function formatTime(epochSeconds: number, roundUpToMinute = false): string {
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatBalance(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;

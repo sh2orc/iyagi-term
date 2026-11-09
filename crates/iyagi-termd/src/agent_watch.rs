@@ -1,5 +1,5 @@
 //! AI 코딩 에이전트 감시(자동 감지 베이스): 셸 세션의 PTY 루트(셸)에서
-//! 프로세스 트리를 주기적으로 관찰해 claude/codex/opencode 실행을 알아낸다.
+//! 프로세스 트리를 주기적으로 관찰해 claude/codex/opencode/kimi 실행을 알아낸다.
 //!
 //! 감지는 출력 스캐닝이 아니라 프로세스 관찰로 한다 — 테마·버전·언어와
 //! 무관하게 동작한다. 결과는 `WorkloadSummary.agent`에 실려 기존
@@ -71,6 +71,11 @@ const SIGNATURES: &[AgentSignature] = &[
         id: "opencode",
         binaries: &["opencode"],
         path_markers: &["@opencode-ai/opencode", "/opencode-ai/"],
+    },
+    AgentSignature {
+        id: "kimi",
+        binaries: &["kimi"],
+        path_markers: &["@moonshot-ai/kimi-code", "/kimi-cli/"],
     },
 ];
 
@@ -234,6 +239,7 @@ pub fn stamp_command_agent(
                     .as_ref()
                     .map(|_| AgentSessionSource::Launch),
                 session_status: None,
+                provider: None,
                 model: None,
                 effort: None,
                 model_source: None,
@@ -341,6 +347,7 @@ fn agent_status_eq(a: &AgentStatus, b: &AgentStatus) -> bool {
         && a.session_name == b.session_name
         && a.session_source == b.session_source
         && a.session_status == b.session_status
+        && a.provider == b.provider
         && a.model == b.model
         && a.effort == b.effort
         && a.model_source == b.model_source
@@ -488,6 +495,7 @@ fn tick(state: &Arc<DaemonState>, watched: &mut HashMap<WorkloadId, Watched>) {
                 session_name: None,
                 session_source: None,
                 session_status: None,
+                provider: None,
                 model: None,
                 effort: None,
                 model_source: None,
@@ -532,6 +540,7 @@ fn tick(state: &Arc<DaemonState>, watched: &mut HashMap<WorkloadId, Watched>) {
                     }
                 }
             }
+            status.provider = watch.model.provider().map(str::to_string);
             // 사용량 한도도 같은 규칙: 일시적 읽기 실패로 알던 배지를 지우지
             // 않는다. 진짜 해제는 캐시가 해제된 창으로 재기록되거나 프로세스가
             // 끝날 때 온다(clear_agent_status).
@@ -697,6 +706,9 @@ mod tests {
             brief(3, 1, None, &["codex"]),
         ];
         assert_eq!(detect_agent_in_tree(&tree), Some(("codex", 3)));
+
+        let tree = vec![brief(4, 1, Some("/Users/x/.local/bin/kimi"), &["kimi"])];
+        assert_eq!(detect_agent_in_tree(&tree), Some(("kimi", 4)));
     }
 
     #[test]
@@ -881,6 +893,7 @@ mod tests {
             session_name: Some("name".into()),
             session_source: Some(AgentSessionSource::Registry),
             session_status: Some("idle".into()),
+            provider: None,
             model: Some("Opus 5 (1M context)".into()),
             effort: Some("xhigh".into()),
             model_source: Some(term_contracts::snapshot::AgentModelSource::StatusLine),

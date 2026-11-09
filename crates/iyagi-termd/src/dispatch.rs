@@ -572,6 +572,7 @@ fn agent_session_report(
                     session_name: None,
                     session_source: Some(AgentSessionSource::Hook),
                     session_status: None,
+                    provider: None,
                     model: None,
                     effort: None,
                     model_source: None,

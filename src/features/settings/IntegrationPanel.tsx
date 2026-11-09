@@ -3,7 +3,16 @@
 import { useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { isTauri, tauriIpcAdapter } from "../bridge/ipc";
 import { useI18n } from "../../i18n";
-import { usePreferences, ZAI_HAIKU_MODEL, ZAI_MAIN_MODELS, type ZaiMainModel } from "../../store/preferences";
+import {
+  KIMI_CODE_MODELS,
+  KIMI_OPEN_MODELS,
+  usePreferences,
+  ZAI_HAIKU_MODEL,
+  ZAI_MAIN_MODELS,
+  type KimiCodeModel,
+  type KimiOpenModel,
+  type ZaiMainModel,
+} from "../../store/preferences";
 import { useWorkbenchStore } from "../../store/workbenchStore";
 import {
   addedLines,
@@ -15,10 +24,13 @@ import {
 import {
   applyClaudeUsage,
   getClaudeUsageStatus,
+  getKimiKeyStatus,
   getZaiKeyStatus,
   refreshUsageSoon,
   removeClaudeUsage,
+  removeKimiKey,
   removeZaiKey,
+  saveKimiKey,
   saveZaiKey,
 } from "../subscriptions/client";
 import type { ClaudeUsageStatus } from "../subscriptions/types";
@@ -55,6 +67,7 @@ export function IntegrationPanel(): JSX.Element {
       </section>
       <ClaudeUsagePanel />
       <ZaiPanel />
+      <KimiPanel />
       <GatewayPanel controller={controller} gateway={gateway} />
       <KeyPoolPanel controller={controller} gateway={gateway} />
       <HooksPanel
@@ -334,6 +347,180 @@ function ZaiPanel(): JSX.Element {
               <li>{t("settings.zai.route.note.unavailable")}</li>
             </ul>
           </div>
+        </>
+      )}
+      {error ? <p className="setting-error" role="alert">{t("settings.usage.error", { message: error })}</p> : null}
+    </section>
+  );
+}
+
+const KIMI_CODE_MODEL_LABELS: Record<KimiCodeModel, string> = {
+  "k3[1m]": "K3 · 1M",
+  "k3.1-pro[1m]": "K3.1 Pro · 1M",
+  "k3.1-pro": "K3.1 Pro · 256K",
+};
+
+const KIMI_OPEN_MODEL_LABELS: Record<KimiOpenModel, string> = {
+  "kimi-k3[1m]": "Kimi K3 · 1M",
+  "kimi-k3.1-pro[1m]": "Kimi K3.1 Pro · 1M",
+};
+
+function KimiPanel(): JSX.Element {
+  const { t } = useI18n();
+  const available = isTauri();
+  const platform = usePreferences((s) => s.kimiPlatform);
+  const codeModel = usePreferences((s) => s.kimiCodeModel);
+  const openModel = usePreferences((s) => s.kimiOpenModel);
+  const setPlatform = usePreferences((s) => s.setKimiPlatform);
+  const setCodeModel = usePreferences((s) => s.setKimiCodeModel);
+  const setOpenModel = usePreferences((s) => s.setKimiOpenModel);
+  const [configured, setConfigured] = useState(false);
+  const [keyLoaded, setKeyLoaded] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const platformId = useId();
+  const modelId = useId();
+
+  useEffect(() => {
+    if (!available) return;
+    let active = true;
+    setKeyLoaded(false);
+    setConfigured(false);
+    setEditing(false);
+    setApiKey("");
+    setError(null);
+    void getKimiKeyStatus(platform).then(
+      (status) => {
+        if (active) {
+          setConfigured(status.configured);
+          setKeyLoaded(true);
+        }
+      },
+      (value) => {
+        if (active) {
+          setError(errorText(value));
+          setKeyLoaded(true);
+        }
+      },
+    );
+    return () => { active = false; };
+  }, [available, platform]);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const status = await saveKimiKey(platform, apiKey);
+      setConfigured(status.configured);
+      setKeyLoaded(true);
+      setApiKey("");
+      setSaved(true);
+      setEditing(false);
+      refreshUsageSoon();
+    } catch (value) { setError(errorText(value)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const status = await removeKimiKey(platform);
+      setConfigured(status.configured);
+      setKeyLoaded(true);
+      setApiKey("");
+      setEditing(false);
+      refreshUsageSoon();
+    } catch (value) { setError(errorText(value)); }
+    finally { setBusy(false); }
+  };
+
+  const model = platform === "kimi-code" ? codeModel : openModel;
+  return (
+    <section className="integration-block" data-setting-id="kimi">
+      <h2>{t("settings.item.kimi.label")}</h2>
+      <p>{t("settings.item.kimi.description")}</p>
+      {!available ? <p className="muted">{t("settings.usage.desktopOnly")}</p> : (
+        <>
+          <div className="zai-route">
+            <label className="zai-route-model" htmlFor={platformId}>
+              <span>{t("settings.kimi.platform.label")}</span>
+              <select
+                id={platformId}
+                className="setting-select"
+                value={platform}
+                disabled={busy}
+                onChange={(event) => setPlatform(event.target.value as typeof platform)}
+              >
+                <option value="kimi-code">{t("settings.kimi.platform.code")}</option>
+                <option value="kimi-open-platform">{t("settings.kimi.platform.open")}</option>
+              </select>
+            </label>
+            <label className="zai-route-model" htmlFor={modelId}>
+              <span>{t("settings.kimi.model")}</span>
+              <select
+                id={modelId}
+                className="setting-select"
+                value={model}
+                disabled={busy}
+                onChange={(event) => {
+                  if (platform === "kimi-code") setCodeModel(event.target.value as KimiCodeModel);
+                  else setOpenModel(event.target.value as KimiOpenModel);
+                }}
+              >
+                {platform === "kimi-code"
+                  ? KIMI_CODE_MODELS.map((id) => <option key={id} value={id}>{KIMI_CODE_MODEL_LABELS[id]} ({id})</option>)
+                  : KIMI_OPEN_MODELS.map((id) => <option key={id} value={id}>{KIMI_OPEN_MODEL_LABELS[id]} ({id})</option>)}
+              </select>
+            </label>
+            <p className="muted">{t("settings.kimi.modelHint")}</p>
+          </div>
+          {!keyLoaded ? <p role="status">{t("settings.kimi.checking")}</p> : configured && !editing ? (
+            <>
+              <p role="status">{saved ? t("settings.kimi.saved") : t("settings.kimi.configured")}</p>
+              <div className="integration-actions">
+                <button type="button" disabled={busy} onClick={() => {
+                  setSaved(false);
+                  setError(null);
+                  setEditing(true);
+                }}>{t("settings.kimi.edit")}</button>
+                <button type="button" disabled={busy} onClick={() => void remove()}>{t("settings.kimi.remove")}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p role="status">{configured ? t("settings.kimi.editing") : t("settings.kimi.notConfigured")}</p>
+              <div className="integration-actions">
+                <input
+                  className="integration-key-field"
+                  type="password"
+                  value={apiKey}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label={t("settings.kimi.apiKey")}
+                  placeholder={configured ? t("settings.kimi.replacePlaceholder") : t("settings.kimi.placeholder")}
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+                <button type="button" className="primary" disabled={busy || apiKey.trim().length < 8} onClick={() => void save()}>
+                  {t("settings.kimi.save")}
+                </button>
+                {configured ? (
+                  <button type="button" disabled={busy} onClick={() => {
+                    setApiKey("");
+                    setError(null);
+                    setEditing(false);
+                  }}>{t("settings.cancel")}</button>
+                ) : null}
+              </div>
+            </>
+          )}
+          <p className="muted">{t("settings.kimi.security")}</p>
+          <p className="muted">{t("settings.kimi.cckHint")}</p>
         </>
       )}
       {error ? <p className="setting-error" role="alert">{t("settings.usage.error", { message: error })}</p> : null}

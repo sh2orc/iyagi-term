@@ -52,6 +52,9 @@ afterEach(() => {
   usePreferences.setState({
     claudeProvider: DEFAULT_PREFERENCES.claudeProvider,
     zaiMainModel: DEFAULT_PREFERENCES.zaiMainModel,
+    kimiPlatform: DEFAULT_PREFERENCES.kimiPlatform,
+    kimiCodeModel: DEFAULT_PREFERENCES.kimiCodeModel,
+    kimiOpenModel: DEFAULT_PREFERENCES.kimiOpenModel,
   });
   useWorkbenchStore.setState({ claudeProviderRouting: false });
 });
@@ -110,5 +113,23 @@ describe("Z.ai 라우팅 스위치 — 잠금은 켜는 쪽만", () => {
     const html = renderPanel();
     expect(html).toContain(t("settings.usage.desktopOnly"));
     expect(html).not.toContain('class="zai-route-switch"');
+  });
+});
+
+describe("Kimi 키·모델 관리", () => {
+  it("Kimi Code의 K3·K3.1 Pro 1M/256K 선택지를 보여 준다", () => {
+    const html = renderPanel();
+    expect(html).toContain('data-setting-id="kimi"');
+    expect(html).toContain('value="k3[1m]"');
+    expect(html).toContain('value="k3.1-pro[1m]"');
+    expect(html).toContain('value="k3.1-pro"');
+  });
+
+  it("Open Platform 선택은 별도 K3.1 Pro 모델 ID를 보여 준다", () => {
+    usePreferences.setState({ kimiPlatform: "kimi-open-platform", kimiOpenModel: "kimi-k3.1-pro[1m]" });
+    const html = renderPanel();
+    expect(html).toContain('value="kimi-k3.1-pro[1m]"');
+    expect(html).toContain(t("settings.kimi.platform.open"));
+    expect(html).not.toContain('value="k3.1-pro"');
   });
 });

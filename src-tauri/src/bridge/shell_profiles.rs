@@ -1,4 +1,4 @@
-//! 셸 프로필(ccd/ccg) 어댑터(T13 추출 이후).
+//! 셸 프로필(ccd/ccg/cck) 어댑터(T13 추출 이후).
 //!
 //! 구현은 공용 crate `term-integrations`로 옮겼다. 이 모듈은 기존 GUI
 //! import 경로를 유지하는 re-export다.

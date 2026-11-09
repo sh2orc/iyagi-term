@@ -5,6 +5,46 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.8 — 2026-11-09
+
+Kimi joins the providers IYAGI Term knows about: the Kimi CLI is detected like the other
+agents, Kimi Code membership quota and Open Platform balance appear in the usage popover, and
+a third shell command, `cck`, starts Claude Code against the Kimi platform and model you pick.
+
+### Kimi integration
+
+- **Two platforms, two key slots.** Settings › Integrations › Kimi stores a Kimi Code
+  membership key and a Kimi Open Platform key in separate encrypted slots (`term-secrets`,
+  like the Z.ai key). The two platforms do not accept each other's keys, so replacing or
+  deleting one never touches the other.
+- **`cck` starts Claude Code on Kimi.** Launch profiles now install `ccd`, `ccg` and `cck`.
+  `cck` uses the platform and main model selected in the Kimi card: Kimi Code offers
+  `k3[1m]`, `k3.1-pro[1m]` and `k3.1-pro` (256K); Open Platform offers `kimi-k3[1m]` and
+  `kimi-k3.1-pro[1m]`. Context limits and every task tier follow the selected model, and
+  inherited provider keys, backend switches and model overrides are cleared before launch.
+  The key is read from the encrypted store at launch and never written to a shell file. If the
+  selected platform has no key, `cck` says so instead of starting. Re-apply the launch profile
+  after changing the platform or model.
+- **Usage and balance.** The status bar's usage popover shows Kimi Code's 5-hour, weekly and
+  monthly allowance and the Open Platform's available balance (cash and voucher).
+- **Kimi CLI awareness.** The daemon detects the `kimi` CLI in any pane by its process, like
+  Claude Code, Codex and OpenCode. The pane header shows its model, effort and — new for every
+  agent that supports several backends — the provider it is actually using (Kimi Code, Kimi
+  Open Platform or a custom provider), read from `config.toml` or an inline `--config`.
+
+### Upgrading from 0.1.7
+
+`cck` works as soon as the app has started once (it refreshes the daemon copy the shell
+command runs). Detecting the Kimi CLI and showing providers in pane headers need the 0.1.8
+daemon: Settings › General will say a newer daemon is installed — press **Restart**.
+Restarting ends open terminals; agent conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.8_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.8/IYAGI.Term_0.1.8_aarch64.dmg) | `e346f546092c4bc4a506d429776a63177f28b1c3b90fe4a1f8038797785becb1` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.7 — 2026-11-07
 
 A small renderer release: long sessions in the WebGL renderer no longer pick up stray glyph

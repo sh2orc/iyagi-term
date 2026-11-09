@@ -27,10 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.7](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.7)** (2026-11-07) —
-a small renderer release: long WebGL sessions no longer pick up stray glyph fragments after
-the glyph atlas is cleared, and a frame that cannot settle falls back to the DOM renderer
-instead of painting stale coordinates. See [what's new](#whats-new-in-017).
+**Latest: [0.1.8](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.8)** (2026-11-09) —
+Kimi integration: the Kimi CLI is detected like the other agents, Kimi Code quota and Open
+Platform balance appear in the usage popover, and `cck` starts Claude Code on the Kimi
+platform and model you pick. See [what's new](#whats-new-in-018).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +40,12 @@ instead of painting stale coordinates. See [what's new](#whats-new-in-017).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.7_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.7/IYAGI.Term_0.1.7_aarch64.dmg) | 18 MB | `6d333024f5a6d772394d743c012fa720742f57e77fe76f1405a175dee0df8243` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.8_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.8/IYAGI.Term_0.1.8_aarch64.dmg) | 18 MB | `e346f546092c4bc4a506d429776a63177f28b1c3b90fe4a1f8038797785becb1` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.7_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.8_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +80,14 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.8
+
+- **Kimi integration.** Settings › Integrations › Kimi stores Kimi Code membership and Open
+  Platform keys in separate encrypted slots. The new `cck` shell command starts Claude Code on
+  the selected platform and model (K3 or K3.1 Pro, 1M/256K context), the usage popover shows
+  membership quota and Open Platform balance, and the `kimi` CLI is detected in panes with its
+  model and provider. Full notes: [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.7
 
@@ -413,7 +421,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.7** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.8** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

@@ -26,10 +26,10 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.7](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.7)** (2026-11-07) —
-작은 렌더러 릴리스: WebGL 렌더러를 오래 쓰다 글리프 아틀라스를 비운 뒤에도 다른 글자의 조각이
-남지 않고, 한 프레임 안에서 아틀라스가 안정되지 않으면 낡은 좌표로 그리는 대신 DOM 렌더러로
-넘어갑니다. [새로운 점](#017의-새로운-점)을 참고하세요.
+**최신: [0.1.8](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.8)** (2026-11-09) —
+Kimi 연동: Kimi CLI를 다른 에이전트처럼 감지하고, Kimi Code 할당량과 Open Platform 잔액을 사용량
+팝오버에 보여 주며, `cck`로 고른 Kimi 플랫폼·모델의 Claude Code를 시작합니다.
+[새로운 점](#018의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -39,12 +39,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.7_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.7/IYAGI.Term_0.1.7_aarch64.dmg) | 18 MB | `6d333024f5a6d772394d743c012fa720742f57e77fe76f1405a175dee0df8243` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.8_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.8/IYAGI.Term_0.1.8_aarch64.dmg) | 18 MB | `e346f546092c4bc4a506d429776a63177f28b1c3b90fe4a1f8038797785becb1` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.7_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.8_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -77,6 +77,13 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.8의 새로운 점
+
+- **Kimi 연동.** 설정 › 연동 › Kimi에서 Kimi Code 멤버십 키와 Open Platform 키를 서로 다른 암호화
+  슬롯에 저장합니다. 새 `cck` 셸 명령은 고른 플랫폼·모델(K3 또는 K3.1 Pro, 1M·256K 컨텍스트)로
+  Claude Code를 시작하고, 사용량 팝오버는 멤버십 할당량과 Open Platform 잔액을 보여 주며, pane의
+  `kimi` CLI를 모델·provider와 함께 감지합니다. 전체 노트: [RELEASE.md](RELEASE.md).
 
 ## 0.1.7의 새로운 점
 
@@ -388,7 +395,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.7**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.8**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

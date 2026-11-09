@@ -823,10 +823,7 @@ pub fn kimi_config_model(text: &str, model_override: Option<&str>) -> KimiConfig
         };
         let key = key.trim().trim_matches('"');
         match table.as_slice() {
-            [] => match key {
-                "default_model" => default_model = toml_string(value),
-                _ => {}
-            },
+            [] if key == "default_model" => default_model = toml_string(value),
             [section] if *section == "thinking" && key == "effort" => {
                 thinking_effort = toml_string(value).as_deref().and_then(effort_word)
             }

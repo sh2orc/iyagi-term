@@ -5,6 +5,49 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.9 — 2026-11-09
+
+Kimi now follows the membership alone. The usage gauge reads the quota from the `kimi` CLI
+login or a membership key in the account's own region. Pay-as-you-go Open Platform support
+and the `cck` launcher are gone, and the Kimi CLI becomes a built-in launch profile.
+
+### Kimi
+
+- **Usage that actually reads.** 0.1.8 asked only the mainland China endpoint
+  (`api.kimi.com`) and sent the key without the `Bearer` scheme, so most accounts saw no
+  quota. The gauge now uses the `kimi` CLI login while its access token is still valid. That
+  use is read-only: the app never refreshes the token, because refreshing rotates the CLI's
+  refresh token. Otherwise it uses the membership key stored in Settings › Integrations ›
+  Kimi, tried against the global (`api.kimi.ai`) and mainland deployments; whichever accepts
+  the key is asked first from then on. When the login token has lapsed and no key is stored,
+  the last reading stays on screen with the time it was taken.
+- **Clearer failures.** A key that neither deployment accepts is reported as such, with a hint
+  that it may be an Open Platform key saved where a membership key goes. An expired login
+  suggests running `kimi` or storing a membership key.
+- **Open Platform removed.** Kimi Open Platform is billed per use, unlike the membership.
+  Its key slot, the platform choice and the balance row are gone, and an Open Platform key
+  stored by 0.1.8 is deleted the first time the app refreshes usage.
+- **`cck` removed.** Launch profiles install `ccd` and `ccg` again, as before 0.1.8. Run Kimi
+  with the `kimi` CLI instead.
+
+### Launch profiles
+
+- **Kimi CLI is a built-in profile.** Next to codex, claude and opencode there is now a `kimi`
+  profile. It is filled in automatically when the CLI is found, including its own install
+  directory `~/.kimi-code/bin`. Existing installs receive it once. It is skipped if you already
+  have a Kimi CLI profile or a profile labelled `kimi`.
+
+### Upgrading from 0.1.8
+
+If you applied the shell commands in 0.1.8, Settings › Launch profiles now shows them as out of
+date. Apply them once more to drop `cck`; until then, `cck` only prints how to remove it.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.9_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.9/IYAGI.Term_0.1.9_aarch64.dmg) | `30ed93ab6c4db550db589ed7fbb87fb5ce57361bdba170096fc2e5ea0720f140` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.8 — 2026-11-09
 
 Kimi joins the providers IYAGI Term knows about: the Kimi CLI is detected like the other

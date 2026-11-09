@@ -27,10 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.8](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.8)** (2026-11-09) —
-Kimi integration: the Kimi CLI is detected like the other agents, Kimi Code quota and Open
-Platform balance appear in the usage popover, and `cck` starts Claude Code on the Kimi
-platform and model you pick. See [what's new](#whats-new-in-018).
+**Latest: [0.1.9](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.9)** (2026-11-09) —
+Kimi follows the membership alone: usage is read from the `kimi` CLI login or a membership key
+in the account's region, Open Platform and `cck` are removed, and the Kimi CLI is a built-in
+launch profile. See [what's new](#whats-new-in-019).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +40,12 @@ platform and model you pick. See [what's new](#whats-new-in-018).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.8_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.8/IYAGI.Term_0.1.8_aarch64.dmg) | 18 MB | `e346f546092c4bc4a506d429776a63177f28b1c3b90fe4a1f8038797785becb1` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.9_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.9/IYAGI.Term_0.1.9_aarch64.dmg) | 18 MB | `30ed93ab6c4db550db589ed7fbb87fb5ce57361bdba170096fc2e5ea0720f140` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.8_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.9_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +80,15 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.9
+
+- **Kimi usage that reads, membership only.** The gauge uses the `kimi` CLI login while its token
+  is valid (read-only, never refreshed) or a membership key, in whichever region (kimi.ai or
+  kimi.com) accepts it — 0.1.8 asked only kimi.com and sent the key without `Bearer`. The
+  pay-as-you-go Open Platform and the `cck` launcher are removed; the Kimi CLI is a built-in
+  launch profile instead. Re-apply the shell commands once if you installed them in 0.1.8.
+  Full notes: [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.8
 
@@ -423,7 +432,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.8** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.9** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

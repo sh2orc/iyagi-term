@@ -1,7 +1,7 @@
 /**
  * CLI 프로필 편집 폼 (04 §5, 02 §3 마지막 문단, 01 §7).
  *
- * 폼을 열면 SystemProbe.listClis()로 codex/claude/opencode 후보를
+ * 폼을 열면 SystemProbe.listClis()로 codex/claude/opencode/kimi 후보를
  * 제안한다(실행 파일 경로 · symlink target · 설치 형태 표시). 사용자는
  * 후보를 고르거나 절대 경로를 직접 입력한다. 버전은 "검증된 version
  * query"만 2초 timeout으로 조회하고 결과가 없으면 "감지 안 됨"을

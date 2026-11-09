@@ -4,7 +4,7 @@ import { useProfilesStore, type ProfilesStore } from "./profileStore";
 import type { CliKind, ProfileInterpreter } from "./types";
 import { isWindowsShellShim } from "./validation";
 
-const BUILTIN_KINDS = new Set<CliKind>(["codex", "claude", "opencode"]);
+const BUILTIN_KINDS = new Set<CliKind>(["codex", "claude", "opencode", "kimi"]);
 
 /**
  * Windows의 npm shim(`claude.cmd`·확장자 없는 bash 스크립트)은 관리 실행에서

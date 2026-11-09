@@ -12,7 +12,7 @@
 import type { IpcAdapter } from "./ipc";
 import type { DetectedShell } from "../terminal/shellProfiles";
 
-export type CliCandidateKind = "codex" | "claude" | "opencode" | "custom";
+export type CliCandidateKind = "codex" | "claude" | "opencode" | "kimi" | "custom";
 
 export interface CliCandidate {
   /** Discovered executable/shim path, as-is. */
@@ -44,6 +44,7 @@ const VERSION_ARGS: Readonly<Record<Exclude<CliCandidateKind, "custom">, string>
   codex: "--version",
   claude: "--version",
   opencode: "--version",
+  kimi: "--version",
 };
 
 function kindForProgram(program: string): CliCandidateKind {
@@ -51,6 +52,7 @@ function kindForProgram(program: string): CliCandidateKind {
   if (base.startsWith("codex")) return "codex";
   if (base.startsWith("claude")) return "claude";
   if (base.startsWith("opencode")) return "opencode";
+  if (base.startsWith("kimi")) return "kimi";
   return "custom";
 }
 

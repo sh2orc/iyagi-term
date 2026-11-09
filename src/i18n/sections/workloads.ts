@@ -66,7 +66,7 @@ export const ko = {
   // 관리 실행 대화상자 — direct shell 안내
   "managed.guide.title": "일반 실행 안내(direct shell)",
   "managed.guide.body":
-    "일반 터미널에서 codex/claude/opencode를 직접 입력해도 사용할 수 있습니다. 단, 일반 셸의 자원 관측은 session 단위이므로 같은 셸의 다른 프로세스(dev server 등)가 포함될 수 있습니다. 관리 실행은 대상별 전용 PTY와 OS 그룹으로 더 명확한 attribution을 제공합니다. Windows에서 자동 발견된 .cmd/.bat/.ps1 shim은 일반 셸에서 실행하거나 프로필을 interpreter 형태로 등록하세요.",
+    "일반 터미널에서 codex/claude/opencode/kimi를 직접 입력해도 사용할 수 있습니다. 단, 일반 셸의 자원 관측은 session 단위이므로 같은 셸의 다른 프로세스(dev server 등)가 포함될 수 있습니다. 관리 실행은 대상별 전용 PTY와 OS 그룹으로 더 명확한 attribution을 제공합니다. Windows에서 자동 발견된 .cmd/.bat/.ps1 shim은 일반 셸에서 실행하거나 프로필을 interpreter 형태로 등록하세요.",
 
   // 관리 실행 대화상자 — cwd/argv
   "managed.cwdLabel": "작업 디렉터리(절대 경로 — 존재 확인은 실행 시)",
@@ -172,7 +172,7 @@ export const en: Record<keyof typeof ko, string> = {
   // Managed run dialog — direct shell guide
   "managed.guide.title": "Direct shell guide",
   "managed.guide.body":
-    "You can also run codex/claude/opencode directly in a plain terminal. Note that resource accounting in a plain shell is session-scoped, so other processes in the same shell (such as a dev server) are included. Managed runs provide clearer attribution with a dedicated PTY and OS process group. On Windows, run auto-discovered .cmd/.bat/.ps1 shims in a plain shell, or register the profile in interpreter form.",
+    "You can also run codex/claude/opencode/kimi directly in a plain terminal. Note that resource accounting in a plain shell is session-scoped, so other processes in the same shell (such as a dev server) are included. Managed runs provide clearer attribution with a dedicated PTY and OS process group. On Windows, run auto-discovered .cmd/.bat/.ps1 shims in a plain shell, or register the profile in interpreter form.",
 
   // Managed run dialog — cwd/argv
   "managed.cwdLabel": "Working directory (absolute path — existence checked at launch)",

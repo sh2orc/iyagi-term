@@ -61,7 +61,7 @@ pub fn hide_console_std(command: &mut std::process::Command) -> &mut std::proces
 pub struct CliCandidate {
     /// Absolute executable path as discovered.
     pub program: String,
-    /// `codex` | `claude` | `opencode` (only the three are scanned).
+    /// `codex` | `claude` | `opencode` | `kimi` (only these four are scanned).
     pub kind: &'static str,
     /// Symlink-resolved canonical target (verbatim `\\?\` prefix stripped).
     pub resolved_target: Option<String>,
@@ -273,10 +273,11 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
     Some(value.to_string())
 }
 
-const CLI_NAMES: [(&str, &str); 3] = [
+const CLI_NAMES: [(&str, &str); 4] = [
     ("codex", "codex"),
     ("claude", "claude"),
     ("opencode", "opencode"),
+    ("kimi", "kimi"),
 ];
 
 /// Windows lookup order: a real `.exe`, then the `cmd.exe`-runnable shims,
@@ -579,6 +580,8 @@ fn unix_user_install_dirs(home: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![
         home.join(".local/bin"),
         home.join(".opencode/bin"),
+        // Kimi Code's installer puts `kimi` here (outside a dock-launched PATH).
+        home.join(".kimi-code/bin"),
         home.join(".volta/bin"),
         home.join(".asdf/shims"),
         home.join(".bun/bin"),
@@ -833,6 +836,7 @@ mod tests {
         }
         let dirs = unix_user_install_dirs(home.path());
         assert!(dirs.contains(&home.path().join(".opencode/bin")));
+        assert!(dirs.contains(&home.path().join(".kimi-code/bin")));
         assert!(dirs.contains(&home.path().join(".volta/bin")));
         assert!(dirs.contains(&home.path().join(".npm-global/bin")));
         assert!(dirs.contains(&home.path().join(".local/share/pnpm")));
@@ -885,6 +889,7 @@ mod tests {
             Some("1.0.32".into())
         );
         assert_eq!(extract_version("opencode 0.9 x64"), Some("0.9".into()));
+        assert_eq!(extract_version("2.5.2\n"), Some("2.5.2".into()));
         assert_eq!(
             extract_version("ver 10.0.19045.3208"),
             Some("10.0.19045".into())

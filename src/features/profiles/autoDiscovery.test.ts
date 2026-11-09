@@ -40,6 +40,22 @@ describe("built-in profile auto discovery", () => {
     expect(store.getState().profileByLabel("opencode")?.descriptor.program).toBe("");
   });
 
+  it("fills the kimi built-in from a discovered kimi CLI", async () => {
+    const store = testStore();
+    const kimiProbe: SystemProbe = {
+      async listClis() {
+        return [{ program: "/home/dev/.kimi-code/bin/kimi", kind: "kimi", resolvedTarget: null, installForm: "native" }];
+      },
+      async queryVersion() { return "2.5.2"; },
+    };
+    expect(await autoConfigureDetectedProfiles(kimiProbe, store)).toBe(1);
+    expect(store.getState().profileByLabel("kimi")?.descriptor).toMatchObject({
+      kind: "kimi",
+      program: "/home/dev/.kimi-code/bin/kimi",
+      detected_version: "2.5.2",
+    });
+  });
+
   it("never overwrites a user-selected program", async () => {
     const store = testStore();
     const codex = store.getState().profileByLabel("codex")!;

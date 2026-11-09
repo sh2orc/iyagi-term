@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   PROFILES_EXPORT_VERSION,
+  PROFILES_SEEDED_KEY,
   PROFILES_STORAGE_KEY,
   createProfilesStore,
   normalizeProfileShape,
@@ -59,9 +60,10 @@ beforeEach(() => {
 });
 
 describe("기본 시드 (04 §5 + 03 §8)", () => {
-  it("codex/claude/opencode 세 프로필, program은 감지 전까지 비어 있음", () => {
+  it("codex/claude/opencode/kimi 네 프로필, program은 감지 전까지 비어 있음", () => {
     const profiles = seedProfiles(uuid);
-    expect(profiles.map((p) => p.descriptor.kind)).toEqual(["codex", "claude", "opencode"]);
+    expect(profiles.map((p) => p.descriptor.kind)).toEqual(["codex", "claude", "opencode", "kimi"]);
+    expect(profiles.map((p) => p.label)).toEqual(["codex", "claude", "opencode", "kimi"]);
     for (const p of profiles) {
       expect(p.descriptor.program).toBe("");
       expect(p.descriptor.detected_version).toBeNull();
@@ -140,7 +142,7 @@ describe("localStorage 지속화 round-trip (iyagi.profiles.v1)", () => {
     expect(raw).toBeTruthy();
     const envelope = JSON.parse(raw as string) as { version: number; profiles: LaunchProfile[] };
     expect(envelope.version).toBe(PROFILES_EXPORT_VERSION);
-    expect(envelope.profiles).toHaveLength(4);
+    expect(envelope.profiles).toHaveLength(5);
 
     const b = createProfilesStore(() => storage, uuid);
     expect(b.getState().profiles.map((p) => p.label)).toContain("round-trip");
@@ -149,12 +151,71 @@ describe("localStorage 지속화 round-trip (iyagi.profiles.v1)", () => {
 
   it("storage가 없어도 동작하고 손상된 데이터는 시드로 되돌린다", () => {
     const noStorage = createProfilesStore(() => null, uuid);
-    expect(noStorage.getState().profiles).toHaveLength(3);
+    expect(noStorage.getState().profiles).toHaveLength(4);
 
     const broken = new MemoryStorage();
     broken.setItem(PROFILES_STORAGE_KEY, "{not json");
     const recovered = createProfilesStore(() => broken, uuid);
-    expect(recovered.getState().profiles).toHaveLength(3);
+    expect(recovered.getState().profiles).toHaveLength(4);
+  });
+});
+
+describe("새 기본 CLI 시드 마이그레이션 (iyagi.profiles.seeded.v1)", () => {
+  /** 시드 기록 키가 생기기 전 스토어: codex/claude/opencode만 저장돼 있다. */
+  function legacyStorage(extra: LaunchProfile[] = []): MemoryStorage {
+    const storage = new MemoryStorage();
+    const legacy = seedProfiles(uuid).filter((p) => p.descriptor.kind !== "kimi");
+    legacy[1] = { ...legacy[1], descriptor: { ...legacy[1].descriptor, program: "/opt/homebrew/bin/claude" } };
+    storage.setItem(PROFILES_STORAGE_KEY, serializeProfiles([...legacy, ...extra]));
+    return storage;
+  }
+
+  it("옛 스토어에 kimi 기본 프로필을 끝에 한 번 붙이고 저장한다", () => {
+    const storage = legacyStorage();
+    const store = createProfilesStore(() => storage, uuid);
+    const profiles = store.getState().profiles;
+    expect(profiles.map((p) => p.label)).toEqual(["codex", "claude", "opencode", "kimi"]);
+    expect(profiles[3].descriptor).toMatchObject({ kind: "kimi", program: "" });
+    // 기존 프로필(사용자가 고른 경로)은 그대로.
+    expect(profiles[1].descriptor.program).toBe("/opt/homebrew/bin/claude");
+
+    const saved = parseEnvelope(storage.getItem(PROFILES_STORAGE_KEY) as string).profiles;
+    expect(saved.map((p) => p.label)).toEqual(["codex", "claude", "opencode", "kimi"]);
+    expect(JSON.parse(storage.getItem(PROFILES_SEEDED_KEY) as string)).toEqual(["codex", "claude", "opencode", "kimi"]);
+  });
+
+  it("사용자가 지운 kimi 프로필은 다음 실행에서 되살리지 않는다", () => {
+    const storage = legacyStorage();
+    const first = createProfilesStore(() => storage, uuid);
+    const kimi = first.getState().profileByLabel("kimi") as LaunchProfile;
+    expect(first.getState().removeProfile(kimi.id)).toBe(true);
+
+    const second = createProfilesStore(() => storage, uuid);
+    expect(second.getState().profiles.map((p) => p.label)).toEqual(["codex", "claude", "opencode"]);
+  });
+
+  it("새 설치에서 첫 변경 전에 지워도 되살리지 않는다", () => {
+    const storage = new MemoryStorage();
+    const first = createProfilesStore(() => storage, uuid);
+    const kimi = first.getState().profileByLabel("kimi") as LaunchProfile;
+    first.getState().removeProfile(kimi.id);
+
+    const second = createProfilesStore(() => storage, uuid);
+    expect(second.getState().profiles.map((p) => p.label)).toEqual(["codex", "claude", "opencode"]);
+  });
+
+  it("같은 라벨의 사용자 프로필이 있으면 건드리지 않는다", () => {
+    const storage = legacyStorage([makeProfile("kimi")]);
+    const store = createProfilesStore(() => storage, uuid);
+    const kimiLabelled = store.getState().profiles.filter((p) => p.label === "kimi");
+    expect(kimiLabelled).toHaveLength(1);
+    expect(kimiLabelled[0].descriptor.kind).toBe("custom");
+    expect(JSON.parse(storage.getItem(PROFILES_SEEDED_KEY) as string)).toContain("kimi");
+  });
+
+  it("kimi 종류 프로필을 가져오기·복원에서 받아들인다", () => {
+    const [kimi] = seedProfiles(uuid).filter((p) => p.descriptor.kind === "kimi");
+    expect(normalizeProfileShape(kimi)?.descriptor.kind).toBe("kimi");
   });
 });
 
@@ -185,7 +246,7 @@ describe("JSON 내보내기/가져오기 (버전 필드 검증)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("version");
     // 기존 프로필은 유지된다(거부 시 교체 없음).
-    expect(store.getState().profiles).toHaveLength(3);
+    expect(store.getState().profiles).toHaveLength(4);
   });
 
   it("version 없음·잘못된 JSON·불완전한 프로필 형식 거부", () => {

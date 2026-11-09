@@ -11,7 +11,7 @@
 import type { Enforcement } from "../../generated/Enforcement";
 import { t } from "../../i18n";
 
-export type CliKind = "codex" | "claude" | "opencode" | "custom";
+export type CliKind = "codex" | "claude" | "opencode" | "kimi" | "custom";
 
 export interface CliDescriptorCapabilities {
   turn_events: boolean;
@@ -106,6 +106,7 @@ export const CLI_KIND_LABELS: Record<CliKind, string> = {
   codex: "Codex CLI",
   claude: "Claude Code",
   opencode: "OpenCode",
+  kimi: "Kimi CLI",
   get custom(): string {
     return t("profile.kind.custom");
   },

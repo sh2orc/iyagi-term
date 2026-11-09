@@ -1,7 +1,7 @@
 /**
  * CLI 발견(discovery) + 버전 조회 UI 로직 (04 §5).
  *
- * - 프로필 폼을 열면 probe.listClis()로 codex/claude/opencode 후보를
+ * - 프로필 폼을 열면 probe.listClis()로 codex/claude/opencode/kimi 후보를
  *   제안한다: 실행 파일 경로, symlink target, 설치 형태를 그대로 보여 준다.
  * - 버전 조회는 queryVersion만 2초 timeout으로 실행하고, 실패/거절/시간
  *   초과면 null → "감지 안 됨". 값을 지어내지 않는다.

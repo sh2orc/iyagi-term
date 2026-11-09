@@ -1,7 +1,9 @@
 /**
  * 프로필 스토어 (zustand): localStorage 버전 키 `iyagi.profiles.v1`에
  * 지속화한다. CRUD + 라벨 중복 가드 + JSON 내보내기/가져오기(version 필드
- * 위조/불일치 거부) + 세 CLI 기본 시드(program은 감지될 때까지 비어 있음).
+ * 위조/불일치 거부) + 네 CLI 기본 시드(program은 감지될 때까지 비어 있음).
+ * 시드 목록에 새 CLI가 늘면 기존 스토어에도 그 기본 프로필을 한 번만 더한다
+ * (`iyagi.profiles.seeded.v1`) — 사용자가 지운 기본 프로필은 되살리지 않는다.
  *
  * 비밀은 저장하지 않는다(01 §7): env 항목은 값 또는 OS 보안 저장소 참조
  * 라벨뿐이며 raw 비밀 입력 경로가 아예 없다.
@@ -14,6 +16,8 @@ import { t } from "../../i18n";
 
 export const PROFILES_STORAGE_KEY = "iyagi.profiles.v1";
 export const PROFILES_EXPORT_VERSION = 1;
+/** 이 스토어에 이미 시드한 기본 CLI 종류(JSON 배열). 없으면 [`LEGACY_SEEDED_KINDS`]. */
+export const PROFILES_SEEDED_KEY = "iyagi.profiles.seeded.v1";
 
 /** 최소 localStorage 형태(테스트는 메모리 mock 주입). */
 export interface ProfilesStorage {
@@ -27,7 +31,13 @@ export interface ProfileEnvelope {
   profiles: LaunchProfile[];
 }
 
-const CLI_KINDS = ["codex", "claude", "opencode", "custom"] as const;
+const CLI_KINDS = ["codex", "claude", "opencode", "kimi", "custom"] as const;
+
+type SeedKind = Exclude<CliKind, "custom">;
+/** 기본 시드 순서. 새 CLI는 끝에 붙인다. */
+export const SEED_KINDS: readonly SeedKind[] = ["codex", "claude", "opencode", "kimi"];
+/** 시드 기록 키가 생기기 전(0.1.8 이하) 스토어가 받은 시드. */
+const LEGACY_SEEDED_KINDS: readonly SeedKind[] = ["codex", "claude", "opencode"];
 
 function defaultUuid(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } };
@@ -35,8 +45,8 @@ function defaultUuid(): string {
   return `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function seedProfiles(uuid: () => string = defaultUuid): LaunchProfile[] {
-  const make = (kind: "codex" | "claude" | "opencode"): LaunchProfile => ({
+function seedProfile(kind: SeedKind, uuid: () => string): LaunchProfile {
+  return {
     id: uuid(),
     label: kind,
     descriptor: {
@@ -52,8 +62,40 @@ export function seedProfiles(uuid: () => string = defaultUuid): LaunchProfile[] 
     env: [],
     notes: "",
     interpreter: null,
-  });
-  return [make("codex"), make("claude"), make("opencode")];
+  };
+}
+
+export function seedProfiles(uuid: () => string = defaultUuid): LaunchProfile[] {
+  return SEED_KINDS.map((kind) => seedProfile(kind, uuid));
+}
+
+function readSeededKinds(storage: ProfilesStorage): readonly string[] {
+  try {
+    const raw = storage.getItem(PROFILES_SEEDED_KEY);
+    if (raw === null) return LEGACY_SEEDED_KINDS;
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every(isString) ? parsed : LEGACY_SEEDED_KINDS;
+  } catch {
+    return LEGACY_SEEDED_KINDS;
+  }
+}
+
+/**
+ * 저장된 스토어에 아직 시드한 적 없는 기본 CLI 프로필을 붙인다. 같은 종류의
+ * 프로필이나 같은 라벨이 이미 있으면 사용자의 것을 두고 건너뛴다.
+ */
+export function addUnseededProfiles(
+  profiles: readonly LaunchProfile[],
+  seeded: readonly string[],
+  uuid: () => string = defaultUuid,
+): LaunchProfile[] {
+  const next = [...profiles];
+  for (const kind of SEED_KINDS) {
+    if (seeded.includes(kind)) continue;
+    if (next.some((p) => p.descriptor.kind === kind || p.label === kind)) continue;
+    next.push(seedProfile(kind, uuid));
+  }
+  return next;
 }
 
 // -------------------------------------------------------------- 형식 검증
@@ -220,23 +262,44 @@ export function createProfilesStore(
   getStorage: () => ProfilesStorage | null,
   uuid: () => string = defaultUuid,
 ) {
-  const loadInitial = (): LaunchProfile[] => {
-    try {
-      const storage = getStorage();
-      const raw = storage?.getItem(PROFILES_STORAGE_KEY) ?? null;
-      if (raw === null) return seedProfiles(uuid);
-      const { profiles } = parseEnvelope(raw);
-      return profiles;
-    } catch {
-      return seedProfiles(uuid);
-    }
-  };
-
   const persist = (profiles: LaunchProfile[]): void => {
     try {
       getStorage()?.setItem(PROFILES_STORAGE_KEY, serializeProfiles(profiles));
     } catch {
       // 저장 실패는 세션 내 상태를 유지한 채 무시한다.
+    }
+  };
+
+  const markAllSeeded = (): void => {
+    try {
+      getStorage()?.setItem(PROFILES_SEEDED_KEY, JSON.stringify(SEED_KINDS));
+    } catch {
+      // 기록 실패 시 다음 실행에서 다시 판단한다(같은 종류가 있으면 건너뛴다).
+    }
+  };
+
+  const freshSeed = (): LaunchProfile[] => {
+    // 지금 시드한 목록을 기록해 둔다 — 첫 변경 전에 기본 프로필을 지워도
+    // 다음 실행이 옛 스토어로 착각해 되살리지 않게.
+    markAllSeeded();
+    return seedProfiles(uuid);
+  };
+
+  const loadInitial = (): LaunchProfile[] => {
+    try {
+      const storage = getStorage();
+      if (!storage) return seedProfiles(uuid);
+      const raw = storage.getItem(PROFILES_STORAGE_KEY);
+      if (raw === null) return freshSeed();
+      const { profiles } = parseEnvelope(raw);
+      const seeded = readSeededKinds(storage);
+      if (SEED_KINDS.every((kind) => seeded.includes(kind))) return profiles;
+      const migrated = addUnseededProfiles(profiles, seeded, uuid);
+      if (migrated.length !== profiles.length) persist(migrated);
+      markAllSeeded();
+      return migrated;
+    } catch {
+      return freshSeed();
     }
   };
 
@@ -282,6 +345,7 @@ export function createProfilesStore(
       const profiles = seedProfiles(uuid);
       set({ profiles });
       persist(profiles);
+      markAllSeeded();
     },
 
     exportJson: () => serializeProfiles(get().profiles),

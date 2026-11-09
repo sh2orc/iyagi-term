@@ -6,14 +6,14 @@
  * `export type { SystemProbe, CliCandidate } from "../bridge/systemProbe";`
  * 재내보내기로 교체해도 모든 이용처는 그대로 동작한다(이름이 seam이다).
  *
- * - listClis(): PATH에서 codex/claude/opencode 후보를 찾아 실행 파일 경로,
+ * - listClis(): PATH에서 codex/claude/opencode/kimi 후보를 찾아 실행 파일 경로,
  *   symlink target, 설치 형태(npm shim 등)를 돌려준다(04 §5).
  * - queryVersion(program): 해당 executable의 "검증된" version query만
  *   2초 timeout / 8 KiB output cap으로 실행한다. 검증되지 않았으면
  *   null을 돌려준다 — UI는 절대 값을 지어내지 않는다.
  */
 
-export type CliCandidateKind = "codex" | "claude" | "opencode" | "custom";
+export type CliCandidateKind = "codex" | "claude" | "opencode" | "kimi" | "custom";
 
 export interface CliCandidate {
   /** 발견된 실행 파일/셸 shim 경로(있는 그대로). */

@@ -5,6 +5,41 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.10 — 2026-11-10
+
+The Kimi usage gauge keeps reading from the `kimi` CLI login after its short-lived access token
+expires. IYAGI Term now refreshes the login itself, under the same lock the CLI uses, instead
+of waiting for the CLI to run again.
+
+### Kimi
+
+- **The CLI login no longer goes stale.** 0.1.9 used the `kimi` CLI's access token only while
+  it was valid (about 15 minutes after the CLI last refreshed it) and never refreshed it. Now
+  an expired token, or one the usage endpoint rejects, is refreshed through the CLI's own OAuth
+  endpoint for the account's region (`auth.kimi.ai` or `auth.kimi.com`).
+- **Shared with the CLI, not competing with it.** The refresh holds the CLI's
+  `oauth/<slot>.lock`, so the app and a running `kimi` never rotate the refresh token at the
+  same time; if the CLI has already refreshed, its new token is used as is. The rotated
+  credentials are written back to the CLI's credential file atomically and readable only by
+  you (`0600`), so the CLI keeps working with them.
+- **When the login cannot be refreshed.** If the refresh is refused, for example because the
+  login was revoked, the gauge suggests running `/login` in `kimi` again or storing a
+  membership key, and the last reading stays on screen with the time it was taken. A
+  membership key stored in Settings › Integrations › Kimi is still used when the login is not.
+- **Wording.** The credential-store error now says the store could not be read or written,
+  since the app also writes the CLI's credential file.
+
+### Upgrading from 0.1.9
+
+The usage gauge runs in the app, so this fix needs no daemon restart. Settings › General may
+still offer one because the daemon's version changed; it can wait until a convenient time.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.10_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.10/IYAGI.Term_0.1.10_aarch64.dmg) | `815027080f4054e76f302bbd59479c52320922efe0a66ea058063135790e2086` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.9 — 2026-11-09
 
 Kimi now follows the membership alone. The usage gauge reads the quota from the `kimi` CLI

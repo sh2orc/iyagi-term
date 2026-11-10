@@ -26,10 +26,10 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.9](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.9)** (2026-11-09) —
-Kimi는 멤버십만 씁니다. 사용량을 `kimi` CLI 로그인이나 계정 리전의 멤버십 키로 읽고, Open
-Platform과 `cck`를 없앴으며, Kimi CLI를 기본 실행 프로필로 넣었습니다.
-[새로운 점](#019의-새로운-점)을 참고하세요.
+**최신: [0.1.10](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.10)** (2026-11-10) —
+`kimi` CLI 로그인의 액세스 토큰이 만료돼도 Kimi 사용량 게이지가 계속 읽힙니다. 앱이 CLI와 같은
+잠금 아래에서 토큰을 갱신하고 회전된 토큰을 다시 기록합니다.
+[새로운 점](#0110의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -39,12 +39,12 @@ Platform과 `cck`를 없앴으며, Kimi CLI를 기본 실행 프로필로 넣었
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.9_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.9/IYAGI.Term_0.1.9_aarch64.dmg) | 18 MB | `30ed93ab6c4db550db589ed7fbb87fb5ce57361bdba170096fc2e5ea0720f140` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.10_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.10/IYAGI.Term_0.1.10_aarch64.dmg) | 18 MB | `815027080f4054e76f302bbd59479c52320922efe0a66ea058063135790e2086` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.9_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.10_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -77,6 +77,13 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.10의 새로운 점
+
+- **계속 쓸 수 있는 Kimi CLI 로그인.** `kimi` CLI의 액세스 토큰이 만료됐거나 거부되면 앱이 CLI의
+  OAuth 엔드포인트로 토큰을 갱신합니다. 이때 CLI의 `oauth/<slot>.lock`을 잡아 둘이 동시에 refresh
+  토큰을 회전하지 않게 하고, 새 토큰을 CLI 자격 증명 파일(`0600`)에 다시 기록합니다. 0.1.9는 토큰이
+  유효한 동안에만 썼습니다. 전체 노트: [RELEASE.md](RELEASE.md).
 
 ## 0.1.9의 새로운 점
 
@@ -405,7 +412,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.9**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.10**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

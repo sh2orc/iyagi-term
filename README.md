@@ -27,10 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.9](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.9)** (2026-11-09) —
-Kimi follows the membership alone: usage is read from the `kimi` CLI login or a membership key
-in the account's region, Open Platform and `cck` are removed, and the Kimi CLI is a built-in
-launch profile. See [what's new](#whats-new-in-019).
+**Latest: [0.1.10](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.10)** (2026-11-10) —
+the Kimi usage gauge keeps reading from the `kimi` CLI login after its access token expires:
+the app refreshes it under the CLI's own lock and writes the rotated token back.
+See [what's new](#whats-new-in-0110).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +40,12 @@ launch profile. See [what's new](#whats-new-in-019).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.9_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.9/IYAGI.Term_0.1.9_aarch64.dmg) | 18 MB | `30ed93ab6c4db550db589ed7fbb87fb5ce57361bdba170096fc2e5ea0720f140` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.10_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.10/IYAGI.Term_0.1.10_aarch64.dmg) | 18 MB | `815027080f4054e76f302bbd59479c52320922efe0a66ea058063135790e2086` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.9_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.10_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +80,14 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.10
+
+- **Kimi CLI login that stays usable.** When the `kimi` CLI's access token has expired or is
+  rejected, the app now refreshes it through the CLI's OAuth endpoint, holding the CLI's own
+  `oauth/<slot>.lock` so the two never rotate the refresh token at once, and writes the new
+  token back to the CLI's credential file (`0600`). 0.1.9 used the token only while it was
+  still valid. Full notes: [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.9
 
@@ -432,7 +440,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.9** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.10** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

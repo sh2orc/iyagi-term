@@ -110,9 +110,9 @@ export const ko = {
   "monitor.quota.reason.no_data": "아직 사용량 데이터가 없습니다.",
   "monitor.quota.reason.network_error": "공급자에 연결하지 못했습니다.",
   "monitor.quota.reason.timeout": "조회 시간이 초과되었습니다.",
-  "monitor.quota.reason.credential_store_error": "앱 전용 암호화 키 저장소를 읽지 못했습니다.",
+  "monitor.quota.reason.credential_store_error": "인증 정보 저장소를 읽거나 쓸 수 없습니다.",
   "monitor.quota.reason.unavailable": "현재 사용량을 확인할 수 없습니다.",
-  "monitor.quota.reason.kimi_login_stale": "kimi CLI 로그인 토큰이 만료됐습니다. kimi를 실행하거나 설정 › 연동 › Kimi에 멤버십 키를 저장하세요.",
+  "monitor.quota.reason.kimi_login_stale": "kimi CLI 로그인을 갱신하지 못했습니다. kimi에서 /login을 다시 실행하거나 설정 › 연동 › Kimi에 멤버십 키를 저장하세요.",
   "monitor.quota.reason.kimi_key_rejected": "저장된 키를 Kimi Code가 받아들이지 않습니다. Open Platform(종량제) 키가 아니라 Kimi Code 콘솔에서 만든 멤버십 키인지 확인하세요.",
 
   // GraphDrawer
@@ -241,9 +241,9 @@ export const en: Record<keyof typeof ko, string> = {
   "monitor.quota.reason.no_data": "No usage data is available yet.",
   "monitor.quota.reason.network_error": "Could not reach the provider.",
   "monitor.quota.reason.timeout": "The usage query timed out.",
-  "monitor.quota.reason.credential_store_error": "The app-local encrypted key store could not be read.",
+  "monitor.quota.reason.credential_store_error": "Could not read or write the credential store.",
   "monitor.quota.reason.unavailable": "Usage is currently unavailable.",
-  "monitor.quota.reason.kimi_login_stale": "The kimi CLI login token has expired. Run kimi, or store a membership key under Settings › Integrations › Kimi.",
+  "monitor.quota.reason.kimi_login_stale": "Could not refresh the kimi CLI login. Run /login in kimi again, or store a membership key under Settings › Integrations › Kimi.",
   "monitor.quota.reason.kimi_key_rejected": "Kimi Code rejects the stored key. Make sure it is a membership key from the Kimi Code console, not a pay-as-you-go Open Platform key.",
 
   // GraphDrawer

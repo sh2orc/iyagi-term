@@ -262,8 +262,8 @@ level, where the work actually runs:
 **Kimi integration**
 
 - Kimi Code membership quota (5-hour, weekly, monthly) in the usage gauges — read from your `kimi`
-  CLI login while its token is valid, or from a membership API key stored under
-  **Settings › Integrations › Kimi**, in whichever region (kimi.ai or kimi.com) the account lives
+  CLI login, refreshing expired OAuth tokens through the CLI's shared lock, or from a membership API
+  key stored under **Settings › Integrations › Kimi**, in whichever region (kimi.ai or kimi.com) the account lives
 - Kimi CLI is a built-in launch profile, and panes show the provider/model it runs.
   Pay-as-you-go Open Platform keys are not supported
 

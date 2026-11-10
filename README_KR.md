@@ -240,9 +240,9 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 
 **Kimi 연동**
 
-- Kimi Code 멤버십 할당량(5시간·주간·월간)을 사용량 게이지에 보여 줍니다. `kimi` CLI 로그인 토큰이
-  유효한 동안은 그 로그인으로, 아니면 **설정 › 연동 › Kimi**에 저장한 멤버십 API 키로 읽으며,
-  계정이 속한 리전(kimi.ai 또는 kimi.com)을 따릅니다
+- Kimi Code 멤버십 할당량(5시간·주간·월간)을 사용량 게이지에 보여 줍니다. `kimi` CLI 로그인을 사용하고
+  만료된 OAuth 토큰은 CLI와 같은 잠금으로 갱신하며, **설정 › 연동 › Kimi**에 저장한 멤버십 API 키도
+  사용할 수 있습니다. 계정이 속한 리전(kimi.ai 또는 kimi.com)을 따릅니다
 - Kimi CLI를 기본 실행 프로필로 제공하고, `kimi` CLI가 쓰는 provider·모델을 pane에 표시합니다.
   종량제 Open Platform 키는 지원하지 않습니다
 

@@ -4,10 +4,9 @@
 //! membership quota (5-hour, weekly and monthly windows):
 //!
 //! 1. **The Kimi Code CLI login** (`$KIMI_CODE_HOME`, default `~/.kimi-code`):
-//!    its OAuth access token, used only while it is still valid (about 15
-//!    minutes after the CLI last refreshed it). It is never refreshed here:
-//!    refreshing rotates the refresh token, and the CLI owns that rotation
-//!    behind its own `oauth/<slot>.lock`.
+//!    its OAuth access token. Expired or rejected tokens are refreshed through
+//!    the same OAuth endpoint and `oauth/<slot>.lock` used by the CLI, and the
+//!    rotated credentials are written back to the CLI's credential file.
 //! 2. **The membership API key** stored in iyagi (`kimi-code.enc`). It does not
 //!    expire, so the gauge keeps working while the CLI is idle.
 //!
@@ -36,6 +35,8 @@ const CONFIG_CAP: u64 = 1024 * 1024;
 /// Treat an access token as expired this many seconds early, so a request
 /// never leaves with a token that dies in flight.
 const TOKEN_MARGIN_SECS: u64 = 30;
+const OAUTH_CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
+const OAUTH_LOCK_STALE: Duration = Duration::from_secs(5);
 /// The provider the Kimi Code CLI writes for its own login.
 const MANAGED_PROVIDER: &str = "managed:kimi-code";
 
@@ -50,6 +51,13 @@ impl KimiRegion {
         match self {
             Self::Global => "https://api.kimi.ai/coding/v1/usages",
             Self::MainlandCn => "https://api.kimi.com/coding/v1/usages",
+        }
+    }
+
+    fn oauth_token_url(self) -> &'static str {
+        match self {
+            Self::Global => "https://auth.kimi.ai/api/oauth/token",
+            Self::MainlandCn => "https://auth.kimi.com/api/oauth/token",
         }
     }
 
@@ -104,17 +112,49 @@ fn validate_key(key: &str) -> Result<(), &'static str> {
 
 // ---------------------------------------------------------------- CLI login
 
+#[derive(Clone)]
+struct CliCredential {
+    region: KimiRegion,
+    path: PathBuf,
+    access_token: Zeroizing<String>,
+    refresh_token: Zeroizing<String>,
+    expires_at: u64,
+    expires_in: u64,
+    scope: String,
+    token_type: String,
+}
+
+impl std::fmt::Debug for CliCredential {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CliCredential")
+            .field("region", &self.region)
+            .field("path", &self.path)
+            .field("access_token", &"[redacted]")
+            .field("refresh_token", &"[redacted]")
+            .field("expires_at", &self.expires_at)
+            .field("expires_in", &self.expires_in)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CliCredential {
+    fn is_fresh(&self, now: u64) -> bool {
+        !self.access_token.is_empty() && self.expires_at > now.saturating_add(TOKEN_MARGIN_SECS)
+    }
+}
+
 /// What the Kimi Code CLI login offers right now.
 #[derive(Debug)]
 enum CliLogin {
     /// No CLI home, no OAuth login, or a login stored somewhere we do not
     /// read (keyring storage, a custom endpoint).
     Missing,
-    /// Logged in, but the access token has expired since the CLI last ran.
-    Expired { region: KimiRegion },
+    Expired {
+        credential: CliCredential,
+    },
     Valid {
-        region: KimiRegion,
-        access_token: Zeroizing<String>,
+        credential: CliCredential,
     },
 }
 
@@ -252,33 +292,55 @@ fn read_cli_login(home: &Path, now: u64) -> CliLogin {
     ) else {
         return CliLogin::Missing;
     };
-    let Some(text) = read_capped(&path, CREDENTIAL_CAP).map(Zeroizing::new) else {
+    let Some(credential) = read_credential(&path, region) else {
         return CliLogin::Missing;
     };
-    let Ok(value) = serde_json::from_str::<Value>(&text) else {
-        return CliLogin::Missing;
-    };
-    let token = value
+    if credential.is_fresh(now) {
+        CliLogin::Valid { credential }
+    } else {
+        CliLogin::Expired { credential }
+    }
+}
+
+fn read_credential(path: &Path, region: KimiRegion) -> Option<CliCredential> {
+    let text = read_capped(path, CREDENTIAL_CAP).map(Zeroizing::new)?;
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    let access_token = value
         .get("access_token")
         .and_then(Value::as_str)
-        .filter(|token| !token.is_empty());
-    let expires_at = number(value.get("expires_at")).map(|epoch| {
-        if epoch > 100_000_000_000.0 {
-            (epoch / 1000.0) as u64
-        } else {
-            epoch as u64
-        }
-    });
-    match (token, expires_at) {
-        (Some(token), Some(expires_at)) if expires_at > now.saturating_add(TOKEN_MARGIN_SECS) => {
-            CliLogin::Valid {
-                region,
-                access_token: Zeroizing::new(token.to_string()),
+        .filter(|token| !token.is_empty())?;
+    let refresh_token = value
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let expires_at = number(value.get("expires_at"))
+        .map(|epoch| {
+            if epoch > 100_000_000_000.0 {
+                (epoch / 1000.0) as u64
+            } else {
+                epoch as u64
             }
-        }
-        (Some(_), _) => CliLogin::Expired { region },
-        (None, _) => CliLogin::Missing,
-    }
+        })
+        .unwrap_or_default();
+    let expires_in = number(value.get("expires_in")).unwrap_or(0.0).max(0.0) as u64;
+    Some(CliCredential {
+        region,
+        path: path.to_path_buf(),
+        access_token: Zeroizing::new(access_token.to_string()),
+        refresh_token: Zeroizing::new(refresh_token.to_string()),
+        expires_at,
+        expires_in,
+        scope: value
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        token_type: value
+            .get("token_type")
+            .and_then(Value::as_str)
+            .unwrap_or("Bearer")
+            .to_string(),
+    })
 }
 
 // ---------------------------------------------------------------- refresh
@@ -332,22 +394,15 @@ async fn read_usage(
     let key_unreadable = key.is_err();
     let key = key.unwrap_or_default();
     let login_region = match &login {
-        CliLogin::Valid { region, .. } | CliLogin::Expired { region } => Some(*region),
+        CliLogin::Valid { credential } | CliLogin::Expired { credential } => {
+            Some(credential.region)
+        }
         CliLogin::Missing => None,
     };
-    if let CliLogin::Valid {
-        region,
-        access_token,
-    } = &login
-    {
-        match fetch(region.usage_url(), access_token).await {
-            Ok(usage) => return usage,
-            // A rejected login token is the CLI's problem; the key may still work.
-            Err("auth_failed") => {}
-            Err(reason) if key.is_none() => return error(reason),
-            Err(_) => {}
-        }
-    }
+    let cli_error = match cli_usage(login).await {
+        Ok(usage) => return usage,
+        Err(reason) => reason,
+    };
     if let Some(key) = key {
         let mut regions = Vec::with_capacity(2);
         for region in [
@@ -381,22 +436,298 @@ async fn read_usage(
     if key_unreadable {
         return error("credential_store_error");
     }
-    match login {
-        CliLogin::Expired { .. } => {
-            let mut usage = unavailable("kimi_login_stale");
-            usage.status = "unavailable";
-            usage
-        }
-        _ => {
+    match cli_error {
+        "not_configured" => {
             let mut usage = unavailable("not_configured");
             usage.status = "notConfigured";
             usage
         }
+        "auth_failed" => unavailable("kimi_login_stale"),
+        reason => error(reason),
     }
 }
 
-/// Keep the latest ready reading; when only "the CLI token went stale" is
-/// left to say, show that reading instead — its `observed_at` says how old.
+async fn cli_usage(login: CliLogin) -> Result<ProviderUsage, &'static str> {
+    match login {
+        CliLogin::Missing => Err("not_configured"),
+        CliLogin::Expired { credential } => refresh_and_fetch(credential, false).await,
+        CliLogin::Valid { credential } => {
+            match fetch(credential.region.usage_url(), &credential.access_token).await {
+                Err("auth_failed") => refresh_and_fetch(credential, true).await,
+                result => result,
+            }
+        }
+    }
+}
+
+async fn refresh_and_fetch(
+    credential: CliCredential,
+    force: bool,
+) -> Result<ProviderUsage, &'static str> {
+    let credential = refresh_credential(credential, force).await?;
+    fetch(credential.region.usage_url(), &credential.access_token).await
+}
+
+async fn refresh_credential(
+    credential: CliCredential,
+    force: bool,
+) -> Result<CliCredential, &'static str> {
+    let lock = OAuthLock::acquire(&credential).await?;
+    let result = refresh_credential_locked(credential, force).await;
+    lock.release().await;
+    result
+}
+
+async fn refresh_credential_locked(
+    credential: CliCredential,
+    force: bool,
+) -> Result<CliCredential, &'static str> {
+    let current = read_credential(&credential.path, credential.region);
+    let changed = current.as_ref().is_some_and(|active| {
+        active.access_token.as_str() != credential.access_token.as_str()
+            || active.refresh_token.as_str() != credential.refresh_token.as_str()
+            || active.expires_at != credential.expires_at
+    });
+    let active = current.unwrap_or(credential);
+    if active.is_fresh(unix_now()) && (!force || changed) {
+        return Ok(active);
+    }
+    if active.refresh_token.is_empty() {
+        return Err("auth_failed");
+    }
+    let value = match oauth_refresh_request(active.region.oauth_token_url(), &active).await {
+        Ok(value) => value,
+        Err("auth_failed") => {
+            // A peer that does not share the lock may have rotated the token
+            // while our request was in flight. Prefer its fresh credentials.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if let Some(recovery) = read_credential(&active.path, active.region) {
+                if recovery.refresh_token.as_str() != active.refresh_token.as_str()
+                    && recovery.is_fresh(unix_now())
+                {
+                    return Ok(recovery);
+                }
+            }
+            return Err("auth_failed");
+        }
+        Err(reason) => return Err(reason),
+    };
+    let refreshed = parse_refreshed_credential(&value, &active, unix_now())?;
+    write_credential(&refreshed)?;
+    Ok(refreshed)
+}
+
+async fn oauth_refresh_request(
+    url: &str,
+    credential: &CliCredential,
+) -> Result<Value, &'static str> {
+    let response = client()
+        .ok_or("client_error")?
+        .post(url)
+        .header(ACCEPT, "application/json")
+        .form(&[
+            ("client_id", OAUTH_CLIENT_ID),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", credential.refresh_token.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "network_error")?;
+    let status = response.status();
+    let bytes = read_body_capped(response)
+        .await
+        .map_err(|_| "response_invalid")?;
+    let value = serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null);
+    if status.is_success() {
+        return Ok(value);
+    }
+    if matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) || value.get("error").and_then(Value::as_str) == Some("invalid_grant")
+    {
+        return Err("auth_failed");
+    }
+    Err("provider_error")
+}
+
+fn parse_refreshed_credential(
+    value: &Value,
+    previous: &CliCredential,
+    now: u64,
+) -> Result<CliCredential, &'static str> {
+    let access_token = value
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .ok_or("response_invalid")?;
+    let refresh_token = value
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .ok_or("response_invalid")?;
+    let expires_in = number(value.get("expires_in"))
+        .filter(|seconds| *seconds > 0.0)
+        .ok_or("response_invalid")? as u64;
+    Ok(CliCredential {
+        region: previous.region,
+        path: previous.path.clone(),
+        access_token: Zeroizing::new(access_token.to_string()),
+        refresh_token: Zeroizing::new(refresh_token.to_string()),
+        expires_at: now.saturating_add(expires_in),
+        expires_in,
+        scope: value
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or(&previous.scope)
+            .to_string(),
+        token_type: value
+            .get("token_type")
+            .and_then(Value::as_str)
+            .unwrap_or(&previous.token_type)
+            .to_string(),
+    })
+}
+
+/// The CLI uses proper-lockfile on `oauth/<slot>`: the lock itself is the
+/// sibling `<slot>.lock` directory, considered stale after five seconds.
+struct OAuthLock {
+    path: Option<PathBuf>,
+    heartbeat: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl OAuthLock {
+    async fn acquire(credential: &CliCredential) -> Result<Self, &'static str> {
+        let slot = credential
+            .path
+            .file_stem()
+            .and_then(|slot| slot.to_str())
+            .ok_or("credential_store_error")?;
+        let home = credential
+            .path
+            .parent()
+            .and_then(Path::parent)
+            .ok_or("credential_store_error")?;
+        let target = home.join("oauth").join(slot);
+        std::fs::create_dir_all(target.parent().ok_or("credential_store_error")?)
+            .map_err(|_| "credential_store_error")?;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&target)
+            .map_err(|_| "credential_store_error")?;
+        let path = target.with_extension("lock");
+        for _ in 0..80 {
+            match std::fs::create_dir(&path) {
+                Ok(()) => {
+                    let heartbeat_path = path.clone();
+                    let heartbeat = tokio::spawn(async move {
+                        loop {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            let path = heartbeat_path.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                if let Ok(file) = std::fs::File::open(path) {
+                                    let _ = file.set_times(
+                                        std::fs::FileTimes::new().set_modified(SystemTime::now()),
+                                    );
+                                }
+                            })
+                            .await;
+                        }
+                    });
+                    return Ok(Self {
+                        path: Some(path),
+                        heartbeat: Some(heartbeat),
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|metadata| metadata.modified())
+                        .ok()
+                        .and_then(|modified| modified.elapsed().ok())
+                        .is_some_and(|age| age > OAUTH_LOCK_STALE);
+                    if stale {
+                        let _ = std::fs::remove_dir(&path);
+                        continue;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(_) => return Err("credential_store_error"),
+            }
+        }
+        Err("timeout")
+    }
+
+    async fn release(mut self) {
+        if let Some(heartbeat) = self.heartbeat.take() {
+            heartbeat.abort();
+            let _ = heartbeat.await;
+        }
+        self.remove();
+    }
+
+    fn remove(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = std::fs::remove_dir(path);
+        }
+    }
+}
+
+impl Drop for OAuthLock {
+    fn drop(&mut self) {
+        if let Some(heartbeat) = self.heartbeat.take() {
+            heartbeat.abort();
+        }
+        self.remove();
+    }
+}
+
+fn write_credential(credential: &CliCredential) -> Result<(), &'static str> {
+    use std::io::Write as _;
+
+    let value = serde_json::json!({
+        "access_token": credential.access_token.as_str(),
+        "refresh_token": credential.refresh_token.as_str(),
+        "expires_at": credential.expires_at,
+        "expires_in": credential.expires_in,
+        "scope": credential.scope.as_str(),
+        "token_type": credential.token_type.as_str(),
+    });
+    let mut text = serde_json::to_string_pretty(&value).map_err(|_| "credential_store_error")?;
+    text.push('\n');
+    let text = Zeroizing::new(text);
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = credential
+        .path
+        .with_extension(format!("json.tmp.{}.{unique}", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let write = (|| {
+        let mut file = options.open(&temporary)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()
+    })();
+    if write.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+        return Err("credential_store_error");
+    }
+    if std::fs::rename(&temporary, &credential.path).is_err() {
+        let _ = std::fs::remove_file(&temporary);
+        return Err("credential_store_error");
+    }
+    Ok(())
+}
+
+/// Keep the latest ready reading; when the CLI login can no longer be
+/// refreshed, show that reading instead — its `observed_at` says how old.
 fn remember(usage: ProviderUsage) -> ProviderUsage {
     let Ok(mut last) = LAST_READY.lock() else {
         return usage;
@@ -707,6 +1038,20 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[tokio::test]
+    #[ignore = "requires a signed-in Kimi Code CLI; reads quota without inference"]
+    async fn kimi_usage_native_smoke() {
+        let root = tempfile::tempdir().unwrap();
+        let usage = refresh(root.path()).await;
+        assert_eq!(usage.provider, "kimi-code");
+        assert_eq!(usage.status, "ready", "{usage:?}");
+        assert!(!usage.windows.is_empty());
+        assert!(usage
+            .windows
+            .iter()
+            .all(|window| (0.0..=100.0).contains(&window.remaining_percent)));
+    }
+
     #[test]
     fn parses_legacy_weekly_and_count_windows() {
         let usage = parse_code_usage(&json!({
@@ -869,12 +1214,9 @@ base_url = "https://example.invalid"
             ),
         );
         match read_cli_login(valid.path(), now) {
-            CliLogin::Valid {
-                region,
-                access_token,
-            } => {
-                assert_eq!(region, KimiRegion::Global);
-                assert_eq!(access_token.as_str(), "tok");
+            CliLogin::Valid { credential } => {
+                assert_eq!(credential.region, KimiRegion::Global);
+                assert_eq!(credential.access_token.as_str(), "tok");
             }
             other => panic!("expected a valid login, got {other:?}"),
         }
@@ -894,9 +1236,7 @@ base_url = "https://example.invalid"
         );
         assert!(matches!(
             read_cli_login(near.path(), now),
-            CliLogin::Expired {
-                region: KimiRegion::Global
-            }
+            CliLogin::Expired { .. }
         ));
 
         let missing_file = cli_home(CLI_CONFIG, None);
@@ -935,16 +1275,130 @@ base_url = "https://example.invalid"
         let missing = read_usage(CliLogin::Missing, Ok(None), None).await;
         assert_eq!(missing.status, "notConfigured");
         assert_eq!(missing.reason_code, Some("not_configured"));
-        let stale = read_usage(
-            CliLogin::Expired {
-                region: KimiRegion::Global,
-            },
-            Ok(None),
-            None,
-        )
-        .await;
+        let now = 1_800_000_000;
+        let home = cli_home(
+            CLI_CONFIG,
+            Some(json!({"access_token":"tok","refresh_token":"","expires_at":now - 10})),
+        );
+        let stale = read_usage(read_cli_login(home.path(), now), Ok(None), None).await;
         assert_eq!(stale.status, "unavailable");
         assert_eq!(stale.reason_code, Some("kimi_login_stale"));
+    }
+
+    #[tokio::test]
+    async fn refreshed_credentials_are_written_and_a_peer_refresh_is_reused() {
+        let now = 1_800_000_000;
+        let home = cli_home(
+            CLI_CONFIG,
+            Some(
+                json!({"access_token":"old-access","refresh_token":"old-refresh","expires_at":now - 10}),
+            ),
+        );
+        let previous = match read_cli_login(home.path(), now) {
+            CliLogin::Expired { credential } => credential,
+            other => panic!("expected an expired login, got {other:?}"),
+        };
+        let debug = format!("{previous:?}");
+        assert!(!debug.contains("old-access"));
+        assert!(!debug.contains("old-refresh"));
+        let refreshed = parse_refreshed_credential(
+            &json!({"access_token":"new-access","refresh_token":"new-refresh","expires_in":900}),
+            &previous,
+            now,
+        )
+        .unwrap();
+        assert_eq!(refreshed.expires_at, now + 900);
+        assert!(refreshed.is_fresh(now));
+        write_credential(&refreshed).unwrap();
+
+        // The file now represents a refresh completed by the CLI. Re-reading it
+        // under the shared lock must adopt it instead of rotating it again.
+        let adopted = refresh_credential(previous, false).await.unwrap();
+        assert_eq!(adopted.access_token.as_str(), "new-access");
+        assert_eq!(adopted.refresh_token.as_str(), "new-refresh");
+        let stored = read_credential(&adopted.path, adopted.region).unwrap();
+        assert_eq!(stored.access_token.as_str(), "new-access");
+        assert!(!home
+            .path()
+            .join("oauth/kimi-code-env-0e4f99c69cc27850.lock")
+            .exists());
+        assert!(parse_refreshed_credential(
+            &json!({"access_token":"missing-fields"}),
+            &adopted,
+            now
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn oauth_refresh_uses_the_cli_form_contract() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 2048];
+            loop {
+                let read = socket.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                if request.len() >= header_end + 4 + length {
+                    break;
+                }
+            }
+            let text = String::from_utf8_lossy(&request);
+            assert!(text.starts_with("POST /api/oauth/token HTTP/1.1\r\n"));
+            assert!(text.contains("grant_type=refresh_token"));
+            assert!(text.contains("refresh_token=old-refresh"));
+            assert!(text.contains(OAUTH_CLIENT_ID));
+            let body =
+                json!({"access_token":"new-access","refresh_token":"new-refresh","expires_in":900})
+                    .to_string();
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let home = cli_home(
+            CLI_CONFIG,
+            Some(
+                json!({"access_token":"old-access","refresh_token":"old-refresh","expires_at":10}),
+            ),
+        );
+        let credential = match read_cli_login(home.path(), 100) {
+            CliLogin::Expired { credential } => credential,
+            other => panic!("expected an expired login, got {other:?}"),
+        };
+        let value =
+            oauth_refresh_request(&format!("http://{address}/api/oauth/token"), &credential)
+                .await
+                .unwrap();
+        server.await.unwrap();
+        assert_eq!(value["access_token"], "new-access");
+        assert_eq!(value["refresh_token"], "new-refresh");
     }
 
     #[test]

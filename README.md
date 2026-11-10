@@ -27,10 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.10](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.10)** (2026-11-10) —
-the Kimi usage gauge keeps reading from the `kimi` CLI login after its access token expires:
-the app refreshes it under the CLI's own lock and writes the rotated token back.
-See [what's new](#whats-new-in-0110).
+**Latest: [0.1.11](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.11)** (2026-11-10) —
+the app and the daemon trust the macOS keychain as well as their bundled roots, so their own
+connections work behind corporate TLS inspection (ePrism and similar).
+See [what's new](#whats-new-in-0111).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +40,12 @@ See [what's new](#whats-new-in-0110).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.10_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.10/IYAGI.Term_0.1.10_aarch64.dmg) | 18 MB | `815027080f4054e76f302bbd59479c52320922efe0a66ea058063135790e2086` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.11_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.11/IYAGI.Term_0.1.11_aarch64.dmg) | 18 MB | `9ae2d97d389c76a390da8f1e89f0f2343e9f2d223d0b239a1e5ec154681b91da` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.10_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.11_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +80,15 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.11
+
+- **Works behind corporate TLS inspection.** The app and the daemon now trust the certificates
+  in the macOS keychain together with their bundled Mozilla roots, so a company CA (ePrism and
+  similar) installed on the Mac is accepted: usage gauges, the Kimi login refresh, the gateway
+  and auto-continue's network check no longer fail TLS behind such a proxy. CLIs running inside
+  terminals still use their own trust settings (e.g. `NODE_EXTRA_CA_CERTS`). Restart the daemon
+  from Settings › General to apply it there. Full notes: [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.10
 
@@ -440,7 +449,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.10** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.11** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

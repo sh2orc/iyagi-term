@@ -5,6 +5,42 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.11 — 2026-11-10
+
+IYAGI Term now trusts the certificates in the macOS keychain as well as its bundled roots, so
+its own connections work behind corporate TLS inspection (ePrism and similar) whose CA is
+installed on the Mac.
+
+### Networking
+
+- **Keychain certificates are trusted.** The app and the daemon checked HTTPS servers only
+  against the Mozilla roots bundled into the binaries and ignored the keychain. Behind a
+  TLS-inspection proxy, which re-signs every site with a company CA, all of their own
+  connections failed: the Kimi and Z.ai usage gauges, the Kimi login refresh, the gateway's
+  upstream calls for Z.ai-routed Claude Code terminals, and the network check that
+  auto-continue makes before resuming (it then reported the network as down). Both sets are
+  trusted together now. If the keychain cannot be read, the bundled roots still apply, so
+  nothing that connected before stops connecting.
+- **`SSL_CERT_FILE` / `SSL_CERT_DIR`.** When the app is started with either variable set,
+  that bundle or directory is read instead of the keychain, still on top of the bundled roots.
+- **Not covered yet: CLIs inside terminals.** Claude Code, Codex, `kimi` and other tools
+  running in a pane connect on their own and use their own trust settings. Behind TLS
+  inspection they still need the company CA in their environment, for example
+  `NODE_EXTRA_CA_CERTS` for Node-based CLIs.
+
+### Upgrading from 0.1.10
+
+Certificates are read when a connection client is created. After installing a new company CA,
+restart the app. The gateway and the network check run in the daemon: when Settings › General
+offers a restart for the 0.1.11 daemon, press **Restart**. Restarting ends open terminals;
+agent conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.11_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.11/IYAGI.Term_0.1.11_aarch64.dmg) | `9ae2d97d389c76a390da8f1e89f0f2343e9f2d223d0b239a1e5ec154681b91da` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.10 — 2026-11-10
 
 The Kimi usage gauge keeps reading from the `kimi` CLI login after its short-lived access token

@@ -26,10 +26,9 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.10](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.10)** (2026-11-10) —
-`kimi` CLI 로그인의 액세스 토큰이 만료돼도 Kimi 사용량 게이지가 계속 읽힙니다. 앱이 CLI와 같은
-잠금 아래에서 토큰을 갱신하고 회전된 토큰을 다시 기록합니다.
-[새로운 점](#0110의-새로운-점)을 참고하세요.
+**최신: [0.1.11](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.11)** (2026-11-10) —
+앱과 데몬이 내장 루트 인증서와 함께 macOS 키체인도 신뢰해서, 사내 TLS 검사(ePrism 등) 환경에서도
+자체 연결이 동작합니다. [새로운 점](#0111의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -39,12 +38,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.10_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.10/IYAGI.Term_0.1.10_aarch64.dmg) | 18 MB | `815027080f4054e76f302bbd59479c52320922efe0a66ea058063135790e2086` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.11_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.11/IYAGI.Term_0.1.11_aarch64.dmg) | 18 MB | `9ae2d97d389c76a390da8f1e89f0f2343e9f2d223d0b239a1e5ec154681b91da` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.10_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.11_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -77,6 +76,14 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.11의 새로운 점
+
+- **사내 TLS 검사 환경 지원.** 앱과 데몬이 내장 Mozilla 루트와 함께 macOS 키체인의 인증서를
+  신뢰합니다. Mac에 설치된 회사 CA(ePrism 등)를 받아들이므로, 이런 프록시 뒤에서도 사용량
+  게이지·Kimi 로그인 갱신·게이트웨이·auto-continue의 네트워크 확인이 TLS에서 실패하지 않습니다.
+  터미널 안에서 도는 CLI는 각자의 신뢰 설정을 씁니다(예: `NODE_EXTRA_CA_CERTS`). 데몬 쪽에도
+  적용하려면 설정 › 일반에서 데몬을 재시작하세요. 전체 노트: [RELEASE.md](RELEASE.md).
 
 ## 0.1.10의 새로운 점
 
@@ -412,7 +419,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.10**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.11**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

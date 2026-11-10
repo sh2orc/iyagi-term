@@ -35,7 +35,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = "0.2"
 tempfile = "3"
-reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "stream", "rustls-tls"] }
+# 내장 Mozilla 루트와 OS 신뢰 저장소(macOS 키체인)를 함께 신뢰한다 — 키체인에 설치된
+# 사내 TLS 검사 CA를 거치는 게이트웨이 업스트림·네트워크 프로브도 통과하도록.
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "stream", "rustls-tls", "rustls-tls-native-roots"] }
 # 게이트웨이 스트리밍 프록시의 `bytes_stream()` 소비(reqwest stream 기능의
 # 의존성을 직접 노출한다).
 futures-util = { version = "0.3", default-features = false }

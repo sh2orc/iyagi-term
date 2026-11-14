@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { t } from "../../i18n";
-import { agentActivityFromStatus, agentActivityLabel, agentDisplayName, isAgentBusy, isKnownAgent, resolveAgentActivity } from "./agentNames";
+import { agentActivityFromStatus, agentActivityLabel, agentDisplayName, agentTitleLabel, isAgentBusy, isKnownAgent, resolveAgentActivity } from "./agentNames";
 
 describe("agentActivityFromStatus", () => {
   it("Claude 레지스트리 status 넷을 세 상태로 접는다", () => {
@@ -68,5 +68,23 @@ describe("Kimi CLI provider 표시", () => {
     expect(agentDisplayName("kimi", "gpt-4.1", "openai")).toBe("Kimi CLI · openai");
     expect(agentDisplayName("kimi", "kimi-k3.1-pro", "Kimi Open Platform")).toBe("Kimi CLI · Kimi Open Platform");
     expect(agentDisplayName("kimi", null, null)).toBe("Kimi CLI");
+  });
+});
+
+describe("agentTitleLabel — 창 제목의 provider·모델 표시", () => {
+  it("Kimi는 provider 이름과 모델·effort를 함께 붙인다", () => {
+    expect(agentTitleLabel({ agent: "kimi", provider: "Kimi Code", model: "K3.1 Pro", effort: "high" })).toBe(
+      "Kimi Code · K3.1 Pro · high",
+    );
+    expect(agentTitleLabel({ agent: "kimi", provider: null, model: null, effort: null })).toBe("Kimi CLI");
+  });
+
+  it("다른 에이전트도 이름·모델이 같이 읽힌다(GLM Claude는 Z.ai)", () => {
+    expect(agentTitleLabel({ agent: "claude", model: "glm-5.3", effort: null, provider: null })).toBe(
+      "Z.ai · glm-5.3",
+    );
+    expect(agentTitleLabel({ agent: "codex", model: "gpt-5.6-sol", effort: "high", provider: null })).toBe(
+      "Codex · gpt-5.6-sol · high",
+    );
   });
 });

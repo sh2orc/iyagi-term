@@ -7,7 +7,7 @@
 import type { AgentStatus } from "../../generated/AgentStatus";
 import { resumeCommand, sessionDisplayLabel } from "../agentSessions/types";
 import { t } from "../../i18n";
-import { isAgentModelProvisional } from "./agentModel";
+import { agentModelLabel, isAgentModelProvisional } from "./agentModel";
 
 const KNOWN_AGENTS = new Set(["claude", "codex", "opencode", "kimi"]);
 
@@ -29,6 +29,20 @@ export function agentDisplayName(id: string, model?: string | null, provider?: s
   }
   if (agentDisplayId(id, model) === "zai") return "Z.ai";
   return KNOWN_AGENTS.has(id) ? t(`terminal.agent.${id}`) : id;
+}
+
+/**
+ * 창 제목(W1-3)에 붙는 에이전트 표시: "Kimi Code · K3.1 Pro · high" —
+ * provider를 아는 이름(agentDisplayName)과 현재 모델·effort
+ * (agentModelLabel)를 이어 붙인다. 어떤 에이전트인지는 항상 알므로
+ * 빈 문자열이 나오지 않는다.
+ */
+export function agentTitleLabel(
+  status: Pick<AgentStatus, "agent" | "model" | "effort" | "provider">,
+): string {
+  return [agentDisplayName(status.agent, status.model, status.provider), agentModelLabel(status)]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
 }
 
 /**

@@ -362,6 +362,22 @@ describe("에이전트 배지의 현재 모델·effort(/model·/effort 즉시 �
     expect(html).not.toContain(t("terminal.agent.modelProvisional"));
   });
 
+  it("Kimi Code의 provider·모델·effort를 배지에 표시한다", () => {
+    const html = renderPaneWith({
+      phase: "live",
+      agent: {
+        ...base,
+        agent: "kimi",
+        provider: "Kimi Code",
+        model: "K3.1 Pro",
+        effort: "high",
+        model_source: "config",
+      },
+    });
+    expect(html).toContain(">Kimi Code");
+    expect(html).toContain('<span class="pane-agent-model"> · K3.1 Pro · high</span>');
+  });
+
   it("세션 기록 전 잠정값은 provisional로 구분하고 툴팁에 알린다", () => {
     const html = renderPaneWith({
       phase: "live",

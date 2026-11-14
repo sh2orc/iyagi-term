@@ -74,7 +74,7 @@ const SIGNATURES: &[AgentSignature] = &[
     },
     AgentSignature {
         id: "kimi",
-        binaries: &["kimi"],
+        binaries: &["kimi", "kimi-code"],
         path_markers: &["@moonshot-ai/kimi-code", "/kimi-cli/"],
     },
 ];
@@ -709,6 +709,17 @@ mod tests {
 
         let tree = vec![brief(4, 1, Some("/Users/x/.local/bin/kimi"), &["kimi"])];
         assert_eq!(detect_agent_in_tree(&tree), Some(("kimi", 4)));
+
+        let tree = vec![brief(
+            5,
+            1,
+            Some("/Users/x/.kimi-code/bin/kimi-code"),
+            &["kimi-code"],
+        )];
+        assert_eq!(detect_agent_in_tree(&tree), Some(("kimi", 5)));
+
+        let tree = vec![brief(6, 1, None, &["kimi-code"])];
+        assert_eq!(detect_agent_in_tree(&tree), Some(("kimi", 6)));
     }
 
     #[test]

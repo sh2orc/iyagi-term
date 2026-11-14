@@ -234,12 +234,14 @@ describe("ResourceStrip 에이전트 요약", () => {
         b: livePane("b", "claude", { model: "glm-5.3", session_status: "waiting" }),
         c: livePane("c", "codex"),
         d: livePane("d", null),
+        e: livePane("e", "kimi", { provider: "Kimi Code" }),
+        f: livePane("f", "kimi", { provider: "Kimi Code" }),
       } as never,
       workloads: [],
       queue: [],
     });
     const html = renderToStaticMarkup(<ResourceStrip />);
-    expect(html).toContain("Claude Code 1 · Z.ai 1 · Codex 1");
+    expect(html).toContain("Claude Code 1 · Z.ai 1 · Codex 1 · Kimi Code 2");
     expect(html).toContain(t("monitor.strip.agentsWorking", { n: 1 }));
     expect(html).toContain(t("monitor.strip.agentsWaiting", { n: 1 }));
     expect(html).not.toContain(t("monitor.strip.managed", { running: 0, queued: 0 }));

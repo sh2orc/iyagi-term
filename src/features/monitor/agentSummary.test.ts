@@ -21,13 +21,16 @@ describe("summarizeAgents", () => {
       pane({ agent: "claude", model: "opus" }),
       pane({ agent: "claude", model: "glm-5.3" }),
       pane({ agent: "claude" }),
+      pane({ agent: "kimi", provider: "Kimi Code" }),
+      pane({ agent: "kimi", provider: "Kimi Code" }),
       pane(null), // a plain shell
     ], new Set());
-    expect(summary.total).toBe(4);
+    expect(summary.total).toBe(6);
     expect(summary.kinds.map((kind) => [kind.id, kind.name, kind.count])).toEqual([
       ["claude", "Claude Code", 2],
       ["zai", "Z.ai", 1],
       ["codex", "Codex", 1],
+      ["kimi", "Kimi Code", 2],
     ]);
   });
 

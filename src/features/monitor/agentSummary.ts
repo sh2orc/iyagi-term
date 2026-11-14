@@ -1,6 +1,6 @@
 /**
  * 상태바의 에이전트 요약: 터미널마다 자동 감지한 에이전트(claude·codex·
- * opencode, GLM으로 도는 Claude는 Z.ai)를 종류별로 세고, 그중 작업 중·확인
+ * opencode·kimi, GLM으로 도는 Claude는 Z.ai)를 종류별로 세고, 그중 작업 중·확인
  * 대기인 수를 함께 센다. 탭 마커(TabItem)와 같은 판정이다 — 살아 있는 pane만,
  * 활동은 자체 보고가 있으면 그것을, 없으면 최근 출력으로.
  */
@@ -9,7 +9,7 @@ import type { PaneMeta } from "../../store/workbenchStore";
 import { agentDisplayId, agentDisplayName, resolveAgentActivity } from "../terminal/agentNames";
 
 /** 표시 순서. 모르는 에이전트는 이 뒤에 이름순으로 붙는다. */
-const ORDER = ["claude", "zai", "codex", "opencode"];
+const ORDER = ["claude", "zai", "codex", "opencode", "kimi"];
 
 export interface AgentKindCount {
   /** 표시 id(agentDisplayId) — GLM 모델 Claude는 "zai". */

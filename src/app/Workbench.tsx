@@ -61,8 +61,7 @@ import { candidatesForKind, discoverClis } from "../features/profiles/probe";
 import { isWindowsShellShim } from "../features/profiles/validation";
 import type { CliCandidate, CliCandidateKind } from "../features/profiles/probeTypes";
 import { terminalDisplayTitle } from "../features/terminal/shellEnvironment";
-import { agentModelLabel } from "../features/terminal/agentModel";
-import { resolveAgentActivity } from "../features/terminal/agentNames";
+import { agentTitleLabel, resolveAgentActivity } from "../features/terminal/agentNames";
 import { useTerminalActivity } from "../features/terminal/activity";
 import { NotificationBell } from "../features/notifications/NotificationBell";
 import { autonomyArgv, autonomyEnabled } from "../features/workloads/autonomy";
@@ -375,9 +374,11 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
       const state = useWorkbenchStore.getState();
       const pane = state.focusedLeafId ? state.panes[state.focusedLeafId] : null;
       const title = pane ? terminalDisplayTitle(pane.title) : "";
-      // 에이전트가 떠 있으면 현재 모델·effort도 붙인다(/model·/effort 즉시 반영).
-      const model = pane?.agent ? agentModelLabel(pane.agent) : null;
-      const parts = [title, model].filter((part): part is string => Boolean(part));
+      // 에이전트가 떠 있으면 provider 이름과 현재 모델·effort를 붙인다
+      // (/model·/effort 즉시 반영. Kimi는 provider로 어떤 계정·모델인지도
+      // 읽힌다 — "Kimi Code · K3.1 Pro · high").
+      const agent = pane?.agent ? agentTitleLabel(pane.agent) : null;
+      const parts = [title, agent].filter((part): part is string => Boolean(part));
       const activity =
         pane?.agent && pane.phase === "live"
           ? resolveAgentActivity(

@@ -26,9 +26,9 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.11](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.11)** (2026-11-10) —
-앱과 데몬이 내장 루트 인증서와 함께 macOS 키체인도 신뢰해서, 사내 TLS 검사(ePrism 등) 환경에서도
-자체 연결이 동작합니다. [새로운 점](#0111의-새로운-점)을 참고하세요.
+**최신: [0.1.12](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.12)** (2026-11-14) —
+`kimi-code`로 설치한 Kimi Code도 `kimi`처럼 pane에서 감지하고, 창 제목에 모델·effort와 함께
+에이전트 이름을 붙입니다(`Kimi Code · K3.1 Pro · high`). [새로운 점](#0112의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -38,12 +38,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.11_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.11/IYAGI.Term_0.1.11_aarch64.dmg) | 18 MB | `9ae2d97d389c76a390da8f1e89f0f2343e9f2d223d0b239a1e5ec154681b91da` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.12_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.12/IYAGI.Term_0.1.12_aarch64.dmg) | 18 MB | `99184e5b2b733a6f98fbaa0596f98b8ef4f09340799dd561149110aa8e0dffb8` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.11_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.12_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -76,6 +76,16 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.12의 새로운 점
+
+- **`kimi-code` 감지.** Kimi Code CLI를 `kimi-code` 바이너리(예: `~/.kimi-code/bin/kimi-code`)로
+  실행한 pane은 감지되지 않았습니다 — `kimi`만 알아봤습니다. 이제 provider·모델·effort가 붙은
+  에이전트 배지와 작업 중/응답 대기 표시가 나오고, 상태바 에이전트 집계에도 OpenCode 다음 순서로
+  들어갑니다. 적용하려면 설정 › 일반에서 데몬을 재시작하세요.
+- **창 제목에 에이전트 이름.** 지금까지는 포커스한 pane 에이전트의 모델·effort만 붙였는데, 이제
+  에이전트 이름부터 보여 줍니다 — `Kimi Code · K3.1 Pro · high`, `Codex · gpt-5.6-sol · high`,
+  GLM으로 도는 Claude Code는 `Z.ai · glm-5.3`. 전체 노트: [RELEASE.md](RELEASE.md).
 
 ## 0.1.11의 새로운 점
 
@@ -228,8 +238,9 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 
 **AI 에이전트 인식**
 
-- 어느 pane에서든 Claude Code·Codex·OpenCode·Kimi CLI를 출력이 아니라 프로세스 관측으로 감지합니다. pane
-  헤더에 에이전트·세션·provider·모델·effort를 보여 주고, pane·탭·창 제목에 작업 중/응답 대기 표시를 붙입니다
+- 어느 pane에서든 Claude Code·Codex·OpenCode·Kimi CLI(`kimi` 또는 `kimi-code`)를 출력이 아니라
+  프로세스 관측으로 감지합니다. pane 헤더에 에이전트·세션·provider·모델·effort를 보여 주고,
+  pane·탭·창 제목에 작업 중/응답 대기 표시를 붙입니다
 - 끝난 세션은 그 자리에서 **이어서 열기**를 제공하고, 최근 에이전트 세션 대화상자에서 이동·재개·
   기록 삭제를 합니다. 다시 실행하면 복원된 pane이 대화를 이어서 엽니다 — 동시에 최대 3개씩,
   호스트 메모리가 치명적일 때는 기다립니다
@@ -419,7 +430,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.11**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.12**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

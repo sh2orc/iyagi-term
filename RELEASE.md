@@ -5,6 +5,39 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.12 — 2026-11-14
+
+The Kimi Code CLI is recognized when it runs as `kimi-code`, and the window title now names the
+agent of the focused pane together with its model and effort.
+
+### Agent awareness
+
+- **`kimi-code` is detected.** The daemon recognized the Kimi CLI only by the `kimi` binary, so
+  panes running the Kimi Code CLI under its `kimi-code` binary (for example
+  `~/.kimi-code/bin/kimi-code`) showed no agent at all. Both names are detected now: such panes
+  get the same agent badge with provider, model and effort and the same working/waiting markers
+  as `kimi` panes.
+- **Kimi in the status bar.** The status bar's agent count lists Kimi in a fixed place after
+  OpenCode (`Claude Code 1 · Z.ai 1 · Codex 1 · Kimi Code 2`) instead of sorting it by name
+  after the others.
+- **The window title names the agent.** The title used to append only the model and effort of
+  the focused pane's agent. It now starts with the agent's name, with the provider when the
+  agent reports one: `Kimi Code · K3.1 Pro · high`, `Codex · gpt-5.6-sol · high`, and
+  `Z.ai · glm-5.3` for Claude Code running on GLM.
+
+### Upgrading from 0.1.11
+
+Agent detection runs in the daemon: when Settings › General offers a restart for the 0.1.12
+daemon, press **Restart** so `kimi-code` panes are recognized. Restarting ends open terminals;
+agent conversations can be resumed from each pane. The window title and the status bar order
+change with the app itself.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.12_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.12/IYAGI.Term_0.1.12_aarch64.dmg) | `99184e5b2b733a6f98fbaa0596f98b8ef4f09340799dd561149110aa8e0dffb8` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.11 — 2026-11-10
 
 IYAGI Term now trusts the certificates in the macOS keychain as well as its bundled roots, so

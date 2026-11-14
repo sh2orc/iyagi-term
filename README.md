@@ -27,10 +27,10 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.11](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.11)** (2026-11-10) —
-the app and the daemon trust the macOS keychain as well as their bundled roots, so their own
-connections work behind corporate TLS inspection (ePrism and similar).
-See [what's new](#whats-new-in-0111).
+**Latest: [0.1.12](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.12)** (2026-11-14) —
+Kimi Code installed as `kimi-code` is detected in panes like `kimi`, and the window title names
+the agent along with its model and effort (`Kimi Code · K3.1 Pro · high`).
+See [what's new](#whats-new-in-0112).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +40,12 @@ See [what's new](#whats-new-in-0111).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.11_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.11/IYAGI.Term_0.1.11_aarch64.dmg) | 18 MB | `9ae2d97d389c76a390da8f1e89f0f2343e9f2d223d0b239a1e5ec154681b91da` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.12_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.12/IYAGI.Term_0.1.12_aarch64.dmg) | 18 MB | `99184e5b2b733a6f98fbaa0596f98b8ef4f09340799dd561149110aa8e0dffb8` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.11_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.12_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +80,18 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.12
+
+- **`kimi-code` is detected.** Panes running the Kimi Code CLI under its `kimi-code` binary
+  (for example `~/.kimi-code/bin/kimi-code`) were not recognized; only `kimi` was. They now get
+  the agent badge with provider, model and effort, working/waiting markers and a place in the
+  status bar's agent count, which lists Kimi after OpenCode. Restart the daemon from
+  Settings › General to apply it.
+- **The window title names the agent.** It used to add only the model and effort of the focused
+  pane's agent; it now starts with the agent's name — `Kimi Code · K3.1 Pro · high`,
+  `Codex · gpt-5.6-sol · high`, `Z.ai · glm-5.3` for Claude Code on GLM. Full notes:
+  [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.11
 
@@ -248,9 +260,9 @@ level, where the work actually runs:
 
 **AI agent awareness**
 
-- Detects Claude Code, Codex, OpenCode and Kimi CLI in any pane by observing processes, not by scanning
-  output. The pane header shows agent, session, provider, model and effort, and panes, tabs and the
-  window title carry working/waiting markers
+- Detects Claude Code, Codex, OpenCode and Kimi CLI (`kimi` or `kimi-code`) in any pane by
+  observing processes, not by scanning output. The pane header shows agent, session, provider,
+  model and effort, and panes, tabs and the window title carry working/waiting markers
 - Ended sessions offer **Resume** in place, and the recent agent sessions dialog jumps to,
   resumes or forgets a session. On relaunch, restored panes resume their conversation — at most
   three at a time, and not while host memory is critical
@@ -449,7 +461,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.11** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.12** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

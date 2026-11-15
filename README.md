@@ -27,10 +27,9 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.12](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.12)** (2026-11-14) —
-Kimi Code installed as `kimi-code` is detected in panes like `kimi`, and the window title names
-the agent along with its model and effort (`Kimi Code · K3.1 Pro · high`).
-See [what's new](#whats-new-in-0112).
+**Latest: [0.1.13](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.13)** (2026-11-15) —
+a tab holds up to 10 panes instead of 8, and regrouping lays ten of them out as two rows of five.
+See [what's new](#whats-new-in-0113).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -40,12 +39,12 @@ See [what's new](#whats-new-in-0112).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.12_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.12/IYAGI.Term_0.1.12_aarch64.dmg) | 18 MB | `99184e5b2b733a6f98fbaa0596f98b8ef4f09340799dd561149110aa8e0dffb8` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.13_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.13/IYAGI.Term_0.1.13_aarch64.dmg) | 18 MB | `569bc8a1aa5a9a118851a5699131e289de4001320ed2c1a187054071e40efaa6` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.12_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.13_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -80,6 +79,15 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.13
+
+- **Up to 10 panes per tab.** Splitting, moving a pane to another tab, dropping a pane onto a
+  tab and merging tabs now stop at 10 panes instead of 8; the limit message shows the new count.
+- **Two rows of five.** Regrouping by project lays a tab out in two rows of up to five: 9 panes
+  become 5 over 4, 10 become 5 over 5, and larger groups are split across tabs of up to 10.
+  Splitting by hand still divides the focused pane, as before. Full notes:
+  [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.12
 
@@ -461,7 +469,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.12** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.13** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

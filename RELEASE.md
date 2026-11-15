@@ -5,6 +5,36 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.13 — 2026-11-15
+
+A tab now holds up to 10 panes instead of 8, and regrouping lays ten panes out as two rows of
+five.
+
+### Layout
+
+- **10 panes per tab.** Splitting (`Cmd+D` / `Cmd+Shift+D`), moving a pane to another tab,
+  dropping a pane or a running terminal onto a tab and merging tabs now stop at 10 panes per tab
+  instead of 8. The limit message shows the new count, and the menu bar's split and new-terminal
+  items turn off only when a tab has 10.
+- **Two rows of five.** Regrouping by project (layout editor, `Cmd+Shift+G`) lays each tab out
+  in two rows, now with up to five per row instead of four: 9 panes become 5 over 4 and 10 become
+  5 over 5. Groups larger than 10 are split across tabs of up to 10. Splitting by hand still
+  divides the focused pane, as before.
+- **Renderers.** The number of live terminal renderers stays capped at 12. With ten panes on
+  screen, fewer hidden panes keep theirs, so returning to a tab after switching through several
+  others may rebuild its renderer once, as already happened for older tabs.
+
+### Upgrading from 0.1.12
+
+The pane limit lives in the app, so this change needs no daemon restart. Settings › General may
+still offer one because the daemon's version changed; it can wait until a convenient time.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.13_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.13/IYAGI.Term_0.1.13_aarch64.dmg) | `569bc8a1aa5a9a118851a5699131e289de4001320ed2c1a187054071e40efaa6` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.12 — 2026-11-14
 
 The Kimi Code CLI is recognized when it runs as `kimi-code`, and the window title now names the

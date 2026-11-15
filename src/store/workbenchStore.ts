@@ -326,7 +326,7 @@ export interface WorkbenchState {
   /**
    * pane을 다른 탭으로 옮긴다: 대상 탭의 초점 pane(없으면 마지막 pane) 옆에
    * 좌우 분할로 끼우고 그 축 그룹을 균등화한다. 원래 탭이 비면 닫는다.
-   * 옮긴 pane에 초점·활성 탭이 따라간다. 상한(탭당 8)·같은 탭·모르는 id면
+   * 옮긴 pane에 초점·활성 탭이 따라간다. 상한(탭당 10)·같은 탭·모르는 id면
    * false.
    */
   movePaneToTab(leafId: string, targetTabId: string, splitId: string): boolean;
@@ -342,7 +342,7 @@ export interface WorkbenchState {
   mergeTabs(sourceTabId: string, targetTabId: string, splitId: string): boolean;
   /**
    * 끌어 놓기: pane을 다른 pane의 가장자리(edge) 옆으로 옮긴다. 같은 탭이면 그 트리
-   * 안에서(이미 그 자리면 트리는 그대로), 다른 탭이면 떼어 붙인다 — 상한(탭당 8)·
+   * 안에서(이미 그 자리면 트리는 그대로), 다른 탭이면 떼어 붙인다 — 상한(탭당 10)·
    * 비어 버린 원래 탭 닫기는 movePaneToTab과 같다. 초점·활성 탭은 옮긴 pane을 따라간다.
    */
   dockPane(leafId: string, targetLeafId: string, edge: PaneEdge, splitId: string): boolean;
@@ -350,7 +350,7 @@ export interface WorkbenchState {
   swapPanes(leafId: string, targetLeafId: string): boolean;
   /**
    * 배치 편집: 이미 실행 중인 세션을 붙일 새 pane을 자리(placement)에 만든다 — 그 탭 안(초점 pane
-   * 옆, 없으면 마지막 pane 오른쪽), 어느 pane의 가장자리 옆, 또는 틈의 새 탭. 상한(탭당 8)·모르는
+   * 옆, 없으면 마지막 pane 오른쪽), 어느 pane의 가장자리 옆, 또는 틈의 새 탭. 상한(탭당 10)·모르는
    * 자리·이미 있는 id면 null, 성공하면 pane이 들어간 탭 id. 초점·활성 탭은 새 pane을 따라간다.
    */
   placeNewPane(

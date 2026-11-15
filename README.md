@@ -227,7 +227,7 @@ level, where the work actually runs:
 
 **Terminal workbench**
 
-- Tabs and nested splits, up to 8 panes per tab (macOS `Cmd+D` / `Cmd+Shift+D`; Windows/Linux
+- Tabs and nested splits, up to 10 panes per tab (macOS `Cmd+D` / `Cmd+Shift+D`; Windows/Linux
   `Ctrl+Shift+D` / `Ctrl+Shift+E`). Drag dividers or move them with the arrow keys;
   double-click evens them out
 - Shell picker with detected shells and a default shell

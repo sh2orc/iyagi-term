@@ -4,7 +4,7 @@
  * `row` = 좌우 배치(side-by-side, flex-direction:row) → 세로 분할선.
  * `column` = 상하 배치(stacked) → 가로 분할선.
  *
- * Leaf minimum 240x144 (header 24px 포함), divider 4px, tab cap 8 leaves.
+ * Leaf minimum 240x144 (header 24px 포함), divider 4px, tab cap 10 leaves.
  * All functions are pure; ids are supplied by callers so tests stay
  * deterministic.
  */
@@ -40,7 +40,7 @@ export const LEAF_MIN_HEIGHT_PX = 144; // pane header 24px 포함
 export const PANE_HEADER_PX = 24;
 export const DIVIDER_PX = 4;
 export const RESOURCE_STRIP_PX = 28;
-export const MAX_PANES_PER_TAB = 8;
+export const MAX_PANES_PER_TAB = 10;
 
 export const SPLIT_NO_SPACE_MESSAGE = "분할할 공간이 부족합니다";
 // pane 상한 안내 문구는 statusStrings.paneLimitText가 생성한다(i18n).
@@ -379,10 +379,10 @@ export function joinTrees(first: SplitNode, second: SplitNode, splitId: string, 
 
 /**
  * leaf들을 격자로 배치한다(재그룹핑으로 새로 만든 탭). 위아래 딱 두 줄로
- * 나누고, 한 줄에는 최대 4개까지만 옆으로 늘어놓는다(탭 상한
- * MAX_PANES_PER_TAB=8이라 호출자가 그룹을 8개씩 나눠 넘기므로 실제로도
- * 한 줄이 4개를 넘지 않는다). 위 줄이 ceil(n/2)개, 아래 줄이 floor(n/2)개를
- * 순서대로 갖는다: 2 → [1,1], 3 → [2,1], 5 → [3,2], 7 → [4,3], 8 → [4,4].
+ * 나누고, 한 줄에는 최대 5개까지만 옆으로 늘어놓는다(탭 상한
+ * MAX_PANES_PER_TAB=10이라 호출자가 그룹을 10개씩 나눠 넘기므로 실제로도
+ * 한 줄이 5개를 넘지 않는다). 위 줄이 ceil(n/2)개, 아래 줄이 floor(n/2)개를
+ * 순서대로 갖는다: 2 → [1,1], 3 → [2,1], 5 → [3,2], 8 → [4,4], 9 → [5,4], 10 → [5,5].
  * n=1이면 leaf 하나 그대로, n=0이면 null.
  *
  * 줄 안은 row split chain, 줄 사이는 column split chain이며 모두 균등

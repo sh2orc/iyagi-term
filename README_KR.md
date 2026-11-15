@@ -209,7 +209,7 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 
 **터미널 워크벤치**
 
-- 탭과 중첩 분할, 탭당 최대 8개 pane(macOS `Cmd+D` / `Cmd+Shift+D`, Windows/Linux `Ctrl+Shift+D` /
+- 탭과 중첩 분할, 탭당 최대 10개 pane(macOS `Cmd+D` / `Cmd+Shift+D`, Windows/Linux `Ctrl+Shift+D` /
   `Ctrl+Shift+E`). 분할선은 끌거나 방향키로 옮기고, 더블클릭하면 균등 분할합니다
 - 감지된 셸과 기본 셸을 고르는 셸 선택기
 - pane별 확대/축소(`Cmd/Ctrl` `=` `-` `0`), 탭의 모든 pane 동시 입력(`Cmd+Shift+B` /

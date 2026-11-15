@@ -2073,7 +2073,7 @@ export class SessionController {
   // 아래 넷은 트리만 옮긴다: 세션·PTY·xterm·pane 메타는 그대로이고, 화면은
   // 탭 전환과 같은 unmount → mount → refit 경로를 탄다. 데몬 호출은 없다.
 
-  /** pane을 다른 탭으로(대상 탭의 초점 pane 옆에 좌우 분할). 상한(8)은 분할과 같은 문구로 거절. */
+  /** pane을 다른 탭으로(대상 탭의 초점 pane 옆에 좌우 분할). 상한(10)은 분할과 같은 문구로 거절. */
   movePaneToTab(leafId: string, targetTabId: string): boolean {
     const store = useWorkbenchStore.getState();
     const target = store.tabs.find((tab) => tab.id === targetTabId);
@@ -2142,7 +2142,7 @@ export class SessionController {
   }
 
   /**
-   * pane을 다른 pane의 가장자리 옆에 놓는다(끌어 놓기). 다른 탭으로 옮길 때만 상한(8)을
+   * pane을 다른 pane의 가장자리 옆에 놓는다(끌어 놓기). 다른 탭으로 옮길 때만 상한(10)을
    * 분할과 같은 문구로 거절한다 — 같은 탭 안의 재배치는 창 수가 그대로다.
    */
   dockPane(leafId: string, targetLeafId: string, edge: PaneEdge): boolean {
@@ -2250,7 +2250,7 @@ export class SessionController {
   /**
    * 배치 편집: 어느 pane에도 붙어 있지 않은 실행 중 세션(창만 닫기·그룹 삭제로 떨어져 나간
    * 터미널)을 지정한 자리에 새 pane으로 붙인다. 세션당 화면은 하나라 이미 붙어 있으면 거절한다
-   * (그런 터미널은 목록에서 pane으로 끌려 옮겨진다). 창이 하나 늘어나므로 상한(8)을 본다.
+   * (그런 터미널은 목록에서 pane으로 끌려 옮겨진다). 창이 하나 늘어나므로 상한(10)을 본다.
    */
   attachSessionAt(sessionId: string, workloadId: string | null, placement: LayoutPlacement): boolean {
     // 세션당 화면은 하나다: pane 메타뿐 아니라 살아 있는 view 경로(sessionIndex)도 본다. 가리키는 pane이

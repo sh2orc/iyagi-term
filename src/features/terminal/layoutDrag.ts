@@ -5,7 +5,7 @@
  * 가장자리/가운데)에서 "놓으면 무슨 일이 일어나는가"를 정한다. DOM에서 좌표를
  * 읽고 미리보기를 그리는 일은 app/layoutDragSession·LayoutDragLayer가, 실행은
  * controller.applyLayoutDrop이 맡는다. 고르는 동작은 메뉴·팔레트에 이미 있는
- * 재배치(또는 그 확장)라 상한(탭당 8)·빈 탭 닫기 규칙이 같다.
+ * 재배치(또는 그 확장)라 상한(탭당 10)·빈 탭 닫기 규칙이 같다.
  *
  * 규칙: 탭 "위"는 그 탭 안으로(pane 옮기기·탭 합치기), 탭 "사이"는 탭 자리로
  * (순서 바꾸기·새 탭으로 분리), pane 가장자리는 그 옆으로, pane 가운데는 자리
@@ -272,7 +272,7 @@ function resolveTabDrop(
 
 /**
  * 배치 안 된 세션: 틈이면 새 탭, 탭 위면 그 탭 안, pane 위면 그 가장자리 옆에 새로 붙인다.
- * 창이 하나 늘어나므로 대상 탭의 상한(8)을 본다 — pane 이동과 같은 문구로 막는다.
+ * 창이 하나 늘어나므로 대상 탭의 상한(10)을 본다 — pane 이동과 같은 문구로 막는다.
  */
 function resolveSessionDrop(
   tabs: readonly TabState[],

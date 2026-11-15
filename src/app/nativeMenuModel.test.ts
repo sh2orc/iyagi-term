@@ -126,7 +126,7 @@ function item(bar: NativeMenuSubmenuSpec[], command: NativeMenuCommand): NativeM
 
 const zsh: NativeMenuShell = { id: "zsh", label: "zsh", isDefault: true };
 const fullTab = {
-  tabs: [terminalTab("t1", ["a", "b", "c", "d", "e", "f", "g", "h"])],
+  tabs: [terminalTab("t1", ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])],
   activeTabId: "t1",
   focusedLeafId: "a",
   panes: { a: pane("a") },

@@ -756,16 +756,16 @@ describe("workbench store — 재배치(04-ui §2-5): moveTab / movePaneToTab / 
     expect(leafIds("t1")).toEqual(["b"]);
   });
 
-  it("movePaneToTab refuses the same tab, unknown ids, and a full target (8 panes)", () => {
+  it("movePaneToTab refuses the same tab, unknown ids, and a full target (10 panes)", () => {
     seed();
     const store = useWorkbenchStore.getState();
     expect(store.movePaneToTab("a", "t1", "x")).toBe(false);
     expect(store.movePaneToTab("zzz", "t2", "x")).toBe(false);
     expect(store.movePaneToTab("a", "nope", "x")).toBe(false);
-    // t2를 8개까지 채운다.
+    // t2를 10개까지 채운다.
     let root = leaf("c");
     const panes: Record<string, ReturnType<typeof meta>> = { a: meta("a"), b: meta("b"), c: meta("c") };
-    for (let i = 1; i < 8; i += 1) {
+    for (let i = 1; i < 10; i += 1) {
       root = split(root, i === 1 ? "c" : `f${i - 1}`, { id: `f${i}`, view_id: `v-f${i}`, session_id: `s-f${i}` }, { splitId: `fs${i}`, axis: "row" })!;
       panes[`f${i}`] = meta(`f${i}`);
     }
@@ -812,16 +812,16 @@ describe("workbench store — 재배치(04-ui §2-5): moveTab / movePaneToTab / 
     expect(s.tabs.map((t) => t.id)).toEqual(["t1", "t2"]);
     expect(s.activeTabId).toBe("t1");
     expect(s.focusedLeafId).toBe("a");
-    // 5 + 4 > 8 → 거절.
-    const five = ["p1", "p2", "p3", "p4", "p5"];
-    const four = ["q1", "q2", "q3", "q4"];
+    // 6 + 5 > 10 → 거절.
+    const six = ["p1", "p2", "p3", "p4", "p5", "p6"];
+    const five = ["q1", "q2", "q3", "q4", "q5"];
     const chain = (ids: string[]) => ids.slice(1).reduce((acc, id, i) => split(acc, ids[i], { id, view_id: `v-${id}`, session_id: `s-${id}` }, { splitId: `${id}-s`, axis: "row" })!, leaf(ids[0]));
     useWorkbenchStore.setState({
       tabs: [
-        { kind: "terminal", id: "A", title: "A", root: chain(five) },
-        { kind: "terminal", id: "B", title: "B", root: chain(four) },
+        { kind: "terminal", id: "A", title: "A", root: chain(six) },
+        { kind: "terminal", id: "B", title: "B", root: chain(five) },
       ],
-      panes: Object.fromEntries([...five, ...four].map((id) => [id, meta(id)])),
+      panes: Object.fromEntries([...six, ...five].map((id) => [id, meta(id)])),
       activeTabId: "A",
       focusedLeafId: "p1",
     });
@@ -1174,9 +1174,9 @@ describe("workbench store — 끌어 놓기(04-ui §2-5): dockPane / swapPanes /
     });
   }
 
-  /** t2를 창 8개(p0…p7)로 채운다 — 탭당 상한. */
+  /** t2를 창 10개(p0…p9)로 채운다 — 탭당 상한. */
   function fillT2() {
-    const ids = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7"];
+    const ids = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"];
     let root: SplitNode = leaf(ids[0]);
     for (let i = 1; i < ids.length; i += 1) {
       root = { kind: "split", id: `full-${i}`, axis: "row", ratio: 0.5, first: root, second: leaf(ids[i]) };
@@ -1305,7 +1305,7 @@ describe("workbench store — 끌어 놓기(04-ui §2-5): dockPane / swapPanes /
     fillT2();
     const before = useWorkbenchStore.getState().tabs;
     expect(controller.applyLayoutDrop({ kind: "dock-pane", leafId: "b", targetLeafId: "p0", edge: "left" })).toBe(false);
-    expect(useWorkbenchStore.getState().toast).toBe(paneLimitText(8));
+    expect(useWorkbenchStore.getState().toast).toBe(paneLimitText(10));
     expect(useWorkbenchStore.getState().tabs).toBe(before);
   });
 
@@ -1412,7 +1412,7 @@ describe("workbench store — 배치 편집(04-ui §2-6): placeNewPane / page", 
     expect(store.placeNewPane({ kind: "new-tab", atIndex: 0 }, newPane("u"), { ...ids, tabId: "t1" })).toBeNull();
     expect(useWorkbenchStore.getState().tabs).toBe(before);
 
-    const full = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7"];
+    const full = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"];
     let root: SplitNode = leaf(full[0]);
     for (let i = 1; i < full.length; i += 1) {
       root = { kind: "split", id: `full-${i}`, axis: "row", ratio: 0.5, first: root, second: leaf(full[i]) };

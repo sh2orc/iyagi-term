@@ -24,7 +24,7 @@ import { beginZoomPreview, cancelZoomPreview, observeHistoryRedraws, zoomPreview
  * 동시에 살려 둘 WebGL 렌더러 상한. 탭을 바꿔도 최근 탭들의 렌더러를 살려
  * 두어 재부착이 즉시·매끄럽게 되지만, 브라우저의 WebGL 컨텍스트 예산(대략
  * 16개)을 넘기면 우리 것이 임의로 lost 되므로 여유를 두고 묶는다. 보이는
- * pane(활성 탭, 최대 8개)은 항상 유지하고, 초과분은 가장 오래된 숨은 pane의
+ * pane(활성 탭, 최대 10개)은 항상 유지하고, 초과분은 가장 오래된 숨은 pane의
  * 렌더러부터 회수한다. xterm 인스턴스·버퍼는 그대로 살아 있어 재생성 비용만
  * 한 번 더 드는 정도다.
  *

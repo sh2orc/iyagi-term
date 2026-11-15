@@ -32,13 +32,13 @@ function chainRow(ids: string[]): SplitNode {
   return acc;
 }
 
-/** t1 = a|b, t2 = c, t3 = mission, t4 = 창 8개(가득), t5 = 이름 없는 빈 terminal 탭. */
+/** t1 = a|b, t2 = c, t3 = mission, t4 = 창 10개(가득), t5 = 이름 없는 빈 terminal 탭. */
 function world(): TabState[] {
   return [
     { kind: "terminal", id: "t1", title: "api", root: chainRow(["a", "b"]) },
     { kind: "terminal", id: "t2", title: "web", root: leaf("c") },
     { kind: "mission", id: "t3", title: "미션", missionId: "m1" },
-    { kind: "terminal", id: "t4", title: "full", root: chainRow(["d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"]) },
+    { kind: "terminal", id: "t4", title: "full", root: chainRow(["d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9"]) },
     { kind: "terminal", id: "t5", title: "", root: null },
   ];
 }
@@ -142,7 +142,7 @@ describe("resolveLayoutDrop — 탭을 끌 때", () => {
       kind: "merge-tab", sourceTabId: "t2", targetTabId: "t1",
     });
     expect(resolveLayoutDrop(tabs, tab("t1"), tab("t4"))).toEqual({
-      action: null, blocked: { key: "moveTarget.tooMany", n: 10, max: 8 },
+      action: null, blocked: { key: "moveTarget.tooMany", n: 12, max: 10 },
     });
     // 빈 탭 합치기는 그 탭 닫기와 같다(store.mergeTabs) — 막지 않는다.
     expect(resolveLayoutDrop(tabs, tab("t5"), tab("t2")).action).toEqual({
@@ -178,7 +178,7 @@ describe("resolveLayoutDrop — pane 헤더를 끌 때", () => {
       kind: "move-pane-to-tab", leafId: "a", targetTabId: "t5",
     });
     expect(resolveLayoutDrop(tabs, pane("a"), { kind: "tab", tabId: "t4" })).toEqual({
-      action: null, blocked: { key: "moveTarget.full", max: 8 },
+      action: null, blocked: { key: "moveTarget.full", max: 10 },
     });
     expect(resolveLayoutDrop(tabs, pane("a"), { kind: "tab", tabId: "t1" })).toEqual(NOTHING);
     expect(resolveLayoutDrop(tabs, pane("a"), { kind: "tab", tabId: "t3" })).toEqual(NOTHING);
@@ -203,7 +203,7 @@ describe("resolveLayoutDrop — pane 헤더를 끌 때", () => {
       kind: "dock-pane", leafId: "a", targetLeafId: "c", edge: "top",
     });
     expect(resolveLayoutDrop(tabs, pane("a"), { kind: "pane", leafId: "d3", zone: "left" })).toEqual({
-      action: null, blocked: { key: "moveTarget.full", max: 8 },
+      action: null, blocked: { key: "moveTarget.full", max: 10 },
     });
     expect(resolveLayoutDrop(tabs, pane("a"), { kind: "pane", leafId: "d3", zone: "center" }).action).toEqual({
       kind: "swap-panes", leafId: "a", targetLeafId: "d3",
@@ -224,8 +224,8 @@ describe("layoutDropText / layoutTabName", () => {
     expect(
       layoutDropText(tabs, { action: { kind: "dock-pane", leafId: "a", targetLeafId: "c", edge: "left" }, blocked: null }),
     ).toBe(t("app.drag.dock.left"));
-    expect(layoutDropText(tabs, { action: null, blocked: { key: "moveTarget.full", max: 8 } })).toBe(
-      t("moveTarget.full", { max: 8 }),
+    expect(layoutDropText(tabs, { action: null, blocked: { key: "moveTarget.full", max: 10 } })).toBe(
+      t("moveTarget.full", { max: 10 }),
     );
     expect(layoutDropText(tabs, NOTHING)).toBeNull();
     expect(layoutTabName(tabs, "t5")).toBe(t("app.tabTitle", { index: 5 }));
@@ -252,7 +252,7 @@ describe("resolveLayoutDrop — 배치 안 된 세션을 끌 때(배치 편집, 
     expect(resolveLayoutDrop(tabs, session, { kind: "tab", tabId: "t2" }).action).toEqual(attach({ kind: "tab", tabId: "t2" }));
     expect(resolveLayoutDrop(tabs, session, { kind: "tab", tabId: "t5" }).action).toEqual(attach({ kind: "tab", tabId: "t5" }));
     expect(resolveLayoutDrop(tabs, session, { kind: "tab", tabId: "t4" })).toEqual({
-      action: null, blocked: { key: "moveTarget.full", max: 8 },
+      action: null, blocked: { key: "moveTarget.full", max: 10 },
     });
     expect(resolveLayoutDrop(tabs, session, { kind: "tab", tabId: "t3" })).toEqual(NOTHING);
     expect(canDropOntoTab(tabs, session, "t2")).toBe(true);
@@ -267,7 +267,7 @@ describe("resolveLayoutDrop — 배치 안 된 세션을 끌 때(배치 편집, 
       attach({ kind: "beside", leafId: "b", edge: "right" }),
     );
     expect(resolveLayoutDrop(tabs, session, { kind: "pane", leafId: "d0", zone: "left" })).toEqual({
-      action: null, blocked: { key: "moveTarget.full", max: 8 },
+      action: null, blocked: { key: "moveTarget.full", max: 10 },
     });
   });
 

@@ -3,7 +3,7 @@
   "units": {"bytes": "integer bytes", "duration": "milliseconds", "cpu": "logical cores"},
   "limits": {
     "sessions": 32,
-    "panes_per_tab": 8,
+    "panes_per_tab": 10,
     "views_per_session": 2,
     "managed_concurrency": 2,
     "queued_workloads": 64,

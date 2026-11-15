@@ -194,16 +194,16 @@ describe("clampRatio — U04 extremes respect recursive minimums", () => {
   });
 });
 
-describe("8-leaf tab cap", () => {
-  it("blocks the 9th pane (상한 안내 문구는 statusStrings.paneLimitText가 생성)", () => {
+describe("10-leaf tab cap", () => {
+  it("blocks the 11th pane (상한 안내 문구는 statusStrings.paneLimitText가 생성)", () => {
     let tree = makeLeaf("l1", "v1");
-    for (let i = 2; i <= 8; i++) {
+    for (let i = 2; i <= 10; i++) {
       const focused = listLeaves(tree)[listLeaves(tree).length - 1].id;
       tree = split(tree, focused, { id: `l${i}`, view_id: `v${i}` }, { splitId: `s${i}`, axis: "row" }) as never;
     }
-    expect(leafCount(tree)).toBe(8);
+    expect(leafCount(tree)).toBe(10);
     expect(canAddPane(tree)).toBe(false);
-    expect(MAX_PANES_PER_TAB).toBe(8);
+    expect(MAX_PANES_PER_TAB).toBe(10);
   });
 });
 
@@ -391,6 +391,8 @@ describe("재배치 — detachLeaf / joinTrees / gridLayout (04-ui §2-5)", () =
     [6, [3, 3]],
     [7, [4, 3]],
     [8, [4, 4]],
+    [9, [5, 4]],
+    [10, [5, 5]],
   ])("gridLayout(%i leaves) → rows %j, all leaves preserved in order", (n, rows) => {
     let id = 0;
     const leaves = Array.from({ length: n }, (_, i) => makeLeaf(`l${i}`, `v${i}`, null));

@@ -4,10 +4,12 @@ import { useCallback, useContext, useEffect, useId, useRef, useState } from "rea
 import { isTauri, tauriIpcAdapter } from "../bridge/ipc";
 import { useI18n } from "../../i18n";
 import {
+  isValidZaiMainModel,
+  normalizeZaiMainModel,
   usePreferences,
   ZAI_HAIKU_MODEL,
+  ZAI_MAIN_MODEL_MAX_LENGTH,
   ZAI_MAIN_MODELS,
-  type ZaiMainModel,
 } from "../../store/preferences";
 import { useWorkbenchStore } from "../../store/workbenchStore";
 import {
@@ -144,11 +146,15 @@ function ClaudeUsagePanel(): JSX.Element {
   );
 }
 
-/** 주 모델 선택지의 표시 이름(제품명이라 번역하지 않는다). */
-const ZAI_MODEL_LABELS: Record<ZaiMainModel, string> = {
+/** 주 모델 프리셋의 표시 이름(제품명이라 번역하지 않는다). */
+const ZAI_MODEL_LABELS: Readonly<Record<string, string>> = {
   "glm-5.3[1m]": "GLM-5.3",
   "glm-5.3-flash[1m]": "GLM-5.3-Flash",
+  "glm-5.4[1m]": "GLM-5.4",
 };
+
+/** 주 모델 `<select>`의 "직접 입력" 항목 값(모델 id는 `glm`으로 시작하므로 겹치지 않는다). */
+const ZAI_CUSTOM_MODEL = "__custom__";
 
 /**
  * Z.ai Coding Plan 카드: 키 등록/교체/삭제 + Claude Code 라우팅 스위치.
@@ -161,6 +167,8 @@ const ZAI_MODEL_LABELS: Record<ZaiMainModel, string> = {
  *   끄세요"라고 안내하므로, 이미 켜진 설정을 되돌릴 길이 막히면 안 된다.
  * - 켜져 있어도 실제 실행은 claudeProviderFor가 다시 판정한다(구 데몬이면 거절).
  * - haiku/백그라운드 슬롯은 데몬이 GLM-5.3-Flash로 고정한다 — 읽기 전용 안내.
+ * - 주 모델은 프리셋 중에서 고르거나 "직접 입력"으로 Z.ai 모델 id를 넣는다.
+ *   형식(`isValidZaiMainModel`)이 맞을 때만 적용하고, 그 전까지는 기존 값이 유지된다.
  */
 function ZaiPanel(): JSX.Element {
   const { t } = useI18n();
@@ -179,10 +187,31 @@ function ZaiPanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(false);
+  const presetModel = ZAI_MAIN_MODELS.includes(zaiMainModel);
+  const [customModel, setCustomModel] = useState(!presetModel);
+  const [modelDraft, setModelDraft] = useState(presetModel ? "" : zaiMainModel);
   const routed = claudeProvider === "zai-coding-plan";
   // 키 상태를 아직 모르거나, 키가 없거나, 데몬이 라우팅을 모르면 켤 수 없다
   // (사유는 아래 문구). 끄는 쪽은 잠그지 않는다 — 스위치의 disabled 참고.
   const routingLocked = !keyLoaded || !configured || !routingCapability;
+  const modelLocked = busy || routingLocked || !routed;
+  const normalizedDraft = normalizeZaiMainModel(modelDraft);
+  const draftValid = isValidZaiMainModel(normalizedDraft);
+  const draftPending = customModel && normalizedDraft !== zaiMainModel;
+
+  // 저장된 모델이 바뀌면(적용·설정 되돌리기·다른 창) 선택 상태를 그 값에 맞춘다:
+  // 프리셋이면 목록에서, 아니면 직접 입력 칸에 보인다.
+  useEffect(() => {
+    const preset = ZAI_MAIN_MODELS.includes(zaiMainModel);
+    setCustomModel(!preset);
+    setModelDraft(preset ? "" : zaiMainModel);
+  }, [zaiMainModel]);
+
+  const applyCustomModel = () => {
+    if (!draftValid || !draftPending) return;
+    setZaiMainModel(normalizedDraft);
+    setModelDraft(normalizedDraft);
+  };
 
   useEffect(() => {
     if (!available) return;
@@ -325,17 +354,62 @@ function ZaiPanel(): JSX.Element {
               <select
                 id={modelId}
                 className="setting-select"
-                value={zaiMainModel}
-                disabled={busy || routingLocked || !routed}
-                onChange={(event) => setZaiMainModel(event.target.value as ZaiMainModel)}
+                value={customModel ? ZAI_CUSTOM_MODEL : zaiMainModel}
+                disabled={modelLocked}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === ZAI_CUSTOM_MODEL) {
+                    setCustomModel(true);
+                    setModelDraft("");
+                  } else {
+                    setCustomModel(false);
+                    setZaiMainModel(value);
+                  }
+                }}
               >
                 {ZAI_MAIN_MODELS.map((model) => (
                   <option key={model} value={model}>
-                    {ZAI_MODEL_LABELS[model]} ({model})
+                    {ZAI_MODEL_LABELS[model] ?? model} ({model})
                   </option>
                 ))}
+                <option value={ZAI_CUSTOM_MODEL}>{t("settings.zai.route.customOption")}</option>
               </select>
             </label>
+            {customModel ? (
+              <>
+                <div className="integration-actions">
+                  <input
+                    className="integration-key-field"
+                    type="text"
+                    value={modelDraft}
+                    maxLength={ZAI_MAIN_MODEL_MAX_LENGTH}
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    placeholder="glm-5.4[1m]"
+                    aria-label={t("settings.zai.route.customModel")}
+                    aria-invalid={modelDraft.trim() !== "" && !draftValid}
+                    disabled={modelLocked}
+                    onChange={(event) => setModelDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.nativeEvent.isComposing) applyCustomModel();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={modelLocked || !draftValid || !draftPending}
+                    onClick={applyCustomModel}
+                  >
+                    {t("settings.zai.route.customApply")}
+                  </button>
+                </div>
+                {modelDraft.trim() !== "" && !draftValid ? (
+                  <p className="setting-error">{t("settings.zai.route.customInvalid", { max: ZAI_MAIN_MODEL_MAX_LENGTH })}</p>
+                ) : null}
+                <p className="muted">{t("settings.zai.route.customHint", { model: zaiMainModel })}</p>
+              </>
+            ) : null}
             <p className="muted">{t("settings.zai.route.haikuNote", { model: ZAI_HAIKU_MODEL })}</p>
             <ul className="muted zai-route-notes">
               <li>{t("settings.zai.route.note.scope")}</li>

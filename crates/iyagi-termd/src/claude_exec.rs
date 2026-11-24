@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use iyagi_termd_lib::claude_provider::{self, StartToken, REASON_KEY_UNREADABLE, TOKEN_ENV};
-use term_contracts::launch::ZAI_CLAUDE_MAIN_MODELS;
+use term_contracts::launch::{is_valid_zai_main_model, ZAI_CLAUDE_MAIN_MODELS};
 
 /// `--main-model`을 주지 않았을 때의 Z.ai 주 모델(pane 기본값과 같다).
 pub const DEFAULT_ZAI_MAIN_MODEL: &str = ZAI_CLAUDE_MAIN_MODELS[0];
@@ -121,7 +121,7 @@ impl ExecError {
                 format!("claude-exec: unknown --provider `{value}` (expected `zai` or `anthropic`)")
             }
             Self::UnsupportedMainModel(value) => format!(
-                "claude-exec: unsupported --main-model `{value}` (expected one of {})",
+                "claude-exec: invalid --main-model `{value}` (expected a lowercase Z.ai model id starting with `glm`, e.g. {})",
                 ZAI_CLAUDE_MAIN_MODELS.join(", ")
             ),
             Self::ProgramNotFound => "claude-exec: `claude` was not found on PATH".to_string(),
@@ -154,7 +154,8 @@ pub fn plan(
     match Provider::parse(provider)? {
         Provider::Zai => {
             let main_model = main_model.unwrap_or(DEFAULT_ZAI_MAIN_MODEL);
-            if !ZAI_CLAUDE_MAIN_MODELS.contains(&main_model) {
+            // 프리셋 목록이 아니라 형식만 본다 — Z.ai 새 모델은 id만 넣으면 된다.
+            if !is_valid_zai_main_model(main_model) {
                 return Err(ExecError::UnsupportedMainModel(main_model.to_string()));
             }
             Ok(ExecPlan {
@@ -471,8 +472,11 @@ mod tests {
     }
 
     #[test]
-    fn zai_plan_accepts_every_supported_main_model_and_rejects_anything_else() {
-        for model in ZAI_CLAUDE_MAIN_MODELS {
+    fn zai_plan_accepts_any_well_formed_main_model_and_rejects_anything_else() {
+        for model in ZAI_CLAUDE_MAIN_MODELS
+            .into_iter()
+            .chain(["glm-5.4", "glm-6[1m]"])
+        {
             let planned = plan("zai", Some(model), env(&[])).expect("supported model");
             assert_eq!(
                 planned
@@ -491,7 +495,7 @@ mod tests {
             );
         }
 
-        for rejected in ["glm-4.6", "claude-opus-4-8", "GLM-5.3[1m]", ""] {
+        for rejected in ["claude-opus-4-8", "GLM-5.3[1m]", "", "glm-5.4 --x", "glm'5"] {
             let error = plan("zai", Some(rejected), env(&[])).unwrap_err();
             assert_eq!(
                 error,
@@ -502,13 +506,13 @@ mod tests {
             assert!(
                 error
                     .message()
-                    .starts_with("claude-exec: unsupported --main-model"),
+                    .starts_with("claude-exec: invalid --main-model"),
                 "{}",
                 error.message()
             );
             assert!(
                 error.message().contains("glm-5.3-flash[1m]"),
-                "lists the valid ids"
+                "names the presets as examples"
             );
         }
     }

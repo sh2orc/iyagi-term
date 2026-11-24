@@ -49,9 +49,36 @@ pub struct LaunchPolicy {
     pub pids_max: Option<u32>,
 }
 
-/// Z.ai Coding Plan 라우팅에서 Claude Code의 주 모델(opus/sonnet 슬롯)로 고를 수
-/// 있는 모델 id. haiku/백그라운드 슬롯은 [`ZAI_CLAUDE_HAIKU_MODEL`]로 고정한다.
-pub const ZAI_CLAUDE_MAIN_MODELS: [&str; 2] = ["glm-5.3[1m]", "glm-5.3-flash[1m]"];
+/// Z.ai Coding Plan 라우팅에서 Claude Code의 주 모델(opus/sonnet 슬롯) **프리셋**.
+/// 첫 항목이 기본값이다. 허용 범위는 이 목록이 아니라
+/// [`is_valid_zai_main_model`]의 형식 검사다 — Z.ai가 새 모델을 내놓아도 앱을
+/// 다시 내지 않고 id를 직접 넣어 쓸 수 있다. haiku/백그라운드 슬롯은
+/// [`ZAI_CLAUDE_HAIKU_MODEL`]로 고정한다.
+pub const ZAI_CLAUDE_MAIN_MODELS: [&str; 3] = ["glm-5.3[1m]", "glm-5.3-flash[1m]", "glm-5.4[1m]"];
+
+/// 주 모델 id의 최대 길이(바이트). 셸 스크립트·환경 변수·로그 한 줄에 그대로
+/// 실리므로 짧게 묶는다.
+pub const ZAI_CLAUDE_MAIN_MODEL_MAX_LEN: usize = 64;
+
+/// Z.ai 라우팅의 주 모델로 받아들이는 id인가 — 목록 대조가 아니라 형식만 본다.
+///
+/// * 소문자 `glm`으로 시작한다. Anthropic 복귀 시 흔적 정리(`claude-exec`)와
+///   에이전트 이름 표시가 모두 `glm*`을 Z.ai 모델로 판정하므로 같은 기준을 쓴다.
+/// * 소문자 ASCII·숫자·`.` `-` `_`, 그리고 1M 컨텍스트 접미사(`[1m]`)용 `[` `]`만.
+///   공백·따옴표·`$` 같은 셸 메타 문자는 들어올 수 없다.
+/// * [`ZAI_CLAUDE_MAIN_MODEL_MAX_LEN`] 바이트 이하.
+///
+/// 그 모델이 실제로 있는지는 Z.ai가 판단한다 — 없는 id면 Claude Code가 첫
+/// 요청에서 오류를 보인다.
+pub fn is_valid_zai_main_model(value: &str) -> bool {
+    value.len() <= ZAI_CLAUDE_MAIN_MODEL_MAX_LEN
+        && value.starts_with("glm")
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'.' | b'-' | b'_' | b'[' | b']')
+        })
+}
 
 /// Z.ai 라우팅 시 `ANTHROPIC_DEFAULT_HAIKU_MODEL`에 고정으로 들어가는 모델.
 pub const ZAI_CLAUDE_HAIKU_MODEL: &str = "glm-5.3-flash[1m]";
@@ -65,8 +92,8 @@ pub const ZAI_CLAUDE_HAIKU_MODEL: &str = "glm-5.3-flash[1m]";
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClaudeProvider {
     /// Route through the Z.ai Coding Plan Anthropic-compatible endpoint with
-    /// `main_model` in the opus/sonnet slots (one of
-    /// [`ZAI_CLAUDE_MAIN_MODELS`]).
+    /// `main_model` in the opus/sonnet slots (any id accepted by
+    /// [`is_valid_zai_main_model`]; [`ZAI_CLAUDE_MAIN_MODELS`] are presets).
     ZaiCodingPlan { main_model: String },
 }
 
@@ -150,12 +177,13 @@ impl LaunchRequest {
                 }
             }
         }
-        // Provider selector shape: the model id must be one the daemon knows
-        // how to place into the Claude Code model slots. The credential
-        // itself is resolved daemon-side and is never part of this request.
+        // Provider selector shape: the model id must be a well-formed Z.ai id
+        // the daemon can place into the Claude Code model slots (and a shell
+        // script) verbatim. The credential itself is resolved daemon-side and
+        // is never part of this request.
         if let Some(ClaudeProvider::ZaiCodingPlan { main_model }) = &self.claude_provider {
-            if !ZAI_CLAUDE_MAIN_MODELS.contains(&main_model.as_str()) {
-                return Invalid("claude_provider.main_model is not a supported Z.ai model");
+            if !is_valid_zai_main_model(main_model) {
+                return Invalid("claude_provider.main_model is not a valid Z.ai model id");
             }
         }
         if !self.cwd.chars().all(|c| !c.is_control()) || self.cwd.is_empty() {
@@ -336,19 +364,36 @@ mod tests {
     }
 
     #[test]
-    fn claude_provider_rejects_unknown_main_model() {
+    fn claude_provider_rejects_malformed_main_model() {
         let mut req = base_request();
-        for model in ["gpt-5", "glm-5.3", "", "GLM-5.3[1m]", "glm-5.3-flash"] {
+        let too_long = format!("glm-{}", "9".repeat(ZAI_CLAUDE_MAIN_MODEL_MAX_LEN));
+        for model in [
+            "gpt-5",
+            "",
+            "GLM-5.3[1m]",
+            " glm-5.4",
+            "glm 5.4",
+            "glm-5.4'",
+            "glm-5.4;rm",
+            "glm-5.4$(x)",
+            "glm-5.4\n",
+            too_long.as_str(),
+        ] {
             req.claude_provider = zai(model);
             assert_eq!(
                 req.validate(),
                 LaunchValidation::Invalid(
-                    "claude_provider.main_model is not a supported Z.ai model"
+                    "claude_provider.main_model is not a valid Z.ai model id"
                 ),
                 "model {model:?} must be rejected"
             );
         }
-        for model in ZAI_CLAUDE_MAIN_MODELS {
+        // 프리셋 밖이라도 형식만 맞으면 받는다(새 Z.ai 모델을 앱 재배포 없이).
+        for model in
+            ZAI_CLAUDE_MAIN_MODELS
+                .into_iter()
+                .chain(["glm-5.3", "glm-5.3-flash", "glm-6_beta[1m]"])
+        {
             req.claude_provider = zai(model);
             assert_eq!(req.validate(), LaunchValidation::Valid, "model {model:?}");
         }

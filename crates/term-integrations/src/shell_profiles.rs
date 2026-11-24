@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use term_contracts::launch::ZAI_CLAUDE_MAIN_MODELS;
+use term_contracts::launch::{is_valid_zai_main_model, ZAI_CLAUDE_MAIN_MODELS};
 
 use crate::hooks_json;
 
@@ -84,8 +84,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// 동적 탐지에서 읽어 들이는 출력 상한.
 const PROBE_OUTPUT_CAP: u64 = 8 * 1024;
 
-/// `ccg`의 기본 주 모델. 허용 목록은 `ZAI_CLAUDE_MAIN_MODELS`(계약 크레이트)와
-/// 하나의 출처를 공유한다 — 데몬이 받아들이지 않을 값을 스크립트에 박지 않는다.
+/// `ccg`의 기본 주 모델(프리셋 `ZAI_CLAUDE_MAIN_MODELS`의 첫 항목). 허용 기준은
+/// 계약 크레이트의 `is_valid_zai_main_model`과 하나의 출처를 공유한다 — 데몬이
+/// 받아들이지 않을 값을 스크립트에 박지 않는다.
 pub const DEFAULT_MAIN_MODEL: &str = ZAI_CLAUDE_MAIN_MODELS[0];
 
 #[derive(Debug, thiserror::Error)]
@@ -233,9 +234,11 @@ fn shell_is_zsh(shell: Option<&str>) -> bool {
     }
 }
 
-/// 데몬이 받아들이는 주 모델인가.
+/// 데몬이 받아들이는 주 모델인가. 프리셋 목록이 아니라 계약 크레이트의 형식
+/// 검사([`is_valid_zai_main_model`])와 같은 기준이다 — 셸 메타 문자가 들어올
+/// 수 없어 스크립트에 그대로 박아도 안전하고, 데몬이 거절할 값은 쓰지 않는다.
 pub fn is_known_main_model(value: &str) -> bool {
-    ZAI_CLAUDE_MAIN_MODELS.contains(&value)
+    is_valid_zai_main_model(value)
 }
 
 /// 미리보기용 모델 정규화: 모르는 값(과 `None`)은 기본 모델로 되돌린다.
@@ -1233,13 +1236,19 @@ mod tests {
     }
 
     #[test]
-    fn only_contract_models_are_accepted() {
-        assert!(is_known_main_model(DEFAULT_MAIN_MODEL));
-        assert!(is_known_main_model("glm-5.3-flash[1m]"));
-        assert!(!is_known_main_model("glm-5.3"));
+    fn only_well_formed_contract_models_are_accepted() {
+        for model in ZAI_CLAUDE_MAIN_MODELS {
+            assert!(is_known_main_model(model), "{model}");
+        }
+        // 프리셋 밖이라도 형식이 맞으면 받는다.
+        assert!(is_known_main_model("glm-5.3"));
+        assert!(is_known_main_model("glm-5.4[1m]"));
         assert!(!is_known_main_model(""));
+        assert!(!is_known_main_model("GLM-5.4"));
+        assert!(!is_known_main_model("glm-5.4'; rm -rf ~; '"));
         assert_eq!(sanitize_main_model(None), DEFAULT_MAIN_MODEL);
         assert_eq!(sanitize_main_model(Some("nope".into())), DEFAULT_MAIN_MODEL);
+        assert_eq!(sanitize_main_model(Some("glm-5.4".into())), "glm-5.4");
         assert_eq!(
             sanitize_main_model(Some("glm-5.3-flash[1m]".into())),
             "glm-5.3-flash[1m]"

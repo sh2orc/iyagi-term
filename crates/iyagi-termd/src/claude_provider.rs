@@ -122,7 +122,13 @@ pub fn zai_env(main_model: &str) -> BTreeMap<String, String> {
         "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
         ZAI_CLAUDE_HAIKU_MODEL.to_string(),
     );
-    for (name, value) in [ZAI_AUTO_COMPACT_WINDOW, ZAI_API_TIMEOUT_MS] {
+    // 타임아웃은 경로의 성질, 압축 창은 모델의 성질이다: 1M 컨텍스트를 선언한
+    // id(`[1m]` 접미사)에만 넣는다 — 미션 실행(`agent_runtime::claude::auth`)과
+    // 같은 규칙. 주 모델을 직접 입력할 수 있으니 접미사 없는 id도 들어온다.
+    let (name, value) = ZAI_API_TIMEOUT_MS;
+    env.insert(name.to_string(), value.to_string());
+    if main_model.ends_with("[1m]") {
+        let (name, value) = ZAI_AUTO_COMPACT_WINDOW;
         env.insert(name.to_string(), value.to_string());
     }
     env.insert(
@@ -695,6 +701,30 @@ mod tests {
         for absent in [TOKEN_ENV, "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR"] {
             assert!(!env.contains_key(absent), "{absent} must not be set");
         }
+    }
+
+    /// 1M 컨텍스트를 선언하지 않은 주 모델(직접 입력한 `glm-5.4` 같은)에는 1M
+    /// 압축 창을 강제하지 않는다 — 압축이 너무 늦어 한도에서 실패한다.
+    /// 타임아웃은 모델과 무관하게 남는다.
+    #[test]
+    fn zai_env_sets_the_1m_compact_window_only_for_a_1m_model() {
+        let plain = zai_env("glm-5.4");
+        assert!(!plain.contains_key(ZAI_AUTO_COMPACT_WINDOW.0));
+        assert_eq!(
+            plain.get(ZAI_API_TIMEOUT_MS.0).map(String::as_str),
+            Some(ZAI_API_TIMEOUT_MS.1)
+        );
+        assert_eq!(
+            plain
+                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .map(String::as_str),
+            Some("glm-5.4")
+        );
+        let wide = zai_env("glm-5.4[1m]");
+        assert_eq!(
+            wide.get(ZAI_AUTO_COMPACT_WINDOW.0).map(String::as_str),
+            Some(ZAI_AUTO_COMPACT_WINDOW.1)
+        );
     }
 
     #[test]

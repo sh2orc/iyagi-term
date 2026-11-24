@@ -105,6 +105,24 @@ describe("Z.ai 라우팅 스위치 — 잠금은 켜는 쪽만", () => {
     expect(html).toContain(t("settings.zai.route.haikuNote", { model: "glm-5.3-flash[1m]" }));
   });
 
+  it("주 모델 프리셋에 GLM-5.4와 직접 입력이 있고, 프리셋 값이면 입력 칸은 숨긴다", () => {
+    usePreferences.setState({ claudeProvider: "zai-coding-plan" });
+    const html = renderPanel();
+    expect(html).toContain('<option value="glm-5.4[1m]">GLM-5.4 (glm-5.4[1m])</option>');
+    expect(html).toContain(t("settings.zai.route.customOption"));
+    expect(html).not.toContain(`aria-label="${t("settings.zai.route.customModel")}"`);
+  });
+
+  it("저장된 주 모델이 프리셋 밖이면 직접 입력이 선택되고 그 id가 입력 칸에 보인다", () => {
+    usePreferences.setState({ claudeProvider: "zai-coding-plan", zaiMainModel: "glm-6[1m]" });
+    const html = renderPanel();
+    expect(html).toMatch(/<option value="__custom__" selected="">/);
+    const input = html.match(new RegExp(`<input[^>]*aria-label="${t("settings.zai.route.customModel")}"[^>]*>`))?.[0] ?? "";
+    expect(input).toContain('value="glm-6[1m]"');
+    expect(html).toContain(t("settings.zai.route.customHint", { model: "glm-6[1m]" }));
+    expect(html).not.toContain(t("settings.zai.route.customInvalid", { max: 64 }));
+  });
+
   it("Tauri가 아니면 카드 본문 대신 데스크톱 전용 안내만 낸다", () => {
     env.tauri = false;
     const html = renderPanel();

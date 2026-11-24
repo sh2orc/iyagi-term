@@ -363,13 +363,13 @@ describe("Claude 제공자 라우팅(claudeProvider · zaiMainModel)", () => {
     });
   });
 
-  it("알려진 값만 받고 나머지는 조용히 기본값으로 떨어진다", () => {
+  it("형식이 맞는 값만 받고 나머지는 조용히 기본값으로 떨어진다", () => {
     expect(sanitizePreferences({ claudeProvider: "zai-coding-plan", zaiMainModel: "glm-5.3-flash[1m]" })).toMatchObject({
       claudeProvider: "zai-coding-plan",
       zaiMainModel: "glm-5.3-flash[1m]",
     });
-    // 데몬이 거부할 모델 id(계약 ZAI_CLAUDE_MAIN_MODELS 밖)는 저장값이어도 받지 않는다.
-    expect(sanitizePreferences({ claudeProvider: "openai", zaiMainModel: "glm-4.5" })).toMatchObject({
+    // 데몬이 거부할 형식의 모델 id(계약 is_valid_zai_main_model 밖)는 저장값이어도 받지 않는다.
+    expect(sanitizePreferences({ claudeProvider: "openai", zaiMainModel: "gpt-4.5" })).toMatchObject({
       claudeProvider: "anthropic",
       zaiMainModel: "glm-5.3[1m]",
     });
@@ -377,15 +377,25 @@ describe("Claude 제공자 라우팅(claudeProvider · zaiMainModel)", () => {
       claudeProvider: "anthropic",
       zaiMainModel: "glm-5.3[1m]",
     });
+    expect(sanitizePreferences({ zaiMainModel: "glm-5.4" })).toMatchObject({ zaiMainModel: "glm-5.4" });
+    expect(sanitizePreferences({ zaiMainModel: "glm 5.4" })).toMatchObject({ zaiMainModel: "glm-5.3[1m]" });
   });
 
-  it("setter도 목록 밖 값은 기본값으로 되돌리고, 항목 되돌리기가 된다", () => {
+  it("setter는 형식이 틀린 값만 기본값으로 되돌리고, 항목 되돌리기가 된다", () => {
     usePreferences.getState().setClaudeProvider("zai-coding-plan");
     usePreferences.getState().setZaiMainModel("glm-5.3-flash[1m]");
     expect(usePreferences.getState().claudeProvider).toBe("zai-coding-plan");
     expect(usePreferences.getState().zaiMainModel).toBe("glm-5.3-flash[1m]");
     expect(isPreferenceChanged(usePreferences.getState(), "claudeProvider")).toBe(true);
-    usePreferences.getState().setZaiMainModel("glm-9" as never);
+    // 프리셋 밖이라도 형식이 맞으면 받는다(공백·대문자는 정규화).
+    usePreferences.getState().setZaiMainModel("  GLM-5.4[1m] ");
+    expect(usePreferences.getState().zaiMainModel).toBe("glm-5.4[1m]");
+    usePreferences.getState().setZaiMainModel("glm-9");
+    expect(usePreferences.getState().zaiMainModel).toBe("glm-9");
+    // 형식이 틀리면 기본값으로 되돌린다.
+    usePreferences.getState().setZaiMainModel("gpt-5");
+    expect(usePreferences.getState().zaiMainModel).toBe("glm-5.3[1m]");
+    usePreferences.getState().setZaiMainModel("glm-5.4'; rm -rf ~");
     expect(usePreferences.getState().zaiMainModel).toBe("glm-5.3[1m]");
     usePreferences.getState().setClaudeProvider("bedrock" as never);
     expect(usePreferences.getState().claudeProvider).toBe("anthropic");

@@ -509,7 +509,7 @@ it("1M 컨텍스트 접미사가 붙은 alias는 Z.ai가 아니라 Claude Code �
     const lead=card.querySelector<HTMLSelectElement>(`select[aria-label="${t("missions.role.lead")}"]`)!;
     expect(roleGroups(lead)).toEqual([
       ["Claude Code",["opus[1m]","opus"]],
-      ["Claude Code · Z.ai Coding Plan",["glm-5.3[1m]","glm-5.3-flash[1m]","glm-5.3"]],
+      ["Claude Code · Z.ai Coding Plan",["glm-5.3[1m]","glm-5.3-flash[1m]","glm-5.4[1m]","glm-5.3"]],
     ]);
   } finally { handle.unmount(); }
 });
@@ -538,7 +538,7 @@ it.each(["ko", "en"] as const)("%s 역할 선택에 감지된 모델이 런타�
       ["Claude Code",["claude-opus-5","opus"]],
       // The Z.ai route the CLI's own transcripts show — the ccg equivalent, launched from the
       // daemon's key store. Its models are pickable right away; the note names the key it needs.
-      ["Claude Code · Z.ai Coding Plan",["glm-5.3[1m]","glm-5.3-flash[1m]","glm-5.3"]],
+      ["Claude Code · Z.ai Coding Plan",["glm-5.3[1m]","glm-5.3-flash[1m]","glm-5.4[1m]","glm-5.3"]],
       ["OpenCode",[t("missions.settings.opencodeNeedsConnection")]],
     ]);
     expect(card.querySelector('[data-testid="team-hint-opencode"]')?.textContent).toBe(t("missions.settings.opencodeTeamHint"));
@@ -576,7 +576,7 @@ it.each(["ko", "en"] as const)("%s 역할 선택에 감지된 모델이 런타�
       [t("missions.settings.savedConnections"),["Claude Code · opus · opus"]],
       ["Codex",["gpt-5.6-luna","gpt-6-astra"]],
       ["Claude Code",["claude-opus-5","opus"]],
-      ["Claude Code · Z.ai Coding Plan",["glm-5.3[1m]","glm-5.3-flash[1m]","glm-5.3"]],
+      ["Claude Code · Z.ai Coding Plan",["glm-5.3[1m]","glm-5.3-flash[1m]","glm-5.4[1m]","glm-5.3"]],
       ["OpenCode",[t("missions.settings.opencodeNeedsConnection")]],
     ]);
     expect(card.querySelector("[data-testid=team-experimental]")).toBeNull();

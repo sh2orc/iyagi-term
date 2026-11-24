@@ -68,13 +68,36 @@ export const CLAUDE_PROVIDER_PREFERENCES: readonly ClaudeProviderPreference[] = 
 ];
 
 /**
- * Z.ai 라우팅 시 opus/sonnet 슬롯에 들어갈 주 모델 —
- * term-contracts `ZAI_CLAUDE_MAIN_MODELS`의 미러(데몬이 같은 목록으로 검증한다).
+ * Z.ai 라우팅 시 opus/sonnet 슬롯에 들어갈 주 모델 id. 프리셋 밖의 id도 형식만
+ * 맞으면 쓸 수 있다([`isValidZaiMainModel`]) — Z.ai가 새 모델을 내놓아도 앱을
+ * 다시 받지 않고 id를 직접 넣으면 된다.
  */
-export type ZaiMainModel = "glm-5.3[1m]" | "glm-5.3-flash[1m]";
-export const ZAI_MAIN_MODELS: readonly ZaiMainModel[] = ["glm-5.3[1m]", "glm-5.3-flash[1m]"];
+export type ZaiMainModel = string;
+/** 설정 화면의 선택지. term-contracts `ZAI_CLAUDE_MAIN_MODELS`의 미러(첫 항목이 기본값). */
+export const ZAI_MAIN_MODELS: readonly ZaiMainModel[] = ["glm-5.3[1m]", "glm-5.3-flash[1m]", "glm-5.4[1m]"];
 /** haiku/백그라운드 슬롯은 데몬이 고정한다(`ZAI_CLAUDE_HAIKU_MODEL`) — 표시용 미러. */
 export const ZAI_HAIKU_MODEL: ZaiMainModel = "glm-5.3-flash[1m]";
+/** term-contracts `ZAI_CLAUDE_MAIN_MODEL_MAX_LEN`의 미러. */
+export const ZAI_MAIN_MODEL_MAX_LENGTH = 64;
+/** term-contracts `is_valid_zai_main_model`의 미러: 소문자 `glm`으로 시작, 소문자·숫자·`. - _ [ ]`만. */
+const ZAI_MAIN_MODEL_PATTERN = /^glm[a-z0-9._[\]-]*$/;
+
+/** 데몬이 받아들이는 형식의 주 모델 id인가(정규화하지 않는다 — [`normalizeZaiMainModel`] 먼저). */
+export function isValidZaiMainModel(value: string): boolean {
+  return value.length <= ZAI_MAIN_MODEL_MAX_LENGTH && ZAI_MAIN_MODEL_PATTERN.test(value);
+}
+
+/** 직접 입력값 정규화: 앞뒤 공백을 지우고 소문자로(Z.ai id는 소문자다). */
+export function normalizeZaiMainModel(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** 저장·설정용: 정규화해서 형식이 맞으면 그 값, 아니면 `null`. */
+function acceptZaiMainModel(value: unknown): ZaiMainModel | null {
+  if (typeof value !== "string") return null;
+  const model = normalizeZaiMainModel(value);
+  return isValidZaiMainModel(model) ? model : null;
+}
 
 /** 게이트웨이 키 풀 회전 전략 — 생성 타입 `GatewayPoolStrategy`의 값 목록(sanitize용). */
 export const GATEWAY_POOL_STRATEGIES: readonly GatewayPoolStrategy[] = ["round_robin", "fill_first"];
@@ -174,7 +197,7 @@ export const DEFAULT_PREFERENCES: PreferenceValues = {
   claudeFullAutonomy: true,
   codexFullAutonomy: true,
   claudeProvider: "anthropic",
-  zaiMainModel: "glm-5.3[1m]",
+  zaiMainModel: ZAI_MAIN_MODELS[0],
   gatewayObservability: false,
   gatewayBlocked: false,
   gatewayPoolStrategy: "round_robin",
@@ -253,9 +276,7 @@ export function sanitizePreferences(raw: unknown): PreferenceValues {
     claudeProvider: CLAUDE_PROVIDER_PREFERENCES.includes(value.claudeProvider as ClaudeProviderPreference)
       ? (value.claudeProvider as ClaudeProviderPreference)
       : DEFAULT_PREFERENCES.claudeProvider,
-    zaiMainModel: ZAI_MAIN_MODELS.includes(value.zaiMainModel as ZaiMainModel)
-      ? (value.zaiMainModel as ZaiMainModel)
-      : DEFAULT_PREFERENCES.zaiMainModel,
+    zaiMainModel: acceptZaiMainModel(value.zaiMainModel) ?? DEFAULT_PREFERENCES.zaiMainModel,
     gatewayObservability:
       typeof value.gatewayObservability === "boolean"
         ? value.gatewayObservability
@@ -466,7 +487,7 @@ export const usePreferences = create<PreferencesState>()(
             : DEFAULT_PREFERENCES.claudeProvider,
         }),
       setZaiMainModel: (model) =>
-        set({ zaiMainModel: ZAI_MAIN_MODELS.includes(model) ? model : DEFAULT_PREFERENCES.zaiMainModel }),
+        set({ zaiMainModel: acceptZaiMainModel(model) ?? DEFAULT_PREFERENCES.zaiMainModel }),
       setGatewayObservability: (gatewayObservability) => set({ gatewayObservability }),
       setGatewayBlocked: (gatewayBlocked) => set({ gatewayBlocked }),
       setGatewayPoolStrategy: (strategy) =>

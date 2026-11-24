@@ -606,7 +606,7 @@ it("Z.ai 경로는 Claude Code 옆의 별도 카드로 서고, 출시 증거 없
     // Coding Plan 고유 id가 먼저, 데몬이 관측한 id가 뒤에 — 한 번도 안 돌려 본 경로도 고를 것이 있다.
     const select = zai.querySelector<HTMLSelectElement>("[data-testid=quick-setup-model]")!;
     expect([...select.options].map(option => option.value))
-      .toEqual(["glm-5.3[1m]", "glm-5.3-flash[1m]", "glm-5.3", CUSTOM_MODEL_OPTION]);
+      .toEqual(["glm-5.3[1m]", "glm-5.3-flash[1m]", "glm-5.4[1m]", "glm-5.3", CUSTOM_MODEL_OPTION]);
     expect(select.value).toBe("glm-5.3[1m]");
     setValue(select, "glm-5.3");
     const create = button(zai, "missions.quickSetup.create");

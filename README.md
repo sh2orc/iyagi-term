@@ -27,9 +27,9 @@ Tauri 2 + React + xterm.js.
 
 Installers are published as **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**.
 
-**Latest: [0.1.13](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.13)** (2026-11-15) —
-a tab holds up to 10 panes instead of 8, and regrouping lays ten of them out as two rows of five.
-See [what's new](#whats-new-in-0113).
+**Latest: [0.1.14](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.14)** (2026-11-24) —
+GLM-5.4 can be picked as the Z.ai main model, and any other Z.ai model id can be typed in.
+See [what's new](#whats-new-in-0114).
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -39,12 +39,12 @@ See [what's new](#whats-new-in-0113).
 
 | Platform | File | Size | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.13_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.13/IYAGI.Term_0.1.13_aarch64.dmg) | 18 MB | `569bc8a1aa5a9a118851a5699131e289de4001320ed2c1a187054071e40efaa6` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.14_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.14/IYAGI.Term_0.1.14_aarch64.dmg) | 18 MB | `79a733f1432cc9b1b8d83f73dbe880f7f4e8830abd5cf53158745d3e940b41e2` |
 
 Check the download before opening it:
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.13_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.14_aarch64.dmg
 ```
 
 The result must match the hash above, the hash in [RELEASE.md](RELEASE.md) and the digest
@@ -79,6 +79,15 @@ Every version is on the [releases page](https://github.com/sh2orc/iyagi-term/rel
 installer and notes. Until 0.1.2 the DMGs were committed under `releases/`; they now live only
 as release assets.
 </details>
+
+## What's new in 0.1.14
+
+- **GLM-5.4 preset.** Settings › Integrations › Z.ai Coding Plan › Main model offers
+  `glm-5.4[1m]`; the default stays `glm-5.3[1m]`.
+- **Custom model ids.** Pick **Custom…** and type any Z.ai id (lowercase, starting with `glm`,
+  e.g. `glm-5.4[1m]`). Panes, `ccg` and the generated launch-profile script all accept it, and the
+  1M compaction window is set only for ids ending in `[1m]`. Re-apply Launch profiles › ccd / ccg
+  to move `ccg` to the new model. Full notes: [RELEASE.md](RELEASE.md).
 
 ## What's new in 0.1.13
 
@@ -469,7 +478,7 @@ bump, build, notarization, `gh release create` — is in [releases/README.md](re
 
 ## Status & Roadmap
 
-**0.1.13** is the current release. **R1 — local terminal + managed execution** has shipped since
+**0.1.14** is the current release. **R1 — local terminal + managed execution** has shipped since
 0.1.0, and each release since has refined resource governance, agent awareness and input; see
 [RELEASE.md](RELEASE.md) for the history.
 

@@ -26,9 +26,9 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 설치 파일은 **[GitHub Releases](https://github.com/sh2orc/iyagi-term/releases)**로 배포합니다.
 
-**최신: [0.1.13](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.13)** (2026-11-15) —
-탭 하나에 pane을 8개가 아니라 최대 10개까지 열고, 다시 묶기는 10개를 위아래 5개씩 두 줄로
-배치합니다. [새로운 점](#0113의-새로운-점)을 참고하세요.
+**최신: [0.1.14](https://github.com/sh2orc/iyagi-term/releases/tag/v0.1.14)** (2026-11-24) —
+Z.ai 주 모델로 GLM-5.4를 고를 수 있고, 다른 Z.ai 모델 id도 직접 입력할 수 있습니다.
+[새로운 점](#0114의-새로운-점)을 참고하세요.
 
 <p align="center">
   <a href="https://github.com/sh2orc/iyagi-term/releases/latest">
@@ -38,12 +38,12 @@ admission 제어, CPU·메모리 압력, 세션 자체 — 를 창보다 오래 
 
 | 플랫폼 | 파일 | 크기 | SHA-256 |
 |---|---|---|---|
-| macOS · Apple Silicon | [`IYAGI.Term_0.1.13_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.13/IYAGI.Term_0.1.13_aarch64.dmg) | 18 MB | `569bc8a1aa5a9a118851a5699131e289de4001320ed2c1a187054071e40efaa6` |
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.14_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.14/IYAGI.Term_0.1.14_aarch64.dmg) | 18 MB | `79a733f1432cc9b1b8d83f73dbe880f7f4e8830abd5cf53158745d3e940b41e2` |
 
 열기 전에 받은 파일을 확인하세요.
 
 ```sh
-shasum -a 256 ~/Downloads/IYAGI.Term_0.1.13_aarch64.dmg
+shasum -a 256 ~/Downloads/IYAGI.Term_0.1.14_aarch64.dmg
 ```
 
 결과가 위 해시, [RELEASE.md](RELEASE.md)의 해시, 릴리스 페이지에서 GitHub가 첨부 파일 옆에 보여
@@ -76,6 +76,15 @@ Linux `.deb`와 Windows/macOS 릴리스 바이너리(설치 파일 없음)를 �
 있습니다. 0.1.2까지는 DMG를 저장소의 `releases/`에 커밋했지만, 이제는 릴리스 첨부 파일로만
 배포합니다.
 </details>
+
+## 0.1.14의 새로운 점
+
+- **GLM-5.4 프리셋.** 설정 › 연동 › Z.ai Coding Plan › 주 모델에 `glm-5.4[1m]`이 추가됐습니다.
+  기본값은 그대로 `glm-5.3[1m]`입니다.
+- **모델 id 직접 입력.** **직접 입력…**을 고르고 Z.ai 모델 id(소문자, `glm`으로 시작 —
+  예: `glm-5.4[1m]`)를 넣습니다. pane·`ccg`·생성되는 실행 프로필 스크립트가 모두 받고, 1M 압축
+  창은 `[1m]`으로 끝나는 id에만 넣습니다. `ccg`를 새 모델로 바꾸려면 실행 프로필 › ccd / ccg를
+  다시 적용하세요. 전체 노트: [RELEASE.md](RELEASE.md).
 
 ## 0.1.13의 새로운 점
 
@@ -438,7 +447,7 @@ Silicon용이며 x86_64 호스트에서는 생략합니다. 이미지는 워크�
 
 ## 상태 및 로드맵
 
-현재 릴리스는 **0.1.13**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
+현재 릴리스는 **0.1.14**입니다. **R1 — 로컬 터미널 + 관리 실행**은 0.1.0에서 출시했고, 이후
 릴리스마다 자원 거버넌스·에이전트 인식·입력을 다듬어 왔습니다. 이력은 [RELEASE.md](RELEASE.md)를
 참고하세요.
 

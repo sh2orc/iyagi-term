@@ -5,6 +5,45 @@ one per version (tag `v<version>`), and the latest is linked from the [README](R
 with its SHA-256. How releases are built, signed, notarized and published:
 [releases/README.md](releases/README.md).
 
+## 0.1.14 — 2026-11-24
+
+GLM-5.4 can be picked as the Z.ai main model, and any other Z.ai model id can be typed in, so a
+new GLM model no longer has to wait for an app release.
+
+### Z.ai Coding Plan
+
+- **GLM-5.4 preset.** Settings › Integrations › Z.ai Coding Plan › Main model now offers
+  `glm-5.4[1m]` next to `glm-5.3[1m]` and `glm-5.3-flash[1m]`. The default stays
+  `glm-5.3[1m]`.
+- **Custom model ids.** The same menu has a **Custom…** entry with a text field: type a Z.ai
+  model id and press Enter or **Apply**. Any id that starts with lowercase `glm` and uses only
+  lowercase letters, digits and `. - _ [ ]` (up to 64 characters) is accepted; uppercase input is
+  lowercased. Until a valid id is applied, the previous model stays in effect. Whether the model
+  exists is up to Z.ai: an unknown id fails on Claude Code's first request.
+- **Same rule everywhere.** Panes launched from iyagi, `ccg` (`iyagi-termd claude-exec
+  --main-model`) and the generated launch-profile script check the id the same way instead of
+  matching a fixed list. Quotes, spaces and other shell characters are rejected, so the id is safe
+  to write into the script.
+- **1M compaction only for 1M models.** `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000` is now set only
+  when the main model ends in `[1m]`, as mission runs already did. A model typed without the suffix
+  keeps Claude Code's own compaction point instead of compacting too late. The haiku/background
+  slot stays fixed to `glm-5.3-flash[1m]`.
+
+### Upgrading from 0.1.13
+
+- `ccg` runs the daemon copy the app refreshes at launch, so it accepts the new ids once 0.1.14
+  has started. To change its model, pick it in Settings › Integrations › Z.ai Coding Plan, then
+  re-apply Settings › Launch profiles › ccd / ccg so the script carries the new `--main-model`.
+- Claude panes launched from the app are checked by the running daemon. When Settings › General
+  offers a restart for the 0.1.14 daemon, press **Restart** before using a custom id there.
+  Restarting ends open terminals; agent conversations can be resumed from each pane.
+
+| Platform | File | SHA-256 |
+|---|---|---|
+| macOS · Apple Silicon | [`IYAGI.Term_0.1.14_aarch64.dmg`](https://github.com/sh2orc/iyagi-term/releases/download/v0.1.14/IYAGI.Term_0.1.14_aarch64.dmg) | `79a733f1432cc9b1b8d83f73dbe880f7f4e8830abd5cf53158745d3e940b41e2` |
+
+Signed with Developer ID and notarized; the ticket is stapled to the DMG.
+
 ## 0.1.13 — 2026-11-15
 
 A tab now holds up to 10 panes instead of 8, and regrouping lays ten panes out as two rows of
